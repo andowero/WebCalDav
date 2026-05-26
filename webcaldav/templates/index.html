@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebCalDav</title>
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<script>
+  window.__STATE__ = {{ state | tojson }};
+  window.__USER_EMAIL__ = {{ user_email | tojson }};
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }} };
+</script>
+
+<!-- ── Login ── -->
+<div id="page-login" class="auth-page" style="display:none">
+  <div class="auth-card">
+    <h1>WebCalDav</h1>
+    <div id="login-error" class="error-msg" style="display:none"></div>
+    <form id="login-form">
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" autocomplete="username" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" required>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Change password (first login) ── -->
+<div id="page-change-pw" class="auth-page" style="display:none">
+  <div class="auth-card">
+    <h1>WebCalDav</h1>
+    <p class="info-msg">First login — please set a new password before continuing.</p>
+    <div id="cpw-error" class="error-msg" style="display:none"></div>
+    <form id="change-pw-form">
+      <label for="cpw-old">Current (one-off) password</label>
+      <input id="cpw-old" type="password" autocomplete="current-password" required>
+      <label for="cpw-new">New password</label>
+      <input id="cpw-new" type="password" autocomplete="new-password" required minlength="10">
+      <label for="cpw-confirm">Confirm new password</label>
+      <input id="cpw-confirm" type="password" autocomplete="new-password" required minlength="10">
+      <button type="submit">Set password</button>
+    </form>
+  </div>
+</div>
+
+<!-- ── Main calendar ── -->
+<div id="page-calendar" style="display:none">
+  <header class="top-bar">
+    <span class="app-name">WebCalDav</span>
+    <span class="user-email" id="header-email"></span>
+    <button id="btn-logout" class="btn-outline">Log out</button>
+  </header>
+  <div id="calendar"></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

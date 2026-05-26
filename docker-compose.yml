@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    image: webcaldav:local
+    ports:
+      - "8000:8000"
+    volumes:
+      - data:/data
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////data/webcaldav.db
+      LOG_LEVEL: INFO
+      SESSION_IDLE_TIMEOUT: 3600
+    restart: unless-stopped
+
+volumes:
+  data:
