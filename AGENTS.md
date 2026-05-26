@@ -36,11 +36,26 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 
 # Often used commands
 
-TBD — populated once the app is scaffolded.
+TBD — populated once the app is scaffolded. Expected: `uv run pytest` (test suite), `uv run ruff check`, `uv run mypy`.
 
 # Testing instructions
 
-TBD — populated once the app is scaffolded.
+The app is tested primarily by calling the HTTP API directly with an in-process ASGI client — no running container or live network needed. Layers:
+
+- **Crypto unit tests** — KEK/DEK/AES-GCM roundtrips, `password_verifier`, nonce uniqueness, DEK rotation on reset.
+- **API tests** — FastAPI `TestClient` over a temp SQLite DB: first-login restricted→unrestricted flow, 401/403 auth boundaries, session lifecycle, `caldav-accounts`/`calendars`/`settings` CRUD.
+- **CalDAV layer** — a fake client injected via `app.dependency_overrides` for fast `/events` tests, plus an in-process `radicale` instance for real protocol integration tests.
+- **Admin CLI** — entrypoint functions called directly (no subprocess).
+
+Rules for keeping the suite testable:
+
+- Inject the CalDAV client and session store as dependencies so tests can override them.
+- Use weak argon2id parameters under test (set via config/env) — real parameters make the suite crawl.
+- Point each test at a throwaway DB via `DATABASE_URL`.
+- Use an injectable clock for idle-timeout tests rather than sleeping.
+- Share one provisioning function between the admin CLI and test fixtures.
+
+No automated browser/E2E tests (no Playwright). FullCalendar, the Service Worker, and notifications are verified manually against the supported browsers.
 
 # Documentation
 

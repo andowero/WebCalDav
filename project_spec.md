@@ -29,10 +29,13 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 
 ### Milestones
 
-| Milestone | Scope                                                 |
-|-----------|-------------------------------------------------------|
-| MVP       | Secure user login, read-only view of calendar events |
-| v1        | Editing of calendar events                            |
+| Milestone | Scope                                                     |
+|-----------|-----------------------------------------------------------|
+| MVP       | Secure user login, read-only view of calendar events      |
+| v1        | Editing of calendar events -> from, to, all-day, name     |
+| v2        | Editing of calendar events -> notes, location, remainders |
+| v3        | Editing of calendar events -> repetition                  |
+| v4        | Browser notifications                                     |
 
 ## Part 2: Technical design
 
@@ -49,6 +52,10 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 - `argon2-cffi` for argon2id
 - `cryptography` for AES-GCM
 - `structlog` for structured logging
+- `pytest`, `pytest-asyncio`, `httpx` (ASGI `TestClient`), `pytest-cov` for tests
+- `radicale` as a real CalDAV server fixture in integration tests
+- `freezegun` (or an injectable clock) for time-dependent tests
+- `ruff` for lint, `mypy` for type checks
 
 ### Data model
 
@@ -147,6 +154,39 @@ Settings and ops:
   - `http_requests_total` (counter, labeled by route and status)
 - Structured JSON logs via `structlog`, levels DEBUG/INFO/WARNING/ERROR.
 - Passwords, DEKs, and CalDAV credentials are never logged.
+
+### Testing
+
+The app is tested primarily by calling the HTTP API directly with an in-process ASGI client — no live network, no running container required. Four layers:
+
+**1. Crypto unit tests.** The security core, tested as pure functions:
+- KEK derivation is deterministic for a given password + `kdf_salt`.
+- DEK wrap → unwrap roundtrip recovers the original key; wrong password fails.
+- AES-GCM encrypt → decrypt roundtrip for CalDAV credentials; tampered ciphertext fails.
+- `password_verifier` accepts the correct password and rejects wrong ones.
+- Nonces are unique across calls.
+- `reset-password` rotates the DEK so old `encrypted_password` records no longer decrypt.
+
+**2. API tests (call the endpoints).** FastAPI `TestClient` over httpx ASGI against a temporary SQLite database created per test. Coverage:
+- First-login flow: login → `restricted` session → every protected route returns 403 → `POST /auth/change-password` clears `must_change_password` → session becomes unrestricted.
+- Auth boundaries: no session → 401; restricted session limited to `change-password`/`logout`; confirm no signup endpoint exists.
+- Session behavior: cookie attributes, idle timeout, logout wipes the session entry.
+- CRUD on `caldav-accounts`, `calendars` (`PATCH` color/enabled), and `settings`.
+
+**3. CalDAV layer tests (mock + real Radicale).** Two complementary suites:
+- *Fast suite:* a fake CalDAV client injected via FastAPI `dependency_overrides`, exercising the adapter and the `/events` proxy logic without a server.
+- *Integration suite:* a real `radicale` instance run in-process on a temp directory, exercising actual REPORT/PUT/DELETE against `/events` for end-to-end protocol confidence.
+
+**4. Admin CLI tests.** Call the CLI entrypoint functions directly (not via subprocess): `create-user` inserts the user and prints a one-off password, `reset-password` rotates the DEK and wipes CalDAV credentials, `list-users`, `delete-user`. The CLI and test fixtures share one provisioning function.
+
+**Testability requirements baked into the design:**
+- **Dependency injection** for the CalDAV client and the session store, so tests swap fakes via `app.dependency_overrides`.
+- **Configurable argon2id parameters** — real parameters make the suite crawl, so tests run with deliberately weak parameters set via config/env.
+- **`DATABASE_URL` override** to point each test at a throwaway database.
+- **Injectable clock** so idle-timeout tests advance time instead of sleeping.
+- **Shared provisioning function** used by both the admin CLI and test fixtures, so user setup needs no subprocess.
+
+**Out of scope.** No automated browser/E2E tests (no Playwright). The FullCalendar UI, Service Worker, and browser notifications are verified manually against the supported browsers.
 
 ### Browser support
 

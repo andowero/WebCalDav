@@ -68,6 +68,25 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 - App-level metrics: `active_sessions`, `caldav_request_duration_seconds`, `caldav_request_errors_total`.
 - `structlog` for JSON logs; level controlled by `LOG_LEVEL`.
 
+### Testing
+
+Tested mainly by driving the HTTP API in-process — no container, no live network. Four layers:
+
+- **Crypto unit tests** — KEK derivation, DEK wrap/unwrap, AES-GCM roundtrip, `password_verifier`, nonce uniqueness, DEK rotation on reset.
+- **API tests** — FastAPI `TestClient` (httpx ASGI) over a temp SQLite DB: first-login `restricted`→unrestricted flow, 403/401 auth boundaries, session lifecycle, `caldav-accounts`/`calendars`/`settings` CRUD.
+- **CalDAV layer** — a fake client injected via `dependency_overrides` for fast `/events` proxy tests, plus an in-process **`radicale`** instance for real REPORT/PUT/DELETE integration tests.
+- **Admin CLI** — entrypoint functions called directly (no subprocess) for `create-user`/`reset-password`/`list-users`/`delete-user`.
+
+Design choices that make this work:
+
+- **Dependency injection** for the CalDAV client and session store, swapped in tests via `app.dependency_overrides`.
+- **Configurable argon2id parameters** — weak parameters under test so the suite stays fast; real parameters in production.
+- **`DATABASE_URL` override** for a throwaway DB per test.
+- **Injectable clock** so idle-timeout tests advance time without sleeping.
+- **Shared provisioning function** behind both the admin CLI and test fixtures.
+
+No automated browser/E2E tests; the frontend, Service Worker, and notifications are verified manually.
+
 ## Data flows
 
 ### User provisioning
