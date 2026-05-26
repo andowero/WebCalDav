@@ -93,9 +93,9 @@ async def root(request: Request) -> HTMLResponse:
             pass
 
     return templates.TemplateResponse(
+        request,
         "index.html",
-        {
-            "request": request,
+        context={
             "state": state,
             "user_email": user_email,
             "tz": user_settings_tz,
