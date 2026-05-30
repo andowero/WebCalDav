@@ -81,6 +81,140 @@ def _dt_to_iso(dt: date | datetime) -> str:
     return dt.isoformat()
 
 
+_FREQ_WORDS = {
+    "SECONDLY": "second",
+    "MINUTELY": "minute",
+    "HOURLY": "hour",
+    "DAILY": "day",
+    "WEEKLY": "week",
+    "MONTHLY": "month",
+    "YEARLY": "year",
+}
+_DAY_WORDS = {
+    "MO": "Mon", "TU": "Tue", "WE": "Wed", "TH": "Thu",
+    "FR": "Fri", "SA": "Sat", "SU": "Sun",
+}
+
+
+def _rrule_to_text(rrule) -> str:
+    """Render an icalendar vRecur into a short human-readable summary."""
+    try:
+        parts: dict[str, list[str]] = {}
+        for key, val in rrule.items():
+            vals = val if isinstance(val, list) else [val]
+            parts[str(key).upper()] = [str(v) for v in vals]
+    except Exception:
+        return "Repeats"
+
+    freq = (parts.get("FREQ") or ["?"])[0].upper()
+    word = _FREQ_WORDS.get(freq, "time")
+    try:
+        interval = int((parts.get("INTERVAL") or ["1"])[0])
+    except ValueError:
+        interval = 1
+
+    if interval == 1:
+        text = {"day": "Daily", "week": "Weekly",
+                "month": "Monthly", "year": "Yearly"}.get(word, f"Every {word}")
+    else:
+        text = f"Every {interval} {word}s"
+
+    byday = parts.get("BYDAY")
+    if byday:
+        days = ", ".join(_DAY_WORDS.get(d[-2:].upper(), d) for d in byday)
+        text += f" on {days}"
+
+    count = parts.get("COUNT")
+    until = parts.get("UNTIL")
+    if count:
+        text += f", {count[0]} times"
+    elif until:
+        text += f", until {until[0]}"
+    return text
+
+
+def _reminder_to_text(trigger) -> str:
+    """Render a VALARM trigger (timedelta or datetime) into friendly text."""
+    if isinstance(trigger, datetime):
+        return f"At {trigger.isoformat()}"
+    if not isinstance(trigger, timedelta):
+        return "Reminder"
+    total = int(trigger.total_seconds())
+    if total == 0:
+        return "At time of event"
+    before = total < 0
+    secs = abs(total)
+    days, rem = divmod(secs, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    bits = []
+    if days:
+        bits.append(f"{days} day{'s' if days != 1 else ''}")
+    if hours:
+        bits.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes:
+        bits.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    span = " ".join(bits) or "0 minutes"
+    return f"{span} {'before' if before else 'after'}"
+
+
+def _extract_reminders(vevent) -> list[str]:
+    reminders: list[str] = []
+    for alarm in vevent.walk("VALARM"):
+        if "trigger" not in alarm:
+            continue
+        try:
+            trigger = alarm.decoded("trigger")
+        except Exception:
+            continue
+        reminders.append(_reminder_to_text(trigger))
+    return reminders
+
+
+def _extract_props(vevent) -> dict:
+    """Pull description/location/recurrence/reminders from a VEVENT."""
+    out: dict = {}
+    desc = vevent.get("description")
+    if desc:
+        out["description"] = str(desc)
+    loc = vevent.get("location")
+    if loc:
+        out["location"] = str(loc)
+    rrule = vevent.get("rrule")
+    if rrule:
+        out["recurrence"] = _rrule_to_text(rrule)
+    reminders = _extract_reminders(vevent)
+    if reminders:
+        out["reminders"] = reminders
+    return out
+
+
+def _master_meta(cal, from_dt: datetime, to_dt: datetime) -> dict[str, dict]:
+    """Map UID -> props from unexpanded masters.
+
+    The expanded search drops RRULE (and often VALARM) from each occurrence,
+    so recurrence/reminders are recovered from the master components here.
+    """
+    meta: dict[str, dict] = {}
+    try:
+        masters = cal.search(start=from_dt, end=to_dt, event=True, expand=False)
+    except Exception as e:
+        logger.warning("master search failed url=%s: %s", cal.url, e)
+        return meta
+    for event in masters:
+        try:
+            for vevent in event.icalendar_instance.walk("VEVENT"):
+                uid = str(vevent.get("uid")) if vevent.get("uid") else None
+                if not uid:
+                    continue
+                props = _extract_props(vevent)
+                if props:
+                    meta.setdefault(uid, {}).update(props)
+        except Exception as e:
+            logger.warning("Failed to parse master event: %s", e)
+    return meta
+
+
 def _sync_fetch_events(
     account_url: str,
     username: str,
@@ -97,6 +231,7 @@ def _sync_fetch_events(
             "caldav_search done url=%s from=%s to=%s raw_count=%d",
             calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(events),
         )
+        meta = _master_meta(cal, from_dt, to_dt)
         result: list[dict] = []
         for event in events:
             try:
@@ -122,6 +257,20 @@ def _sync_fetch_events(
                         dur = vevent.decoded("duration")
                         if isinstance(dur, timedelta):
                             ev["end"] = _dt_to_iso(dtstart + dur)  # type: ignore[arg-type]
+
+                    # Instance props take priority; recurrence/reminders fall
+                    # back to the master since expansion strips them.
+                    inst = _extract_props(vevent)
+                    master = meta.get(uid, {})
+                    extended: dict = {"rawStart": ev["start"]}
+                    if "end" in ev:
+                        extended["rawEnd"] = ev["end"]
+                    for key in ("description", "location", "recurrence", "reminders"):
+                        val = inst.get(key, master.get(key))
+                        if val:
+                            extended[key] = val
+                    ev["extendedProps"] = extended
+
                     result.append(ev)
             except Exception as e:
                 logger.warning("Failed to parse event: %s", e)

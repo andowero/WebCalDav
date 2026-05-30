@@ -58,7 +58,22 @@ Read-only event viewing now works against real CalDAV servers (verified against 
 - Static JS/CSS are cache-busted by content hash.
 - CalDAV integration tests added (in-process radicale): 29 tests passing total.
 
+### Event detail viewer (2026-05-31)
+
+Read-only detail window for events, foundation for the v1–v3 editing milestones.
+
+- Clickable events open a resizable detail window showing name, duration (all-day
+  + from/to), repetition, location, notes, and reminders. All fields read-only.
+- `GET /events` enriched with `extendedProps`: `description`, `location`,
+  `recurrence` (RRULE summary), `reminders` (VALARM triggers), `rawStart`/`rawEnd`.
+  Recurrence/reminders recovered from unexpanded masters (second `expand=False`
+  search), since expansion strips RRULE/VALARM from occurrences.
+- Detail from/to respect the timezone + 12h/24h settings (`Intl` formatting).
+- Named IANA timezones now render correctly in FullCalendar via the
+  `@fullcalendar/luxon3` plugin (base bundle only supported `local`/`UTC`),
+  fixing calendar-vs-detail time mismatches for offset-shifted events.
+
 ## What is next
 
-- Complete v1 milestone: event create/update/delete via PUT/POST/DELETE `/events`.
-- Named-timezone rendering in FullCalendar (luxon plugin) if offset-only proves insufficient.
+- Complete v1 milestone: event create/update/delete via PUT/POST/DELETE `/events`,
+  reusing the detail window as an edit form.

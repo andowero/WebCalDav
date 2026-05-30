@@ -6,6 +6,9 @@
   <title>WebCalDav</title>
   <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+  <!-- luxon + plugin: required for named IANA timezones (e.g. Europe/Prague) -->
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3.5.0/build/global/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fullcalendar/luxon3@6.1.15/index.global.min.js"></script>
   <link rel="stylesheet" href="/static/app.css?v={{ static_v }}">
 </head>
 <body>
@@ -59,6 +62,59 @@
   </header>
   <div class="calendar-body">
     <div id="calendar"></div>
+  </div>
+</div>
+
+<!-- ── Event detail ── -->
+<div id="event-overlay" class="event-overlay" style="display:none"></div>
+<div id="event-modal" class="event-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="ev-title-text">
+  <div class="event-modal-header">
+    <span id="ev-title-text">Event</span>
+    <button id="btn-event-close" class="btn-icon" aria-label="Close">&#x2715;</button>
+  </div>
+  <div class="event-modal-body">
+    <label class="ev-field">
+      <span class="ev-label">Name</span>
+      <input id="ev-name" type="text" readonly>
+    </label>
+
+    <fieldset class="ev-group">
+      <legend>Duration</legend>
+      <label class="ev-check"><input type="checkbox" id="ev-allday" disabled> All day</label>
+      <div class="ev-dt-row">
+        <span class="ev-label">From</span>
+        <input type="text" id="ev-start-date" readonly>
+        <input type="text" id="ev-start-time" class="ev-time" readonly>
+      </div>
+      <div class="ev-dt-row">
+        <span class="ev-label">To</span>
+        <input type="text" id="ev-end-date" readonly>
+        <input type="text" id="ev-end-time" class="ev-time" readonly>
+      </div>
+    </fieldset>
+
+    <fieldset class="ev-group">
+      <legend>Repetition</legend>
+      <label class="ev-check"><input type="checkbox" id="ev-repeats" disabled> Repeats</label>
+      <div id="ev-repeat-details" class="ev-repeat-details">
+        <input id="ev-rrule" type="text" readonly>
+      </div>
+    </fieldset>
+
+    <label class="ev-field">
+      <span class="ev-label">Location</span>
+      <input id="ev-location" type="text" readonly placeholder="—">
+    </label>
+
+    <label class="ev-field">
+      <span class="ev-label">Notes</span>
+      <textarea id="ev-notes" rows="3" readonly placeholder="—"></textarea>
+    </label>
+
+    <div class="ev-field">
+      <span class="ev-label">Reminders</span>
+      <div id="ev-reminders" class="ev-reminders"></div>
+    </div>
   </div>
 </div>
 

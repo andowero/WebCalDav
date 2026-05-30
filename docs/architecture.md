@@ -59,7 +59,13 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 ### Frontend
 
 - Single Jinja2-rendered host page.
-- Static assets: FullCalendar.js bundle plus a small vanilla-JS glue layer that calls the API via `fetch`.
+- Static assets: FullCalendar.js bundle (+ luxon and the `@fullcalendar/luxon3`
+  plugin for named-IANA-timezone rendering) plus a small vanilla-JS glue layer
+  that calls the API via `fetch`.
+- A read-only event detail window opens on event click, populated from the event's
+  `extendedProps` (`description`, `location`, `recurrence`, `reminders`,
+  `rawStart`/`rawEnd`); dates are formatted client-side per the timezone + time
+  format settings.
 - No build step beyond bundling FullCalendar's CSS/JS.
 
 ### Observability

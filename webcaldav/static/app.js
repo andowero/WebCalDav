@@ -337,6 +337,115 @@
       .replace(/"/g, '&quot;');
   }
 
+  // ── Event detail modal ──────────────────────────────────────────────────────
+
+  function settingsTz() {
+    const tz = (window.__SETTINGS__ || {}).timezone;
+    return tz && tz !== 'local' ? tz : undefined;
+  }
+
+  // Shift a date-only string (YYYY-MM-DD…) by whole days.
+  function shiftDateStr(iso, delta) {
+    const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+    const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+    dt.setUTCDate(dt.getUTCDate() + delta);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth() + 1)}-${p(dt.getUTCDate())}`;
+  }
+
+  // Format an event boundary respecting timezone + time-format settings.
+  // Returns { date, time }; time is '' for all-day events.
+  function formatBoundary(iso, allDay) {
+    if (!iso) return { date: '', time: '' };
+    if (allDay) {
+      const datePart = String(iso).slice(0, 10);
+      const [y, m, d] = datePart.split('-').map(Number);
+      const local = new Date(y, (m || 1) - 1, d || 1);
+      const dateFmt = new Intl.DateTimeFormat(undefined, {
+        year: 'numeric', month: 'short', day: '2-digit', weekday: 'short',
+      });
+      return { date: dateFmt.format(local), time: '' };
+    }
+    const dt = new Date(iso);
+    if (isNaN(dt.getTime())) return { date: String(iso), time: '' };
+    const tz = settingsTz();
+    const dateFmt = new Intl.DateTimeFormat(undefined, {
+      year: 'numeric', month: 'short', day: '2-digit', weekday: 'short', timeZone: tz,
+    });
+    const timeFmt = new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit', minute: '2-digit', hour12: timeFormatKey() === '12h', timeZone: tz,
+    });
+    return { date: dateFmt.format(dt), time: timeFmt.format(dt) };
+  }
+
+  function applyAllDayToggle() {
+    const allDay = document.getElementById('ev-allday').checked;
+    document.querySelectorAll('.ev-time').forEach((el) => {
+      el.style.display = allDay ? 'none' : '';
+    });
+  }
+
+  function applyRepeatsToggle() {
+    const repeats = document.getElementById('ev-repeats').checked;
+    document.getElementById('ev-repeat-details').style.display = repeats ? '' : 'none';
+  }
+
+  function openEventModal(event) {
+    const props = event.extendedProps || {};
+
+    document.getElementById('ev-title-text').textContent = event.title || 'Event';
+    document.getElementById('ev-name').value = event.title || '';
+
+    document.getElementById('ev-allday').checked = !!event.allDay;
+
+    const rawStart = props.rawStart || (event.start ? event.start.toISOString() : null);
+    let rawEnd = props.rawEnd || (event.end ? event.end.toISOString() : rawStart);
+    // iCal all-day DTEND is exclusive — show the inclusive last day.
+    if (event.allDay && props.rawEnd) rawEnd = shiftDateStr(props.rawEnd, -1);
+    const from = formatBoundary(rawStart, event.allDay);
+    const to = formatBoundary(rawEnd, event.allDay);
+    document.getElementById('ev-start-date').value = from.date;
+    document.getElementById('ev-start-time').value = from.time;
+    document.getElementById('ev-end-date').value = to.date;
+    document.getElementById('ev-end-time').value = to.time;
+
+    const recurrence = props.recurrence || '';
+    document.getElementById('ev-repeats').checked = !!recurrence;
+    document.getElementById('ev-rrule').value = recurrence;
+
+    document.getElementById('ev-location').value = props.location || '';
+    document.getElementById('ev-notes').value = props.description || '';
+
+    const remEl = document.getElementById('ev-reminders');
+    const reminders = props.reminders || [];
+    if (reminders.length) {
+      remEl.innerHTML = reminders
+        .map((r) => `<div class="ev-reminder">${escHtml(r)}</div>`)
+        .join('');
+    } else {
+      remEl.innerHTML = '<div class="ev-reminder empty-note">None</div>';
+    }
+
+    applyAllDayToggle();
+    applyRepeatsToggle();
+
+    show('event-overlay');
+    show('event-modal');
+  }
+
+  function closeEventModal() {
+    hide('event-overlay');
+    hide('event-modal');
+  }
+
+  function initEventModal() {
+    document.getElementById('btn-event-close').addEventListener('click', closeEventModal);
+    document.getElementById('event-overlay').addEventListener('click', closeEventModal);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeEventModal();
+    });
+  }
+
   // ── Calendar page ───────────────────────────────────────────────────────────
 
   function initCalendar() {
@@ -351,6 +460,7 @@
     });
 
     initSettingsPanel();
+    initEventModal();
 
     const calendarEl = document.getElementById('calendar');
     const s = window.__SETTINGS__ || {};
@@ -376,6 +486,10 @@
         } catch (err) {
           failureCallback(err);
         }
+      },
+      eventClick: function (info) {
+        info.jsEvent.preventDefault();
+        openEventModal(info.event);
       },
     });
     _fcCalendar.render();
