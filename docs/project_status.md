@@ -4,7 +4,7 @@
 
 | Milestone | Scope                                                     | Status      |
 |-----------|-----------------------------------------------------------|-------------|
-| MVP       | Secure user login, read-only view of calendar events      | In progress |
+| MVP       | Secure user login, read-only view of calendar events      | Complete    |
 | v1        | Editing of calendar events → from, to, all-day, name     | Not started |
 | v2        | Editing of calendar events → notes, location, reminders  | Not started |
 | v3        | Editing of calendar events → repetition                  | Not started |
@@ -48,9 +48,17 @@ Full application skeleton implemented and tested.
 - Auth API tests: full first-login flow, 401/403 boundaries, logout, no signup endpoint.
 - Admin CLI tests: provisioning, verifier correctness, DEK roundtrip, password generation.
 
+### CalDAV wiring (2026-05-30)
+
+Read-only event viewing now works against real CalDAV servers (verified against Radicale).
+
+- `POST /caldav-accounts` connects to the server, enumerates calendars, and stores each calendar's `calendar-color` (alpha-stripped to `#rrggbb`, fallback blue).
+- `GET /events` fetches events per enabled calendar in parallel and parses them via the `icalendar` library (timed/TZID, all-day, and duration events).
+- Settings: timezone combo box (`Intl.supportedValuesOf`), persisted 12h/24h time format (`UserSettings.time_format`); changes apply live with no page reload.
+- Static JS/CSS are cache-busted by content hash.
+- CalDAV integration tests added (in-process radicale): 29 tests passing total.
+
 ## What is next
 
-- Wire real CalDAV fetching in `/events` using the `caldav` library.
-- `POST /caldav-accounts` should actually connect to the server and enumerate calendars.
-- CalDAV integration test suite (fake client + in-process Radicale).
 - Complete v1 milestone: event create/update/delete via PUT/POST/DELETE `/events`.
+- Named-timezone rendering in FullCalendar (luxon plugin) if offset-only proves insufficient.

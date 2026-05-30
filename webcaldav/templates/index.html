@@ -6,14 +6,14 @@
   <title>WebCalDav</title>
   <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={{ static_v }}">
 </head>
 <body>
 
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }} };
 </script>
 
 <!-- ── Login ── -->
@@ -98,18 +98,23 @@
     <form id="prefs-form" class="inner-form">
       <div id="prefs-msg" style="display:none"></div>
       <label>Timezone</label>
-      <input id="pref-tz" type="text" placeholder="Europe/Prague">
+      <select id="pref-tz"></select>
       <label>First day of week</label>
       <select id="pref-fdow">
         <option value="0">Sunday</option>
         <option value="1">Monday</option>
         <option value="6">Saturday</option>
       </select>
+      <label>Time format</label>
+      <select id="pref-timefmt">
+        <option value="24h">24-hour (13:00)</option>
+        <option value="12h">12-hour (1pm)</option>
+      </select>
       <button type="submit">Save</button>
     </form>
   </section>
 </aside>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ static_v }}"></script>
 </body>
 </html>

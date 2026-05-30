@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from datetime import datetime as dt_type
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,7 +73,7 @@ def _parse_dt(s: str | None) -> dt_type | None:
 async def get_events(
     entry: SessionEntry = Depends(get_unrestricted_session),
     db: AsyncSession = Depends(get_db),
-    from_: str | None = None,
+    from_: str | None = Query(None, alias="from"),
     to: str | None = None,
     calendar_ids: str | None = None,
 ) -> list[dict]:
@@ -85,6 +85,7 @@ async def get_events(
     rows = result.all()
 
     if not rows:
+        logger.info("events_no_enabled_calendars", user_id=entry.user_id)
         return _dummy_events()
 
     from_dt = _parse_dt(from_)
@@ -94,6 +95,16 @@ async def get_events(
         now = dt_type.now(timezone.utc)
         from_dt = from_dt or now.replace(day=1)
         to_dt = to_dt or now
+
+    logger.info(
+        "events_fetch_start",
+        user_id=entry.user_id,
+        calendars=len(rows),
+        from_raw=from_,
+        to_raw=to,
+        from_dt=from_dt.isoformat(),
+        to_dt=to_dt.isoformat(),
+    )
 
     tasks = []
     for cal, account in rows:
@@ -112,15 +123,23 @@ async def get_events(
 
     events: list[dict] = []
     for i, res in enumerate(results):
+        cal, account = rows[i]
         if isinstance(res, Exception):
-            cal, account = rows[i]
             logger.warning(
                 "caldav_fetch_failed",
                 account_id=account.id,
                 calendar_id=cal.id,
-                error=str(res),
+                calendar_url=cal.caldav_id,
+                error=repr(res),
             )
         else:
+            logger.info(
+                "caldav_fetch_ok",
+                calendar_id=cal.id,
+                calendar_url=cal.caldav_id,
+                count=len(res),
+            )
             events.extend(res)
 
+    logger.info("events_fetch_done", user_id=entry.user_id, total=len(events))
     return events

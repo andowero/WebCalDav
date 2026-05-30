@@ -116,6 +116,54 @@
 
   let _fcCalendar = null;
 
+  function timeFormatKey() {
+    return (window.__SETTINGS__ || {}).time_format || '24h';
+  }
+
+  function fcTimeFormats(key) {
+    if (key === '12h') {
+      return {
+        eventTimeFormat: { hour: 'numeric', minute: '2-digit', meridiem: 'short' },
+        slotLabelFormat: { hour: 'numeric', minute: '2-digit', omitZeroMinute: true, meridiem: 'short' },
+      };
+    }
+    return {
+      eventTimeFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
+      slotLabelFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
+    };
+  }
+
+  function populateTimezones(selected) {
+    const sel = document.getElementById('pref-tz');
+    if (sel.options.length === 0) {
+      let zones = [];
+      try { zones = Intl.supportedValuesOf('timeZone'); } catch (_) {}
+      if (!zones.length) zones = ['UTC'];
+      if (selected && zones.indexOf(selected) === -1) zones.unshift(selected);
+      const frag = document.createDocumentFragment();
+      zones.forEach((z) => {
+        const o = document.createElement('option');
+        o.value = z;
+        o.textContent = z;
+        frag.appendChild(o);
+      });
+      sel.appendChild(frag);
+    }
+    sel.value = selected || 'UTC';
+  }
+
+  function applyCalendarPrefs(tz, fdow, timefmt) {
+    if (!_fcCalendar) return;
+    const fmts = fcTimeFormats(timefmt);
+    _fcCalendar.batchRendering(function () {
+      _fcCalendar.setOption('timeZone', tz || 'local');
+      _fcCalendar.setOption('firstDay', fdow);
+      _fcCalendar.setOption('eventTimeFormat', fmts.eventTimeFormat);
+      _fcCalendar.setOption('slotLabelFormat', fmts.slotLabelFormat);
+      _fcCalendar.refetchEvents();
+    });
+  }
+
   function openSettings() {
     show('settings-overlay');
     show('settings-panel');
@@ -207,11 +255,16 @@
   }
 
   async function loadPrefs() {
+    let tz = 'UTC';
+    let timefmt = timeFormatKey();
     try {
       const s = await apiGet('/settings');
-      document.getElementById('pref-tz').value = s.timezone || '';
+      tz = s.timezone || 'UTC';
+      timefmt = s.time_format || '24h';
       document.getElementById('pref-fdow').value = String(s.first_day_of_week ?? 1);
     } catch (_) {}
+    populateTimezones(tz);
+    document.getElementById('pref-timefmt').value = timefmt;
   }
 
   function initSettingsPanel() {
@@ -251,10 +304,19 @@
       const msg = document.getElementById('prefs-msg');
       msg.className = '';
       try {
+        const tz = document.getElementById('pref-tz').value || 'UTC';
+        const fdow = parseInt(document.getElementById('pref-fdow').value, 10);
+        const timefmt = document.getElementById('pref-timefmt').value;
         await apiPut('/settings', {
-          timezone: document.getElementById('pref-tz').value.trim() || 'UTC',
-          first_day_of_week: parseInt(document.getElementById('pref-fdow').value, 10),
+          timezone: tz,
+          first_day_of_week: fdow,
+          time_format: timefmt,
         });
+        window.__SETTINGS__ = window.__SETTINGS__ || {};
+        window.__SETTINGS__.timezone = tz;
+        window.__SETTINGS__.first_day_of_week = fdow;
+        window.__SETTINGS__.time_format = timefmt;
+        applyCalendarPrefs(tz, fdow, timefmt);
         msg.textContent = 'Saved.';
         msg.className = 'info-msg';
         msg.style.display = '';
@@ -292,6 +354,7 @@
 
     const calendarEl = document.getElementById('calendar');
     const s = window.__SETTINGS__ || {};
+    const tf = fcTimeFormats(timeFormatKey());
     _fcCalendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'dayGridMonth',
       headerToolbar: {
@@ -301,6 +364,8 @@
       },
       firstDay: s.first_day_of_week != null ? s.first_day_of_week : 1,
       timeZone: s.timezone || 'local',
+      eventTimeFormat: tf.eventTimeFormat,
+      slotLabelFormat: tf.slotLabelFormat,
       height: '100%',
       events: async function (fetchInfo, successCallback, failureCallback) {
         try {

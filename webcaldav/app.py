@@ -19,6 +19,22 @@ from .routers import auth, caldav_accounts, calendars, events, ops, settings as 
 
 _PKG = Path(__file__).parent
 
+
+def _static_version() -> str:
+    """Hash of static assets, used to cache-bust /static includes on rebuild."""
+    import hashlib
+
+    h = hashlib.sha256()
+    static_dir = _PKG / "static"
+    for name in ("app.js", "app.css"):
+        p = static_dir / name
+        if p.exists():
+            h.update(p.read_bytes())
+    return h.hexdigest()[:12]
+
+
+STATIC_VERSION = _static_version()
+
 structlog.configure(
     wrapper_class=structlog.make_filtering_bound_logger(
         getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -68,6 +84,7 @@ async def root(request: Request) -> HTMLResponse:
     user_email = None
     user_settings_tz = "UTC"
     user_settings_fdow = 1
+    user_settings_timefmt = "24h"
 
     if session_id:
         try:
@@ -89,6 +106,7 @@ async def root(request: Request) -> HTMLResponse:
                     if s:
                         user_settings_tz = s.timezone
                         user_settings_fdow = s.first_day_of_week
+                        user_settings_timefmt = s.time_format
         except Exception:
             pass
 
@@ -100,5 +118,7 @@ async def root(request: Request) -> HTMLResponse:
             "user_email": user_email,
             "tz": user_settings_tz,
             "fdow": user_settings_fdow,
+            "timefmt": user_settings_timefmt,
+            "static_v": STATIC_VERSION,
         },
     )
