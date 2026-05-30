@@ -54,10 +54,61 @@
   <header class="top-bar">
     <span class="app-name">WebCalDav</span>
     <span class="user-email" id="header-email"></span>
+    <button id="btn-settings" class="btn-outline">Settings</button>
     <button id="btn-logout" class="btn-outline">Log out</button>
   </header>
-  <div id="calendar"></div>
+  <div class="calendar-body">
+    <div id="calendar"></div>
+  </div>
 </div>
+
+<!-- ── Settings panel ── -->
+<div id="settings-overlay" class="settings-overlay" style="display:none"></div>
+<aside id="settings-panel" class="settings-panel" style="display:none">
+  <div class="settings-header">
+    <span>Settings</span>
+    <button id="btn-settings-close" class="btn-icon" aria-label="Close">&#x2715;</button>
+  </div>
+
+  <section class="settings-section">
+    <h2>CalDAV Accounts</h2>
+    <div id="accounts-list"></div>
+    <details id="add-account-details">
+      <summary>Add account</summary>
+      <form id="add-account-form" class="inner-form">
+        <div id="add-account-error" class="error-msg" style="display:none"></div>
+        <label>Server URL</label>
+        <input id="acc-url" type="url" placeholder="https://dav.example.com" required>
+        <label>Username</label>
+        <input id="acc-user" type="text" autocomplete="off" required>
+        <label>Password</label>
+        <input id="acc-pass" type="password" autocomplete="off" required>
+        <button type="submit">Connect</button>
+      </form>
+    </details>
+  </section>
+
+  <section class="settings-section">
+    <h2>Calendars</h2>
+    <div id="calendars-list"></div>
+  </section>
+
+  <section class="settings-section">
+    <h2>Preferences</h2>
+    <form id="prefs-form" class="inner-form">
+      <div id="prefs-msg" style="display:none"></div>
+      <label>Timezone</label>
+      <input id="pref-tz" type="text" placeholder="Europe/Prague">
+      <label>First day of week</label>
+      <select id="pref-fdow">
+        <option value="0">Sunday</option>
+        <option value="1">Monday</option>
+        <option value="6">Saturday</option>
+      </select>
+      <button type="submit">Save</button>
+    </form>
+  </section>
+</aside>
 
 <script src="/static/app.js"></script>
 </body>

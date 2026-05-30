@@ -4,6 +4,9 @@
   function show(id) {
     document.getElementById(id).style.display = '';
   }
+  function hide(id) {
+    document.getElementById(id).style.display = 'none';
+  }
   function showError(id, msg) {
     const el = document.getElementById(id);
     el.textContent = msg;
@@ -24,6 +27,43 @@
     return data;
   }
 
+  async function apiPatch(path, body) {
+    const r = await fetch(path, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    return data;
+  }
+
+  async function apiDelete(path) {
+    const r = await fetch(path, { method: 'DELETE' });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.detail || `HTTP ${r.status}`);
+    }
+  }
+
+  async function apiGet(path) {
+    const r = await fetch(path);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    return data;
+  }
+
+  async function apiPut(path, body) {
+    const r = await fetch(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    return data;
+  }
+
   function initLogin() {
     show('page-login');
     const form = document.getElementById('login-form');
@@ -33,7 +73,7 @@
       const btn = form.querySelector('button');
       btn.disabled = true;
       try {
-        const data = await apiPost('/auth/login', {
+        await apiPost('/auth/login', {
           email: document.getElementById('login-email').value,
           password: document.getElementById('login-password').value,
         });
@@ -72,6 +112,171 @@
     });
   }
 
+  // ── Settings panel ─────────────────────────────────────────────────────────
+
+  let _fcCalendar = null;
+
+  function openSettings() {
+    show('settings-overlay');
+    show('settings-panel');
+    loadSettings();
+  }
+
+  function closeSettings() {
+    hide('settings-overlay');
+    hide('settings-panel');
+    if (_fcCalendar) _fcCalendar.refetchEvents();
+  }
+
+  async function loadSettings() {
+    await Promise.all([loadAccounts(), loadCalendars(), loadPrefs()]);
+  }
+
+  async function loadAccounts() {
+    const list = document.getElementById('accounts-list');
+    list.innerHTML = '<p class="loading">Loading…</p>';
+    try {
+      const accounts = await apiGet('/caldav-accounts');
+      if (accounts.length === 0) {
+        list.innerHTML = '<p class="empty-note">No accounts yet.</p>';
+        return;
+      }
+      list.innerHTML = '';
+      accounts.forEach((a) => {
+        const row = document.createElement('div');
+        row.className = 'account-row';
+        row.innerHTML =
+          `<span class="account-url" title="${escHtml(a.url)}">${escHtml(a.username)} — ${escHtml(a.url)}</span>` +
+          `<button class="btn-danger-sm" data-id="${a.id}">Remove</button>`;
+        row.querySelector('button').addEventListener('click', async () => {
+          if (!confirm(`Remove account ${a.url}?`)) return;
+          try {
+            await apiDelete(`/caldav-accounts/${a.id}`);
+            await loadSettings();
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+        list.appendChild(row);
+      });
+    } catch (err) {
+      list.innerHTML = `<p class="error-note">${escHtml(err.message)}</p>`;
+    }
+  }
+
+  async function loadCalendars() {
+    const list = document.getElementById('calendars-list');
+    list.innerHTML = '<p class="loading">Loading…</p>';
+    try {
+      const cals = await apiGet('/calendars');
+      if (cals.length === 0) {
+        list.innerHTML = '<p class="empty-note">No calendars found.</p>';
+        return;
+      }
+      list.innerHTML = '';
+      cals.forEach((c) => {
+        const row = document.createElement('div');
+        row.className = 'calendar-row';
+        row.innerHTML =
+          `<input type="color" class="cal-color" value="${escHtml(c.color)}" data-id="${c.id}">` +
+          `<label class="cal-label">` +
+            `<input type="checkbox" class="cal-enabled" data-id="${c.id}"${c.enabled ? ' checked' : ''}>` +
+            ` ${escHtml(c.display_name)}` +
+          `</label>`;
+        const colorInput = row.querySelector('.cal-color');
+        const enabledInput = row.querySelector('.cal-enabled');
+        colorInput.addEventListener('change', async () => {
+          try {
+            await apiPatch(`/calendars/${c.id}`, { color: colorInput.value });
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+        enabledInput.addEventListener('change', async () => {
+          try {
+            await apiPatch(`/calendars/${c.id}`, { enabled: enabledInput.checked });
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+        list.appendChild(row);
+      });
+    } catch (err) {
+      list.innerHTML = `<p class="error-note">${escHtml(err.message)}</p>`;
+    }
+  }
+
+  async function loadPrefs() {
+    try {
+      const s = await apiGet('/settings');
+      document.getElementById('pref-tz').value = s.timezone || '';
+      document.getElementById('pref-fdow').value = String(s.first_day_of_week ?? 1);
+    } catch (_) {}
+  }
+
+  function initSettingsPanel() {
+    document.getElementById('btn-settings').addEventListener('click', openSettings);
+    document.getElementById('btn-settings-close').addEventListener('click', closeSettings);
+    document.getElementById('settings-overlay').addEventListener('click', closeSettings);
+
+    // Add account form
+    const addForm = document.getElementById('add-account-form');
+    addForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideError('add-account-error');
+      const btn = addForm.querySelector('button');
+      btn.disabled = true;
+      btn.textContent = 'Connecting…';
+      try {
+        await apiPost('/caldav-accounts', {
+          url: document.getElementById('acc-url').value,
+          username: document.getElementById('acc-user').value,
+          password: document.getElementById('acc-pass').value,
+        });
+        addForm.reset();
+        document.getElementById('add-account-details').open = false;
+        await loadSettings();
+      } catch (err) {
+        showError('add-account-error', err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Connect';
+      }
+    });
+
+    // Prefs form
+    const prefsForm = document.getElementById('prefs-form');
+    prefsForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('prefs-msg');
+      msg.className = '';
+      try {
+        await apiPut('/settings', {
+          timezone: document.getElementById('pref-tz').value.trim() || 'UTC',
+          first_day_of_week: parseInt(document.getElementById('pref-fdow').value, 10),
+        });
+        msg.textContent = 'Saved.';
+        msg.className = 'info-msg';
+        msg.style.display = '';
+        setTimeout(() => { msg.style.display = 'none'; }, 2000);
+      } catch (err) {
+        msg.textContent = err.message;
+        msg.className = 'error-msg';
+        msg.style.display = '';
+      }
+    });
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ── Calendar page ───────────────────────────────────────────────────────────
+
   function initCalendar() {
     show('page-calendar');
 
@@ -83,9 +288,11 @@
       window.location.href = '/';
     });
 
+    initSettingsPanel();
+
     const calendarEl = document.getElementById('calendar');
     const s = window.__SETTINGS__ || {};
-    const calendar = new FullCalendar.Calendar(calendarEl, {
+    _fcCalendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'dayGridMonth',
       headerToolbar: {
         left: 'prev,next today',
@@ -106,7 +313,7 @@
         }
       },
     });
-    calendar.render();
+    _fcCalendar.render();
   }
 
   document.addEventListener('DOMContentLoaded', function () {

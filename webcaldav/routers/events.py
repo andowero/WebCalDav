@@ -1,12 +1,20 @@
+import asyncio
+import logging
 from datetime import date, timedelta
+from datetime import datetime as dt_type
 
+import structlog
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..caldav_client import fetch_events
+from ..crypto import decrypt_bytes
 from ..deps import get_db, get_unrestricted_session
 from ..models import Calendar, CalDAVAccount
 from ..session import SessionEntry
+
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -50,6 +58,17 @@ def _dummy_events() -> list[dict]:
     ]
 
 
+def _parse_dt(s: str | None) -> dt_type | None:
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return dt_type.fromisoformat(s)
+        except ValueError:
+            pass
+    return None
+
+
 @router.get("")
 async def get_events(
     entry: SessionEntry = Depends(get_unrestricted_session),
@@ -59,14 +78,49 @@ async def get_events(
     calendar_ids: str | None = None,
 ) -> list[dict]:
     result = await db.execute(
-        select(Calendar)
+        select(Calendar, CalDAVAccount)
         .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
         .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)  # noqa: E712
     )
-    calendars = result.scalars().all()
+    rows = result.all()
 
-    if not calendars:
+    if not rows:
         return _dummy_events()
 
-    # Real CalDAV fetching will be implemented in a later milestone.
-    return []
+    from_dt = _parse_dt(from_)
+    to_dt = _parse_dt(to)
+    if from_dt is None or to_dt is None:
+        from datetime import timezone
+        now = dt_type.now(timezone.utc)
+        from_dt = from_dt or now.replace(day=1)
+        to_dt = to_dt or now
+
+    tasks = []
+    for cal, account in rows:
+        password = decrypt_bytes(account.encrypted_password, account.nonce, entry.dek).decode()
+        tasks.append(fetch_events(
+            account_url=account.url,
+            username=account.username,
+            password=password,
+            calendar_url=cal.caldav_id,
+            from_dt=from_dt,
+            to_dt=to_dt,
+            color=cal.color,
+        ))
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    events: list[dict] = []
+    for i, res in enumerate(results):
+        if isinstance(res, Exception):
+            cal, account = rows[i]
+            logger.warning(
+                "caldav_fetch_failed",
+                account_id=account.id,
+                calendar_id=cal.id,
+                error=str(res),
+            )
+        else:
+            events.extend(res)
+
+    return events

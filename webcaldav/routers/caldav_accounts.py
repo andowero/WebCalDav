@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..caldav_client import CalendarInfo, discover_calendars
 from ..crypto import decrypt_bytes, encrypt_bytes
 from ..deps import get_db, get_unrestricted_session
 from ..models import CalDAVAccount, Calendar
@@ -18,7 +19,6 @@ class CalDAVAccountIn(BaseModel):
     url: str
     username: str
     password: str
-    display_name: str | None = None
 
 
 class CalDAVAccountOut(BaseModel):
@@ -54,10 +54,21 @@ async def create_account(
     entry: SessionEntry = Depends(get_unrestricted_session),
     db: AsyncSession = Depends(get_db),
 ) -> CalDAVAccountOut:
+    url = body.url.rstrip("/")
+
+    try:
+        calendars: list[CalendarInfo] = await discover_calendars(url, body.username, body.password)
+    except Exception as exc:
+        logger.warning("caldav_discovery_failed", url=url, error=str(exc))
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not connect to CalDAV server: {exc}",
+        )
+
     encrypted_pw, nonce = encrypt_bytes(body.password.encode("utf-8"), entry.dek)
     account = CalDAVAccount(
         user_id=entry.user_id,
-        url=body.url.rstrip("/"),
+        url=url,
         username=body.username,
         encrypted_password=encrypted_pw,
         nonce=nonce,
@@ -65,19 +76,33 @@ async def create_account(
     db.add(account)
     await db.flush()
 
-    display = body.display_name or body.url
-    calendar = Calendar(
-        caldav_account_id=account.id,
-        caldav_id="default",
-        display_name=display,
-        color="#3788d8",
-        enabled=True,
-    )
-    db.add(calendar)
+    if calendars:
+        for cal_info in calendars:
+            db.add(Calendar(
+                caldav_account_id=account.id,
+                caldav_id=cal_info.caldav_id,
+                display_name=cal_info.display_name,
+                color=cal_info.color,
+                enabled=True,
+            ))
+    else:
+        db.add(Calendar(
+            caldav_account_id=account.id,
+            caldav_id=url,
+            display_name=body.username,
+            color="#3788d8",
+            enabled=True,
+        ))
+
     await db.commit()
     await db.refresh(account)
 
-    logger.info("caldav_account_created", user_id=entry.user_id, account_id=account.id)
+    logger.info(
+        "caldav_account_created",
+        user_id=entry.user_id,
+        account_id=account.id,
+        calendars_found=len(calendars),
+    )
     return CalDAVAccountOut(
         id=account.id,
         url=account.url,
