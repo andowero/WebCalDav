@@ -1,14 +1,20 @@
 import asyncio
-import logging
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 from datetime import datetime as dt_type
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..caldav_client import fetch_events
+from ..caldav_client import (
+    EventNotFoundError,
+    RecurringEventError,
+    fetch_events,
+    update_event,
+)
 from ..crypto import decrypt_bytes
 from ..deps import get_db, get_unrestricted_session
 from ..models import Calendar, CalDAVAccount
@@ -117,6 +123,7 @@ async def get_events(
             from_dt=from_dt,
             to_dt=to_dt,
             color=cal.color,
+            calendar_id=cal.id,
         ))
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -143,3 +150,88 @@ async def get_events(
 
     logger.info("events_fetch_done", user_id=entry.user_id, total=len(events))
     return events
+
+
+class EventUpdate(BaseModel):
+    calendar_id: int
+    title: str = ""
+    all_day: bool = False
+    start: str
+    end: str | None = None
+    location: str | None = None
+    description: str | None = None
+    timezone: str | None = None
+
+
+@router.put("/{uid:path}")
+async def put_event(
+    uid: str,
+    body: EventUpdate,
+    entry: SessionEntry = Depends(get_unrestricted_session),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(Calendar, CalDAVAccount)
+        .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
+        .where(Calendar.id == body.calendar_id, CalDAVAccount.user_id == entry.user_id)
+    )
+    row = result.first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Calendar not found")
+    cal, account = row
+
+    if body.all_day:
+        try:
+            start: date = date.fromisoformat(body.start[:10])
+            end_src = body.end[:10] if body.end else body.start[:10]
+            # iCal all-day DTEND is exclusive; the client sends the inclusive
+            # last day, so advance one day here.
+            end: date = date.fromisoformat(end_src) + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid all-day dates")
+    else:
+        try:
+            tz = ZoneInfo(body.timezone) if body.timezone else timezone.utc
+        except ZoneInfoNotFoundError:
+            tz = timezone.utc
+        if not body.end:
+            raise HTTPException(status_code=400, detail="End is required for timed events")
+        try:
+            start = dt_type.fromisoformat(body.start)
+            end = dt_type.fromisoformat(body.end)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid datetime")
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=tz)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=tz)
+        if end <= start:
+            raise HTTPException(status_code=400, detail="End must be after start")
+
+    password = decrypt_bytes(account.encrypted_password, account.nonce, entry.dek).decode()
+    try:
+        await update_event(
+            account_url=account.url,
+            username=account.username,
+            password=password,
+            calendar_url=cal.caldav_id,
+            uid=uid,
+            title=body.title,
+            all_day=body.all_day,
+            start=start,
+            end=end,
+            location=body.location,
+            description=body.description,
+        )
+    except RecurringEventError:
+        raise HTTPException(
+            status_code=422, detail="Editing recurring events is not supported yet"
+        )
+    except EventNotFoundError:
+        raise HTTPException(status_code=404, detail="Event not found")
+    except Exception as e:
+        logger.warning("event_update_failed", uid=uid, error=repr(e))
+        raise HTTPException(status_code=502, detail="Failed to update event on CalDAV server")
+
+    logger.info("event_updated", user_id=entry.user_id, uid=uid, calendar_id=cal.id)
+    return {"status": "ok"}

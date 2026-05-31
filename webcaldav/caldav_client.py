@@ -215,6 +215,14 @@ def _master_meta(cal, from_dt: datetime, to_dt: datetime) -> dict[str, dict]:
     return meta
 
 
+class RecurringEventError(Exception):
+    """Raised when an edit is attempted on a recurring event (out of scope for v1)."""
+
+
+class EventNotFoundError(Exception):
+    """Raised when the target event UID is not present on the calendar."""
+
+
 def _sync_fetch_events(
     account_url: str,
     username: str,
@@ -223,6 +231,7 @@ def _sync_fetch_events(
     from_dt: datetime,
     to_dt: datetime,
     color: str,
+    calendar_id: int,
 ) -> list[dict]:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -262,7 +271,7 @@ def _sync_fetch_events(
                     # back to the master since expansion strips them.
                     inst = _extract_props(vevent)
                     master = meta.get(uid, {})
-                    extended: dict = {"rawStart": ev["start"]}
+                    extended: dict = {"rawStart": ev["start"], "calendarId": calendar_id}
                     if "end" in ev:
                         extended["rawEnd"] = ev["end"]
                     for key in ("description", "location", "recurrence", "reminders"):
@@ -285,6 +294,7 @@ async def fetch_events(
     from_dt: datetime,
     to_dt: datetime,
     color: str,
+    calendar_id: int,
 ) -> list[dict]:
     with caldav_request_duration_seconds.labels(operation="fetch_events").time():
         try:
@@ -297,7 +307,102 @@ async def fetch_events(
                 from_dt,
                 to_dt,
                 color,
+                calendar_id,
             )
         except Exception:
             caldav_request_errors_total.labels(operation="fetch_events").inc()
+            raise
+
+
+def _sync_update_event(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    all_day: bool,
+    start: date | datetime,
+    end: date | datetime,
+    location: str | None,
+    description: str | None,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        try:
+            event = cal.event_by_uid(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+
+        ical = event.icalendar_instance
+        vevent = next((c for c in ical.walk("VEVENT")), None)
+        if vevent is None:
+            raise EventNotFoundError(uid)
+        # v1 does not support editing recurring events; refuse rather than
+        # silently rewriting the whole series.
+        if vevent.get("rrule"):
+            raise RecurringEventError(uid)
+
+        def _replace(key: str, value) -> None:
+            vevent.pop(key, None)
+            if value is not None and value != "":
+                vevent.add(key, value)
+
+        _replace("summary", title)
+        _replace("location", location)
+        _replace("description", description)
+
+        # Rewrite the time span; drop any DURATION so DTEND is authoritative.
+        vevent.pop("dtstart", None)
+        vevent.pop("dtend", None)
+        vevent.pop("duration", None)
+        vevent.add("dtstart", start)
+        vevent.add("dtend", end)
+
+        # Bump SEQUENCE so compliant servers accept the update.
+        try:
+            seq = int(vevent.get("sequence", 0)) + 1
+        except (TypeError, ValueError):
+            seq = 1
+        vevent.pop("sequence", None)
+        vevent.add("sequence", seq)
+        _replace("last-modified", datetime.now(timezone.utc))
+
+        event.data = ical.to_ical().decode("utf-8")
+        event.save()
+
+
+async def update_event(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    all_day: bool,
+    start: date | datetime,
+    end: date | datetime,
+    location: str | None,
+    description: str | None,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="update_event").time():
+        try:
+            await asyncio.to_thread(
+                _sync_update_event,
+                account_url,
+                username,
+                password,
+                calendar_url,
+                uid,
+                title,
+                all_day,
+                start,
+                end,
+                location,
+                description,
+            )
+        except (RecurringEventError, EventNotFoundError):
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="update_event").inc()
             raise

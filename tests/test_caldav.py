@@ -15,7 +15,13 @@ from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 import pytest
 
-from webcaldav.caldav_client import discover_calendars, fetch_events
+from webcaldav.caldav_client import (
+    EventNotFoundError,
+    RecurringEventError,
+    discover_calendars,
+    fetch_events,
+    update_event,
+)
 
 USER = "alice"
 PASSWORD = "secret"
@@ -129,7 +135,7 @@ async def test_fetch_events_parses_all_event_types(radicale_server):
     to = datetime(2026, 6, 1, tzinfo=timezone.utc)
 
     events = await fetch_events(
-        base_url, USER, PASSWORD, calendars["Work"], frm, to, color="#abcdef"
+        base_url, USER, PASSWORD, calendars["Work"], frm, to, color="#abcdef", calendar_id=1
     )
 
     by_id = {e["id"]: e for e in events}
@@ -163,5 +169,130 @@ async def test_fetch_events_naive_range(radicale_server):
         datetime(2026, 5, 1),
         datetime(2026, 6, 1),
         color="#000000",
+        calendar_id=1,
     )
     assert {e["id"] for e in events} == {"tz-event", "allday-event", "duration-event"}
+
+
+_EDIT_EVENT = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//webcaldav-test//EN
+BEGIN:VEVENT
+UID:edit-event
+DTSTAMP:20260101T000000Z
+DTSTART:20260610T090000Z
+DTEND:20260610T100000Z
+SUMMARY:Original
+LOCATION:Old place
+END:VEVENT
+END:VCALENDAR"""
+
+_EDIT_ALLDAY = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//webcaldav-test//EN
+BEGIN:VEVENT
+UID:edit-allday
+DTSTAMP:20260101T000000Z
+DTSTART;VALUE=DATE:20260611
+DTEND;VALUE=DATE:20260612
+SUMMARY:Day off
+END:VEVENT
+END:VCALENDAR"""
+
+_RECUR_EVENT = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//webcaldav-test//EN
+BEGIN:VEVENT
+UID:recur-event
+DTSTAMP:20260101T000000Z
+DTSTART:20260612T090000Z
+DTEND:20260612T093000Z
+RRULE:FREQ=WEEKLY;COUNT=4
+SUMMARY:Weekly sync
+END:VEVENT
+END:VCALENDAR"""
+
+
+@pytest.fixture()
+def edit_calendar(radicale_server):
+    """A throwaway calendar seeded with editable events, torn down per test."""
+    import caldav
+
+    base_url, _ = radicale_server
+    name = "Edit"
+    with caldav.DAVClient(url=base_url, username=USER, password=PASSWORD) as client:
+        cal = client.principal().make_calendar(name=name)
+        cal.save_event(_EDIT_EVENT)
+        cal.save_event(_EDIT_ALLDAY)
+        cal.save_event(_RECUR_EVENT)
+        url = str(cal.url)
+        try:
+            yield base_url, url
+        finally:
+            cal.delete()
+
+
+async def test_update_event_timed(edit_calendar):
+    base_url, url = edit_calendar
+    new_start = datetime(2026, 6, 10, 14, 0, tzinfo=timezone.utc)
+    new_end = datetime(2026, 6, 10, 15, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "edit-event",
+        title="Renamed", all_day=False, start=new_start, end=new_end,
+        location="New place", description="Some notes",
+    )
+
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    ev = {e["id"]: e for e in events}["edit-event"]
+    assert ev["title"] == "Renamed"
+    assert ev["start"].startswith("2026-06-10T14:00:00")
+    assert ev["end"].startswith("2026-06-10T15:30:00")
+    assert ev["extendedProps"]["location"] == "New place"
+    assert ev["extendedProps"]["description"] == "Some notes"
+
+
+async def test_update_event_allday(edit_calendar):
+    from datetime import date
+
+    base_url, url = edit_calendar
+    await update_event(
+        base_url, USER, PASSWORD, url, "edit-allday",
+        title="Vacation", all_day=True,
+        start=date(2026, 6, 15), end=date(2026, 6, 18),  # exclusive DTEND
+        location=None, description=None,
+    )
+
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    ev = {e["id"]: e for e in events}["edit-allday"]
+    assert ev["title"] == "Vacation"
+    assert ev["allDay"] is True
+    assert ev["start"] == "2026-06-15"
+    assert ev["end"] == "2026-06-18"
+
+
+async def test_update_event_recurring_refused(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 12, 11, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
+    with pytest.raises(RecurringEventError):
+        await update_event(
+            base_url, USER, PASSWORD, url, "recur-event",
+            title="Nope", all_day=False, start=start, end=end,
+            location=None, description=None,
+        )
+
+
+async def test_update_event_not_found(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 12, 11, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
+    with pytest.raises(EventNotFoundError):
+        await update_event(
+            base_url, USER, PASSWORD, url, "does-not-exist",
+            title="x", all_day=False, start=start, end=end,
+            location=None, description=None,
+        )

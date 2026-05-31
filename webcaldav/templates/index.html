@@ -73,23 +73,34 @@
     <button id="btn-event-close" class="btn-icon" aria-label="Close">&#x2715;</button>
   </div>
   <div class="event-modal-body">
+    <div id="ev-edit-note" class="info-msg" style="display:none"></div>
+    <div id="ev-error" class="error-msg" style="display:none"></div>
+
     <label class="ev-field">
       <span class="ev-label">Name</span>
-      <input id="ev-name" type="text" readonly>
+      <input id="ev-name" type="text">
     </label>
 
     <fieldset class="ev-group">
       <legend>Duration</legend>
-      <label class="ev-check"><input type="checkbox" id="ev-allday" disabled> All day</label>
+      <label class="ev-check"><input type="checkbox" id="ev-allday"> All day</label>
       <div class="ev-dt-row">
         <span class="ev-label">From</span>
-        <input type="text" id="ev-start-date" readonly>
-        <input type="text" id="ev-start-time" class="ev-time" readonly>
+        <input type="date" id="ev-start-date">
+        <span class="ev-time ev-time-fields">
+          <input type="text" id="ev-start-hh" class="ev-hh" inputmode="numeric" maxlength="2">
+          <span class="ev-colon">:</span>
+          <input type="text" id="ev-start-mm" class="ev-mm" inputmode="numeric" maxlength="2">
+        </span>
       </div>
       <div class="ev-dt-row">
         <span class="ev-label">To</span>
-        <input type="text" id="ev-end-date" readonly>
-        <input type="text" id="ev-end-time" class="ev-time" readonly>
+        <input type="date" id="ev-end-date">
+        <span class="ev-time ev-time-fields">
+          <input type="text" id="ev-end-hh" class="ev-hh" inputmode="numeric" maxlength="2">
+          <span class="ev-colon">:</span>
+          <input type="text" id="ev-end-mm" class="ev-mm" inputmode="numeric" maxlength="2">
+        </span>
       </div>
     </fieldset>
 
@@ -103,18 +114,22 @@
 
     <label class="ev-field">
       <span class="ev-label">Location</span>
-      <input id="ev-location" type="text" readonly placeholder="—">
+      <input id="ev-location" type="text" placeholder="—">
     </label>
 
     <label class="ev-field">
       <span class="ev-label">Notes</span>
-      <textarea id="ev-notes" rows="3" readonly placeholder="—"></textarea>
+      <textarea id="ev-notes" rows="3" placeholder="—"></textarea>
     </label>
 
     <div class="ev-field">
       <span class="ev-label">Reminders</span>
       <div id="ev-reminders" class="ev-reminders"></div>
     </div>
+  </div>
+  <div class="event-modal-footer">
+    <button id="btn-event-cancel" class="btn-outline">Cancel</button>
+    <button id="btn-event-save" class="btn-primary">Save</button>
   </div>
 </div>
 

@@ -32,10 +32,9 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 | Milestone | Scope                                                     |
 |-----------|-----------------------------------------------------------|
 | MVP       | Secure user login, read-only view of calendar events      |
-| v1        | Editing of calendar events -> from, to, all-day, name     |
-| v2        | Editing of calendar events -> notes, location, remainders |
-| v3        | Editing of calendar events -> repetition                  |
-| v4        | Browser notifications                                     |
+| v1        | Basic editing of calendar events -> without repetition    |
+| v2        | Editing of calendar events -> repetition                  |
+| v3        | Browser notifications                                     |
 
 ## Part 2: Technical design
 

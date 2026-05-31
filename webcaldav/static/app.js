@@ -339,9 +339,20 @@
 
   // ── Event detail modal ──────────────────────────────────────────────────────
 
+  let _currentEvent = null;
+  // Previous From/To as luxon DateTimes, so a From change can preserve duration.
+  let _prevStart = null;
+  let _prevEnd = null;
+
   function settingsTz() {
     const tz = (window.__SETTINGS__ || {}).timezone;
     return tz && tz !== 'local' ? tz : undefined;
+  }
+
+  // The IANA zone events are interpreted in: the user setting, else the
+  // browser's resolved zone. Always a concrete name so the server can attach it.
+  function effectiveTz() {
+    return settingsTz() || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   }
 
   // Shift a date-only string (YYYY-MM-DD…) by whole days.
@@ -351,31 +362,6 @@
     dt.setUTCDate(dt.getUTCDate() + delta);
     const p = (n) => String(n).padStart(2, '0');
     return `${dt.getUTCFullYear()}-${p(dt.getUTCMonth() + 1)}-${p(dt.getUTCDate())}`;
-  }
-
-  // Format an event boundary respecting timezone + time-format settings.
-  // Returns { date, time }; time is '' for all-day events.
-  function formatBoundary(iso, allDay) {
-    if (!iso) return { date: '', time: '' };
-    if (allDay) {
-      const datePart = String(iso).slice(0, 10);
-      const [y, m, d] = datePart.split('-').map(Number);
-      const local = new Date(y, (m || 1) - 1, d || 1);
-      const dateFmt = new Intl.DateTimeFormat(undefined, {
-        year: 'numeric', month: 'short', day: '2-digit', weekday: 'short',
-      });
-      return { date: dateFmt.format(local), time: '' };
-    }
-    const dt = new Date(iso);
-    if (isNaN(dt.getTime())) return { date: String(iso), time: '' };
-    const tz = settingsTz();
-    const dateFmt = new Intl.DateTimeFormat(undefined, {
-      year: 'numeric', month: 'short', day: '2-digit', weekday: 'short', timeZone: tz,
-    });
-    const timeFmt = new Intl.DateTimeFormat(undefined, {
-      hour: '2-digit', minute: '2-digit', hour12: timeFormatKey() === '12h', timeZone: tz,
-    });
-    return { date: dateFmt.format(dt), time: timeFmt.format(dt) };
   }
 
   function applyAllDayToggle() {
@@ -390,24 +376,159 @@
     document.getElementById('ev-repeat-details').style.display = repeats ? '' : 'none';
   }
 
+  // Split an ISO instant into { date, hour, minute } as wall-clock time in the
+  // given IANA zone, for the date + hh/mm inputs. Uses luxon.
+  function isoToInputs(iso, tz) {
+    const dt = luxon.DateTime.fromISO(iso, { setZone: true }).setZone(tz || 'local');
+    if (!dt.isValid) return { date: '', hour: 0, minute: 0 };
+    return { date: dt.toFormat('yyyy-MM-dd'), hour: dt.hour, minute: dt.minute };
+  }
+
+  function clampInt(v, lo, hi) {
+    const n = parseInt(v, 10);
+    if (isNaN(n)) return 0;
+    return Math.max(lo, Math.min(hi, n));
+  }
+
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  // Turn a text input into a zero-padded numeric stepper with ▲▼ buttons.
+  // Arrow keys and buttons step by `step`, clamped to [0, max]; blur re-pads.
+  function attachStepper(id, step, max, onChange) {
+    const input = document.getElementById(id);
+    const bump = (delta) => {
+      if (input.disabled) return;
+      input.value = pad2(clampInt(clampInt(input.value, 0, max) + delta, 0, max));
+      onChange();
+    };
+    const spin = document.createElement('span');
+    spin.className = 'ev-spin';
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.className = 'ev-spin-up';
+    up.tabIndex = -1;
+    up.textContent = '▲';
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.className = 'ev-spin-down';
+    down.tabIndex = -1;
+    down.textContent = '▼';
+    up.addEventListener('click', () => bump(step));
+    down.addEventListener('click', () => bump(-step));
+    spin.append(up, down);
+    input.after(spin);
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp') { e.preventDefault(); bump(step); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); bump(-step); }
+    });
+    input.addEventListener('blur', () => {
+      input.value = pad2(clampInt(input.value, 0, max));
+    });
+  }
+
+  // Read a From/To row (date + hh/mm) into a luxon DateTime in the given zone.
+  function readBoundary(prefix, allDay, tz) {
+    const d = document.getElementById(`ev-${prefix}-date`).value;
+    if (!d) return null;
+    if (allDay) return luxon.DateTime.fromISO(d, { zone: tz });
+    const h = clampInt(document.getElementById(`ev-${prefix}-hh`).value, 0, 23);
+    const m = clampInt(document.getElementById(`ev-${prefix}-mm`).value, 0, 59);
+    return luxon.DateTime.fromObject(
+      { year: +d.slice(0, 4), month: +d.slice(5, 7), day: +d.slice(8, 10), hour: h, minute: m },
+      { zone: tz },
+    );
+  }
+
+  function writeBoundary(prefix, dt, allDay) {
+    document.getElementById(`ev-${prefix}-date`).value = dt.toFormat('yyyy-MM-dd');
+    if (!allDay) {
+      document.getElementById(`ev-${prefix}-hh`).value = pad2(dt.hour);
+      document.getElementById(`ev-${prefix}-mm`).value = pad2(dt.minute);
+    }
+  }
+
+  function refreshPrevBoundaries() {
+    const allDay = document.getElementById('ev-allday').checked;
+    const tz = effectiveTz();
+    _prevStart = readBoundary('start', allDay, tz);
+    _prevEnd = readBoundary('end', allDay, tz);
+  }
+
+  // From changed: keep the same duration by shifting To along with it.
+  function onFromChange() {
+    if (!_currentEvent || !_currentEvent.editable) return;
+    const allDay = document.getElementById('ev-allday').checked;
+    const tz = effectiveTz();
+    const newStart = readBoundary('start', allDay, tz);
+    if (!newStart || !newStart.isValid) return;
+    if (_prevStart && _prevStart.isValid && _prevEnd && _prevEnd.isValid) {
+      let newEnd;
+      if (allDay) {
+        const days = Math.round(_prevEnd.diff(_prevStart, 'days').days);
+        newEnd = newStart.plus({ days });
+      } else {
+        newEnd = newStart.plus(_prevEnd.diff(_prevStart));
+      }
+      writeBoundary('end', newEnd, allDay);
+      _prevEnd = newEnd;
+    }
+    _prevStart = newStart;
+  }
+
+  // To changed: leave From alone, but never let To fall before From.
+  function onToChange() {
+    if (!_currentEvent || !_currentEvent.editable) return;
+    const allDay = document.getElementById('ev-allday').checked;
+    const tz = effectiveTz();
+    const start = readBoundary('start', allDay, tz);
+    let newEnd = readBoundary('end', allDay, tz);
+    if (!newEnd || !newEnd.isValid) return;
+    if (start && start.isValid && newEnd < start) {
+      newEnd = start;
+      writeBoundary('end', newEnd, allDay);
+    }
+    _prevStart = start;
+    _prevEnd = newEnd;
+  }
+
+  function setEditable(on) {
+    ['ev-name', 'ev-allday', 'ev-start-date', 'ev-start-hh', 'ev-start-mm',
+     'ev-end-date', 'ev-end-hh', 'ev-end-mm', 'ev-location', 'ev-notes'].forEach((id) => {
+      document.getElementById(id).disabled = !on;
+    });
+    document.getElementById('btn-event-save').style.display = on ? '' : 'none';
+  }
+
   function openEventModal(event) {
     const props = event.extendedProps || {};
+    hideError('ev-error');
 
     document.getElementById('ev-title-text').textContent = event.title || 'Event';
     document.getElementById('ev-name').value = event.title || '';
-
     document.getElementById('ev-allday').checked = !!event.allDay;
 
+    const tz = effectiveTz();
     const rawStart = props.rawStart || (event.start ? event.start.toISOString() : null);
     let rawEnd = props.rawEnd || (event.end ? event.end.toISOString() : rawStart);
     // iCal all-day DTEND is exclusive — show the inclusive last day.
     if (event.allDay && props.rawEnd) rawEnd = shiftDateStr(props.rawEnd, -1);
-    const from = formatBoundary(rawStart, event.allDay);
-    const to = formatBoundary(rawEnd, event.allDay);
-    document.getElementById('ev-start-date').value = from.date;
-    document.getElementById('ev-start-time').value = from.time;
-    document.getElementById('ev-end-date').value = to.date;
-    document.getElementById('ev-end-time').value = to.time;
+
+    if (event.allDay) {
+      document.getElementById('ev-start-date').value = String(rawStart || '').slice(0, 10);
+      document.getElementById('ev-end-date').value = String(rawEnd || rawStart || '').slice(0, 10);
+    } else {
+      const from = isoToInputs(rawStart, tz);
+      const to = isoToInputs(rawEnd, tz);
+      document.getElementById('ev-start-date').value = from.date;
+      document.getElementById('ev-start-hh').value = pad2(from.hour);
+      document.getElementById('ev-start-mm').value = pad2(from.minute);
+      document.getElementById('ev-end-date').value = to.date;
+      document.getElementById('ev-end-hh').value = pad2(to.hour);
+      document.getElementById('ev-end-mm').value = pad2(to.minute);
+    }
 
     const recurrence = props.recurrence || '';
     document.getElementById('ev-repeats').checked = !!recurrence;
@@ -426,6 +547,24 @@
       remEl.innerHTML = '<div class="ev-reminder empty-note">None</div>';
     }
 
+    // Editing scope (v1): no recurring events, and demo events have no calendar.
+    const noteEl = document.getElementById('ev-edit-note');
+    let editable = true;
+    let note = '';
+    if (props.calendarId == null) {
+      editable = false;
+      note = 'Demo event — connect a CalDAV account to add real events.';
+    } else if (recurrence) {
+      editable = false;
+      note = 'Recurring events can’t be edited yet.';
+    }
+    noteEl.textContent = note;
+    noteEl.style.display = note ? '' : 'none';
+    setEditable(editable);
+
+    _currentEvent = { id: event.id, calendarId: props.calendarId, editable };
+
+    refreshPrevBoundaries();
     applyAllDayToggle();
     applyRepeatsToggle();
 
@@ -436,14 +575,127 @@
   function closeEventModal() {
     hide('event-overlay');
     hide('event-modal');
+    _currentEvent = null;
+  }
+
+  async function saveEvent() {
+    if (!_currentEvent || !_currentEvent.editable) return;
+    hideError('ev-error');
+    const allDay = document.getElementById('ev-allday').checked;
+    const startDate = document.getElementById('ev-start-date').value;
+    const endDate = document.getElementById('ev-end-date').value;
+    const name = document.getElementById('ev-name').value.trim();
+
+    if (!name) { showError('ev-error', 'Name is required.'); return; }
+    if (!startDate) { showError('ev-error', 'Start date is required.'); return; }
+
+    const pad = (n) => String(n).padStart(2, '0');
+    const timeStr = (prefix) => {
+      const h = clampInt(document.getElementById(`ev-${prefix}-hh`).value, 0, 23);
+      const m = clampInt(document.getElementById(`ev-${prefix}-mm`).value, 0, 59);
+      return `${pad(h)}:${pad(m)}`;
+    };
+
+    const body = {
+      calendar_id: _currentEvent.calendarId,
+      title: name,
+      all_day: allDay,
+      location: document.getElementById('ev-location').value,
+      description: document.getElementById('ev-notes').value,
+      timezone: effectiveTz(),
+    };
+    if (allDay) {
+      body.start = startDate;
+      body.end = endDate || startDate;
+    } else {
+      if (!endDate) {
+        showError('ev-error', 'From and To date are required.');
+        return;
+      }
+      body.start = `${startDate}T${timeStr('start')}:00`;
+      body.end = `${endDate}T${timeStr('end')}:00`;
+    }
+
+    const btn = document.getElementById('btn-event-save');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      await apiPut(`/events/${encodeURIComponent(_currentEvent.id)}`, body);
+      closeEventModal();
+      if (_fcCalendar) _fcCalendar.refetchEvents();
+    } catch (err) {
+      showError('ev-error', err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
   }
 
   function initEventModal() {
     document.getElementById('btn-event-close').addEventListener('click', closeEventModal);
+    document.getElementById('btn-event-cancel').addEventListener('click', closeEventModal);
+    document.getElementById('btn-event-save').addEventListener('click', saveEvent);
     document.getElementById('event-overlay').addEventListener('click', closeEventModal);
+    document.getElementById('ev-allday').addEventListener('change', () => {
+      applyAllDayToggle();
+      refreshPrevBoundaries();
+    });
+    ['ev-start-date', 'ev-start-hh', 'ev-start-mm'].forEach((id) => {
+      document.getElementById(id).addEventListener('change', onFromChange);
+    });
+    ['ev-end-date', 'ev-end-hh', 'ev-end-mm'].forEach((id) => {
+      document.getElementById(id).addEventListener('change', onToChange);
+    });
+    attachStepper('ev-start-hh', 1, 23, onFromChange);
+    attachStepper('ev-start-mm', 5, 59, onFromChange);
+    attachStepper('ev-end-hh', 1, 23, onToChange);
+    attachStepper('ev-end-mm', 5, 59, onToChange);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeEventModal();
     });
+  }
+
+  // ── Drag / resize editing ───────────────────────────────────────────────────
+
+  // Build a PUT body from an event's current (post-drag/resize) span. Title,
+  // location and notes are carried through unchanged so only the times move.
+  function eventToBody(event) {
+    const props = event.extendedProps || {};
+    const body = {
+      calendar_id: props.calendarId,
+      title: event.title || '',
+      all_day: event.allDay,
+      location: props.location || '',
+      description: props.description || '',
+      timezone: effectiveTz(),
+    };
+    if (event.allDay) {
+      // startStr/endStr are 'YYYY-MM-DD'; iCal DTEND is exclusive, so the
+      // client-visible inclusive end is endStr − 1 day.
+      body.start = event.startStr.slice(0, 10);
+      body.end = event.endStr ? shiftDateStr(event.endStr, -1) : body.start;
+    } else {
+      // startStr/endStr are ISO with the calendar's offset (tz-aware), which
+      // the server parses directly.
+      body.start = event.startStr;
+      body.end = event.endStr || event.startStr;
+    }
+    return body;
+  }
+
+  // Persist a drag (eventDrop) or resize (eventResize); revert on failure.
+  async function onEventChange(info) {
+    const props = info.event.extendedProps || {};
+    if (props.calendarId == null || props.recurrence) {
+      info.revert();
+      return;
+    }
+    try {
+      await apiPut(`/events/${encodeURIComponent(info.event.id)}`, eventToBody(info.event));
+    } catch (err) {
+      alert(err.message);
+      info.revert();
+    }
   }
 
   // ── Calendar page ───────────────────────────────────────────────────────────
@@ -477,12 +729,21 @@
       eventTimeFormat: tf.eventTimeFormat,
       slotLabelFormat: tf.slotLabelFormat,
       height: '100%',
+      // Enable drag-to-move and edge-resize; both start and end edges.
+      editable: true,
+      eventResizableFromStart: true,
       events: async function (fetchInfo, successCallback, failureCallback) {
         try {
           const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr });
           const r = await fetch('/events?' + params.toString());
           if (!r.ok) throw new Error('Failed to fetch events');
-          successCallback(await r.json());
+          const data = await r.json();
+          // Only real (calendar-backed), non-recurring events are editable.
+          data.forEach((e) => {
+            const p = e.extendedProps || {};
+            e.editable = p.calendarId != null && !p.recurrence;
+          });
+          successCallback(data);
         } catch (err) {
           failureCallback(err);
         }
@@ -491,6 +752,8 @@
         info.jsEvent.preventDefault();
         openEventModal(info.event);
       },
+      eventDrop: onEventChange,
+      eventResize: onEventChange,
     });
     _fcCalendar.render();
   }

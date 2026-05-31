@@ -382,7 +382,6 @@ details#add-account-details summary {
 
 .event-modal-body input[type="text"],
 .event-modal-body input[type="date"],
-.event-modal-body input[type="time"],
 .event-modal-body textarea {
   padding: 0.4rem 0.5rem;
   border: 1px solid #d0d0d0;
@@ -395,10 +394,85 @@ details#add-account-details summary {
 
 .event-modal-body textarea { resize: vertical; }
 
+/* HH:MM spinner pair — always-visible native number arrows, fixed 24h format. */
+.ev-time-fields {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.15rem;
+}
+
+.event-modal-body .ev-hh,
+.event-modal-body .ev-mm {
+  width: 3.4em;
+  text-align: center;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+
+/* Custom ▲▼ stepper buttons (cross-browser, always visible). The column
+   stretches to the input height and the two buttons split it 50/50, so each
+   arrow gets a full-size, non-overlapping hit target. */
+.ev-spin {
+  display: inline-flex;
+  flex-direction: column;
+  margin-left: 0.1rem;
+}
+
+.ev-spin button {
+  flex: 1 1 0;
+  box-sizing: border-box;
+  width: 1.6em;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid #d0d0d0;
+  background: #f3f3f3;
+  color: #555;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ev-spin button:hover { background: #e6e6e6; }
+.ev-spin-up { border-radius: 4px 4px 0 0; }
+.ev-spin-down { border-radius: 0 0 4px 4px; border-top: none; }
+
+.ev-colon { display: flex; align-items: center; color: #888; font-weight: 600; }
+
 .event-modal-body input[readonly],
 .event-modal-body textarea[readonly],
 .event-modal-body input[disabled],
 .ev-check input[disabled] { cursor: default; }
+
+.event-modal-body input[disabled],
+.event-modal-body textarea[disabled] {
+  background: #f0f0f0;
+  color: #777;
+}
+
+.event-modal-footer {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.btn-primary {
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #2563eb;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-primary:hover { background: #1d4ed8; }
+.btn-primary:disabled { opacity: .6; cursor: default; }
 
 .ev-group {
   border: 1px solid #eee;

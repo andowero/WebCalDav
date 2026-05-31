@@ -5,8 +5,8 @@
 | Milestone | Scope                                                     | Status      |
 |-----------|-----------------------------------------------------------|-------------|
 | MVP       | Secure user login, read-only view of calendar events      | Complete    |
-| v1        | Editing of calendar events → from, to, all-day, name     | Not started |
-| v2        | Editing of calendar events → notes, location, reminders  | Not started |
+| v1        | Editing of calendar events → from, to, all-day, name, location, notes | In progress |
+| v2        | Editing of calendar events → reminders                   | Not started |
 | v3        | Editing of calendar events → repetition                  | Not started |
 | v4        | Browser notifications                                     | Not started |
 
@@ -73,7 +73,20 @@ Read-only detail window for events, foundation for the v1–v3 editing milestone
   `@fullcalendar/luxon3` plugin (base bundle only supported `local`/`UTC`),
   fixing calendar-vs-detail time mismatches for offset-shifted events.
 
+### Event editing — v1 (2026-05-31)
+
+Existing events are now editable in place — the detail window doubles as the edit form.
+
+- `PUT /events/{uid}` writes name, all-day flag, from/to date+time, location, and
+  notes back to CalDAV with no local cache. Locates the event by UID, mutates only
+  the edited fields (preserving VALARM and everything else), bumps SEQUENCE.
+- Recurrence (repetition) and reminders stay read-only per the v1 scope. Recurring
+  events are refused (422) server-side and blocked in the UI.
+- Events carry `extendedProps.calendarId` so the client targets the right calendar;
+  timed edits round-trip through the user's effective timezone (luxon → zoneinfo).
+- 33 tests passing (added timed / all-day / recurring-refusal / not-found cases).
+
 ## What is next
 
-- Complete v1 milestone: event create/update/delete via PUT/POST/DELETE `/events`,
-  reusing the detail window as an edit form.
+- v1 remainder: event create (`POST /events`) and delete (`DELETE /events/{uid}`).
+- v2: reminders; v3: editing recurrence (repetition) rules.

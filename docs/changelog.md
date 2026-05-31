@@ -2,6 +2,37 @@
 
 ## Unreleased — MVP
 
+### Added — drag & resize editing (2026-05-31)
+- Events are now movable/resizable by mouse in all views, persisted via the
+  existing `PUT /events/{uid}` (`eventDrop` / `eventResize` handlers).
+  - Month: drag shifts by whole days (timed events keep their time); all-day
+    left/right edges move from/to dates.
+  - Week: drag changes date (L/R) and time (U/D); top/bottom edges move
+    from/to, and edge-drag across day columns changes the date.
+  - Day: drag changes time only; top/bottom edges move from/to.
+- Edge resize from both ends enabled (`editable`, `eventResizableFromStart`).
+- Only calendar-backed, non-recurring events are draggable; demo and recurring
+  events are locked. Failed writes revert the change in the UI.
+
+### Added — event editing, v1 (2026-05-31)
+- The event detail window is now an edit form: name, all-day flag, from/to
+  date+time, location, and notes are editable, with Save / Cancel. Recurrence
+  and reminders remain read-only (deferred to v2/v3).
+- `PUT /events/{uid}` writes changes straight to CalDAV: locates the event by
+  UID via `event_by_uid`, rewrites SUMMARY/LOCATION/DESCRIPTION/DTSTART/DTEND,
+  drops any DURATION, bumps SEQUENCE + LAST-MODIFIED, and preserves all other
+  properties (e.g. VALARM). All-day DTEND is written exclusive (+1 day).
+- Recurring events are refused server-side (`RecurringEventError` → 422) and
+  blocked in the UI with a notice; out of scope until v2.
+- Each event now carries its owning calendar in `extendedProps.calendarId`, so
+  the client can target the right calendar on save; demo events (no calendar)
+  are non-editable.
+- Timed edits are interpreted in the user's effective IANA timezone (setting or
+  browser-resolved), parsed wall-clock with luxon on the client and re-attached
+  via `zoneinfo` on the server.
+- CalDAV integration tests for update: timed edit, all-day edit, recurring
+  refusal, and not-found — 33 tests passing total.
+
 ### Added — event detail viewer (2026-05-31)
 - Clickable events open a read-only detail window (pointer cursor on hover):
   name, duration (all-day flag + from/to), repetition, location, notes, reminders.
