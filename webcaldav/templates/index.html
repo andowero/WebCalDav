@@ -81,6 +81,11 @@
       <input id="ev-name" type="text">
     </label>
 
+    <label class="ev-field" id="ev-calendar-field" style="display:none">
+      <span class="ev-label">Calendar</span>
+      <select id="ev-calendar"></select>
+    </label>
+
     <fieldset class="ev-group">
       <legend>Duration</legend>
       <label class="ev-check"><input type="checkbox" id="ev-allday"> All day</label>
@@ -120,8 +125,25 @@
     </div>
   </div>
   <div class="event-modal-footer">
+    <button id="btn-event-delete" class="btn-danger" style="display:none">Delete</button>
     <button id="btn-event-cancel" class="btn-outline">Cancel</button>
     <button id="btn-event-save" class="btn-primary">Save</button>
+  </div>
+</div>
+
+<!-- ── Event context menu (right-click) ── -->
+<div id="ev-context-menu" class="ev-context-menu" style="display:none">
+  <button type="button" id="ctx-edit">Edit</button>
+  <button type="button" id="ctx-delete">Delete</button>
+</div>
+
+<!-- ── Confirm dialog ── -->
+<div id="confirm-overlay" class="event-overlay" style="display:none"></div>
+<div id="confirm-modal" class="confirm-modal" style="display:none" role="dialog" aria-modal="true">
+  <p id="confirm-text"></p>
+  <div class="confirm-footer">
+    <button id="confirm-no" class="btn-outline">No</button>
+    <button id="confirm-yes" class="btn-danger">Yes</button>
   </div>
 </div>
 

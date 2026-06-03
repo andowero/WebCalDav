@@ -18,6 +18,8 @@ import pytest
 from webcaldav.caldav_client import (
     EventNotFoundError,
     RecurringEventError,
+    create_event,
+    delete_event,
     discover_calendars,
     fetch_events,
     update_event,
@@ -296,3 +298,61 @@ async def test_update_event_not_found(edit_calendar):
             title="x", all_day=False, start=start, end=end,
             location=None, description=None,
         )
+
+
+async def test_create_event_timed(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 20, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 20, 10, 0, tzinfo=timezone.utc)
+    await create_event(
+        base_url, USER, PASSWORD, url, "new-timed@webcaldav",
+        title="Fresh meeting", all_day=False, start=start, end=end,
+        location="Room 1", description="Notes",
+    )
+
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    ev = {e["id"]: e for e in events}["new-timed@webcaldav"]
+    assert ev["title"] == "Fresh meeting"
+    assert ev["allDay"] is False
+    assert ev["start"].startswith("2026-06-20T09:00:00")
+    assert ev["end"].startswith("2026-06-20T10:00:00")
+    assert ev["extendedProps"]["location"] == "Room 1"
+
+
+async def test_create_event_allday(edit_calendar):
+    from datetime import date
+
+    base_url, url = edit_calendar
+    await create_event(
+        base_url, USER, PASSWORD, url, "new-allday@webcaldav",
+        title="Trip", all_day=True,
+        start=date(2026, 6, 21), end=date(2026, 6, 23),  # exclusive DTEND
+        location=None, description=None,
+    )
+
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    ev = {e["id"]: e for e in events}["new-allday@webcaldav"]
+    assert ev["title"] == "Trip"
+    assert ev["allDay"] is True
+    assert ev["start"] == "2026-06-21"
+    assert ev["end"] == "2026-06-23"
+
+
+async def test_delete_event(edit_calendar):
+    base_url, url = edit_calendar
+    await delete_event(base_url, USER, PASSWORD, url, "edit-event")
+
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    assert "edit-event" not in {e["id"] for e in events}
+
+
+async def test_delete_event_not_found(edit_calendar):
+    base_url, url = edit_calendar
+    with pytest.raises(EventNotFoundError):
+        await delete_event(base_url, USER, PASSWORD, url, "does-not-exist")

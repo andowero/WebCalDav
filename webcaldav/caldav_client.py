@@ -5,6 +5,8 @@ from typing import NamedTuple
 
 import caldav
 from caldav.elements.ical import CalendarColor
+from icalendar import Calendar as ICalendar
+from icalendar import Event as IEvent
 
 from .metrics import caldav_request_duration_seconds, caldav_request_errors_total
 
@@ -405,4 +407,111 @@ async def update_event(
             raise
         except Exception:
             caldav_request_errors_total.labels(operation="update_event").inc()
+            raise
+
+
+def _sync_create_event(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    all_day: bool,
+    start: date | datetime,
+    end: date | datetime,
+    location: str | None,
+    description: str | None,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        ical = ICalendar()
+        ical.add("prodid", "-//WebCalDav//EN")
+        ical.add("version", "2.0")
+        vevent = IEvent()
+        vevent.add("uid", uid)
+        vevent.add("dtstamp", datetime.now(timezone.utc))
+        if title:
+            vevent.add("summary", title)
+        vevent.add("dtstart", start)
+        vevent.add("dtend", end)
+        if location:
+            vevent.add("location", location)
+        if description:
+            vevent.add("description", description)
+        ical.add_component(vevent)
+        cal.save_event(ical.to_ical().decode("utf-8"))
+
+
+async def create_event(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    all_day: bool,
+    start: date | datetime,
+    end: date | datetime,
+    location: str | None,
+    description: str | None,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="create_event").time():
+        try:
+            await asyncio.to_thread(
+                _sync_create_event,
+                account_url,
+                username,
+                password,
+                calendar_url,
+                uid,
+                title,
+                all_day,
+                start,
+                end,
+                location,
+                description,
+            )
+        except Exception:
+            caldav_request_errors_total.labels(operation="create_event").inc()
+            raise
+
+
+def _sync_delete_event(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        try:
+            event = cal.event_by_uid(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+        event.delete()
+
+
+async def delete_event(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="delete_event").time():
+        try:
+            await asyncio.to_thread(
+                _sync_delete_event,
+                account_url,
+                username,
+                password,
+                calendar_url,
+                uid,
+            )
+        except EventNotFoundError:
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="delete_event").inc()
             raise

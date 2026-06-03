@@ -2,13 +2,12 @@
 
 ## Milestones
 
-| Milestone | Scope                                                     | Status      |
-|-----------|-----------------------------------------------------------|-------------|
-| MVP       | Secure user login, read-only view of calendar events      | Complete    |
-| v1        | Editing of calendar events → from, to, all-day, name, location, notes | In progress |
-| v2        | Editing of calendar events → reminders                   | Not started |
-| v3        | Editing of calendar events → repetition                  | Not started |
-| v4        | Browser notifications                                     | Not started |
+| Milestone | Scope                                                     | Status |
+|-----------|-----------------------------------------------------------|--------|
+| MVP       | Secure user login, read-only view of calendar events      | Complete |
+| v1        | Basic editing of calendar events -> without repetition    | Complete |
+| v2        | Editing of calendar events -> repetition                  | Not started |
+| v3        | Reminders and browser notifications                       | Not started |
 
 ## What has been accomplished
 
@@ -99,7 +98,31 @@ Edit-modal date and time fields now respect the user's locale-style preferences.
   (the native picker ignored it and always started on Sunday).
 - Modal widened so the time picker is no longer clipped.
 
+### Event create & delete (2026-06-03)
+
+Completes the v1 editing milestone — events can now be created and removed, not just edited.
+
+- `POST /events` creates an event (server-generated `<uuid>@webcaldav` UID) on a
+  chosen calendar; `DELETE /events/{uid}?calendar_id=…` removes one. Backed by new
+  `create_event` / `delete_event` in the CalDAV layer.
+- Creating from the grid: month click prefills the clicked day + current time
+  (rounded to 5 min, 1-hour duration); week/day click snaps to the nearest
+  half-hour 30-min slot; week/day drag spans the dragged range; the all-day lane
+  makes an all-day event. A 5px `selectMinDistance` separates click from drag.
+- The create modal adds a calendar picker and requires a name to save; closing
+  discards the draft.
+- Edit modal gains a Delete button; right-clicking any event opens an Edit /
+  Delete context menu, with a yes/no confirm before deletion.
+- 37 tests passing (added create timed/all-day, delete, delete-not-found).
+
+### Default calendar & calendar move (2026-06-03)
+
+- `Calendar.is_default` column added (one default per user). Settings shows a
+  "Default" checkbox per calendar; the create modal pre-selects it.
+- The edit modal exposes the calendar picker so an event can be reassigned.
+  Moving sends `original_calendar_id`; the server recreates on the target (same
+  UID) and deletes from the source.
+
 ## What is next
 
-- v1 remainder: event create (`POST /events`) and delete (`DELETE /events/{uid}`).
-- v2: reminders; v3: editing recurrence (repetition) rules.
+- v2: editing recurrence (repetition) rules.

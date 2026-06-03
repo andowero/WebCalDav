@@ -195,6 +195,8 @@
   function closeSettings() {
     hide('settings-overlay');
     hide('settings-panel');
+    // Calendars may have changed; drop the create-modal picker cache.
+    _calendarsCache = null;
     if (_fcCalendar) _fcCalendar.refetchEvents();
   }
 
@@ -252,9 +254,14 @@
           `<label class="cal-label">` +
             `<input type="checkbox" class="cal-enabled" data-id="${c.id}"${c.enabled ? ' checked' : ''}>` +
             ` ${escHtml(c.display_name)}` +
+          `</label>` +
+          `<label class="cal-default-label" title="Default calendar for new events">` +
+            `<input type="checkbox" class="cal-default" data-id="${c.id}"${c.is_default ? ' checked' : ''}>` +
+            ` Default` +
           `</label>`;
         const colorInput = row.querySelector('.cal-color');
         const enabledInput = row.querySelector('.cal-enabled');
+        const defaultInput = row.querySelector('.cal-default');
         colorInput.addEventListener('change', async () => {
           try {
             await apiPatch(`/calendars/${c.id}`, { color: colorInput.value });
@@ -265,6 +272,15 @@
         enabledInput.addEventListener('change', async () => {
           try {
             await apiPatch(`/calendars/${c.id}`, { enabled: enabledInput.checked });
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+        defaultInput.addEventListener('change', async () => {
+          try {
+            await apiPatch(`/calendars/${c.id}`, { is_default: defaultInput.checked });
+            // Server allows only one default; reload to clear the others' checks.
+            if (defaultInput.checked) await loadCalendars();
           } catch (err) {
             alert(err.message);
           }
@@ -758,9 +774,10 @@
   }
 
   function setEditable(on) {
-    ['ev-name', 'ev-allday', 'ev-start-hh', 'ev-start-mm',
+    ['ev-name', 'ev-calendar', 'ev-allday', 'ev-start-hh', 'ev-start-mm',
      'ev-end-hh', 'ev-end-mm', 'ev-location', 'ev-notes'].forEach((id) => {
-      document.getElementById(id).disabled = !on;
+      const el = document.getElementById(id);
+      if (el) el.disabled = !on;
     });
     document.querySelectorAll(
       '.ev-date-fields input, .ev-date-fields button, .ev-time-fields input, .ev-ampm',
@@ -770,7 +787,7 @@
     document.getElementById('btn-event-save').style.display = on ? '' : 'none';
   }
 
-  function openEventModal(event) {
+  async function openEventModal(event) {
     const props = event.extendedProps || {};
     hideError('ev-error');
 
@@ -833,9 +850,122 @@
     }
     noteEl.textContent = note;
     noteEl.style.display = note ? '' : 'none';
+
+    // Edit mode: show the calendar picker so the event can be moved between
+    // calendars. Demo events (no calendar) hide it. Offer Delete if editable.
+    const calField = document.getElementById('ev-calendar-field');
+    if (props.calendarId != null) {
+      const cals = await getEnabledCalendars();
+      let opts = cals;
+      if (!cals.some((c) => c.id === props.calendarId)) {
+        opts = cals.concat([{ id: props.calendarId, display_name: 'Current calendar' }]);
+      }
+      const calSel = document.getElementById('ev-calendar');
+      calSel.innerHTML = opts
+        .map((c) => `<option value="${c.id}">${escHtml(c.display_name)}</option>`)
+        .join('');
+      calSel.value = String(props.calendarId);
+      calField.style.display = '';
+    } else {
+      calField.style.display = 'none';
+    }
+    document.getElementById('btn-event-delete').style.display = editable ? '' : 'none';
     setEditable(editable);
 
-    _currentEvent = { id: event.id, calendarId: props.calendarId, editable };
+    _currentEvent = {
+      id: event.id,
+      calendarId: props.calendarId,
+      originalCalendarId: props.calendarId,
+      editable,
+      isNew: false,
+    };
+
+    refreshPrevBoundaries();
+    applyAllDayToggle();
+    applyRepeatsToggle();
+
+    show('event-overlay');
+    show('event-modal');
+  }
+
+  // ── Event creation ───────────────────────────────────────────────────────────
+
+  // Enabled calendars, cached after first load; used to populate the create
+  // modal's calendar picker. Refreshed lazily when the cache is empty.
+  let _calendarsCache = null;
+
+  async function getEnabledCalendars(force) {
+    if (_calendarsCache && !force) return _calendarsCache;
+    try {
+      const cals = await apiGet('/calendars');
+      _calendarsCache = cals.filter((c) => c.enabled);
+    } catch (_) {
+      _calendarsCache = [];
+    }
+    return _calendarsCache;
+  }
+
+  // Round a luxon DateTime to the nearest `step` minutes (within its own day).
+  function roundToMinutes(dt, step) {
+    const mins = dt.hour * 60 + dt.minute;
+    const rounded = Math.round(mins / step) * step;
+    return dt.startOf('day').plus({ minutes: rounded });
+  }
+
+  async function openCreateModal(start, end, allDay) {
+    hideError('ev-error');
+    const cals = await getEnabledCalendars();
+
+    document.getElementById('ev-title-text').textContent = 'New event';
+    document.getElementById('ev-name').value = '';
+    document.getElementById('ev-allday').checked = !!allDay;
+    document.getElementById('ev-location').value = '';
+    document.getElementById('ev-notes').value = '';
+    document.getElementById('ev-repeats').checked = false;
+    document.getElementById('ev-rrule').value = '';
+    document.getElementById('ev-reminders').innerHTML =
+      '<div class="ev-reminder empty-note">None</div>';
+
+    // Populate the calendar picker (create-only).
+    const calField = document.getElementById('ev-calendar-field');
+    const calSel = document.getElementById('ev-calendar');
+    calSel.innerHTML = cals
+      .map((c) => `<option value="${c.id}">${escHtml(c.display_name)}</option>`)
+      .join('');
+    // Pre-select the user's default calendar (else the first enabled one).
+    const dflt = cals.find((c) => c.is_default);
+    if (dflt) calSel.value = String(dflt.id);
+    calField.style.display = '';
+    document.getElementById('btn-event-delete').style.display = 'none';
+
+    renderDateFields('start', onFromChange);
+    renderDateFields('end', onToChange);
+    renderTimeFields('start', onFromChange);
+    renderTimeFields('end', onToChange);
+
+    setDateFieldValue('start', start.toFormat('yyyy-MM-dd'));
+    setDateFieldValue('end', end.toFormat('yyyy-MM-dd'));
+    if (!allDay) {
+      setTimeParts('start', start.hour, start.minute);
+      setTimeParts('end', end.hour, end.minute);
+    }
+
+    const noteEl = document.getElementById('ev-edit-note');
+    const hasCal = cals.length > 0;
+    if (!hasCal) {
+      noteEl.textContent = 'Connect a CalDAV account to create events.';
+      noteEl.style.display = '';
+    } else {
+      noteEl.style.display = 'none';
+    }
+    setEditable(hasCal);
+
+    _currentEvent = {
+      id: null,
+      calendarId: hasCal ? parseInt(calSel.value, 10) : null,
+      editable: hasCal,
+      isNew: true,
+    };
 
     refreshPrevBoundaries();
     applyAllDayToggle();
@@ -850,6 +980,8 @@
     hide('event-overlay');
     hide('event-modal');
     _currentEvent = null;
+    // Discard any drag-selection highlight left by a create-from-select.
+    if (_fcCalendar) _fcCalendar.unselect();
   }
 
   async function saveEvent() {
@@ -893,7 +1025,14 @@
     btn.disabled = true;
     btn.textContent = 'Saving…';
     try {
-      await apiPut(`/events/${encodeURIComponent(_currentEvent.id)}`, body);
+      if (_currentEvent.isNew) {
+        await apiPost('/events', body);
+      } else {
+        // Tell the server the original calendar so it can move the event when
+        // the picker was changed.
+        body.original_calendar_id = _currentEvent.originalCalendarId;
+        await apiPut(`/events/${encodeURIComponent(_currentEvent.id)}`, body);
+      }
       closeEventModal();
       if (_fcCalendar) _fcCalendar.refetchEvents();
     } catch (err) {
@@ -904,11 +1043,34 @@
     }
   }
 
+  // Delete the event currently open in the modal (Delete button). No confirm
+  // here — the spec reserves the "are you sure" prompt for the right-click menu.
+  async function deleteCurrentEvent() {
+    if (!_currentEvent || _currentEvent.isNew || _currentEvent.calendarId == null) return;
+    const btn = document.getElementById('btn-event-delete');
+    btn.disabled = true;
+    try {
+      await apiDelete(
+        `/events/${encodeURIComponent(_currentEvent.id)}?calendar_id=${_currentEvent.calendarId}`,
+      );
+      closeEventModal();
+      if (_fcCalendar) _fcCalendar.refetchEvents();
+    } catch (err) {
+      showError('ev-error', err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   function initEventModal() {
     document.getElementById('btn-event-close').addEventListener('click', closeEventModal);
     document.getElementById('btn-event-cancel').addEventListener('click', closeEventModal);
     document.getElementById('btn-event-save').addEventListener('click', saveEvent);
+    document.getElementById('btn-event-delete').addEventListener('click', deleteCurrentEvent);
     document.getElementById('event-overlay').addEventListener('click', closeEventModal);
+    document.getElementById('ev-calendar').addEventListener('change', (e) => {
+      if (_currentEvent) _currentEvent.calendarId = parseInt(e.target.value, 10);
+    });
     document.getElementById('ev-allday').addEventListener('change', () => {
       applyAllDayToggle();
       refreshPrevBoundaries();
@@ -916,8 +1078,89 @@
     // Date-field and time-field listeners/steppers are bound per-open inside
     // renderDateFields / renderTimeFields.
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeEventModal();
+      if (e.key === 'Escape') { closeEventModal(); hideContextMenu(); closeConfirm(); }
     });
+    initContextMenu();
+    initConfirm();
+  }
+
+  // ── Right-click context menu ─────────────────────────────────────────────────
+
+  let _ctxEvent = null;
+
+  function showContextMenu(x, y, event) {
+    _ctxEvent = event;
+    const menu = document.getElementById('ev-context-menu');
+    menu.style.display = '';
+    // Keep the menu on-screen.
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    menu.style.left = `${Math.min(x, window.innerWidth - mw - 8)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - mh - 8)}px`;
+  }
+
+  function hideContextMenu() {
+    document.getElementById('ev-context-menu').style.display = 'none';
+    _ctxEvent = null;
+  }
+
+  function initContextMenu() {
+    const menu = document.getElementById('ev-context-menu');
+    document.getElementById('ctx-edit').addEventListener('click', () => {
+      const ev = _ctxEvent;
+      hideContextMenu();
+      if (ev) openEventModal(ev);
+    });
+    document.getElementById('ctx-delete').addEventListener('click', async () => {
+      const ev = _ctxEvent;
+      hideContextMenu();
+      if (!ev) return;
+      const props = ev.extendedProps || {};
+      if (props.calendarId == null) return;
+      const ok = await confirmDialog(`Delete "${ev.title || 'this event'}"?`);
+      if (!ok) return;
+      try {
+        await apiDelete(
+          `/events/${encodeURIComponent(ev.id)}?calendar_id=${props.calendarId}`,
+        );
+        if (_fcCalendar) _fcCalendar.refetchEvents();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+    // Any outside click / scroll dismisses the menu.
+    document.addEventListener('click', (e) => {
+      if (!menu.contains(e.target)) hideContextMenu();
+    });
+    document.addEventListener('contextmenu', (e) => {
+      if (!e.target.closest('.fc-event') && !menu.contains(e.target)) hideContextMenu();
+    });
+  }
+
+  // ── Confirm dialog (yes/no) ──────────────────────────────────────────────────
+
+  let _confirmResolve = null;
+
+  function confirmDialog(text) {
+    document.getElementById('confirm-text').textContent = text;
+    show('confirm-overlay');
+    show('confirm-modal');
+    return new Promise((resolve) => { _confirmResolve = resolve; });
+  }
+
+  function closeConfirm(result) {
+    hide('confirm-overlay');
+    hide('confirm-modal');
+    if (_confirmResolve) {
+      _confirmResolve(!!result);
+      _confirmResolve = null;
+    }
+  }
+
+  function initConfirm() {
+    document.getElementById('confirm-yes').addEventListener('click', () => closeConfirm(true));
+    document.getElementById('confirm-no').addEventListener('click', () => closeConfirm(false));
+    document.getElementById('confirm-overlay').addEventListener('click', () => closeConfirm(false));
   }
 
   // ── Drag / resize editing ───────────────────────────────────────────────────
@@ -998,6 +1241,10 @@
       // Enable drag-to-move and edge-resize; both start and end edges.
       editable: true,
       eventResizableFromStart: true,
+      // Click vs drag for event creation: a pixel threshold keeps a plain click
+      // out of `select` (→ dateClick) while a real drag fires `select`.
+      selectable: true,
+      selectMinDistance: 5,
       events: async function (fetchInfo, successCallback, failureCallback) {
         try {
           const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr });
@@ -1017,6 +1264,62 @@
       eventClick: function (info) {
         info.jsEvent.preventDefault();
         openEventModal(info.event);
+      },
+      // Plain click on empty space → create modal with view-specific defaults.
+      dateClick: function (info) {
+        hideContextMenu();
+        const tz = effectiveTz();
+        if (info.view.type === 'dayGridMonth') {
+          // Month: clicked day as From/To date, now (rounded to 5 min) as the
+          // From time, default 1-hour duration.
+          const day = info.dateStr.slice(0, 10);
+          const t = roundToMinutes(luxon.DateTime.now().setZone(tz), 5);
+          const start = luxon.DateTime.fromObject(
+            { year: +day.slice(0, 4), month: +day.slice(5, 7), day: +day.slice(8, 10),
+              hour: t.hour, minute: t.minute },
+            { zone: tz },
+          );
+          openCreateModal(start, start.plus({ hours: 1 }), false);
+        } else if (info.allDay) {
+          // Week/Day all-day lane → one-day all-day event.
+          const start = luxon.DateTime.fromISO(info.dateStr.slice(0, 10), { zone: tz });
+          openCreateModal(start, start, true);
+        } else {
+          // Week/Day timed: snap to the nearest half-hour, 30-minute slot.
+          const start = roundToMinutes(
+            luxon.DateTime.fromISO(info.dateStr, { setZone: true }).setZone(tz), 30);
+          openCreateModal(start, start.plus({ minutes: 30 }), false);
+        }
+      },
+      // Drag over empty space → create modal spanning the dragged range.
+      select: function (info) {
+        hideContextMenu();
+        const tz = effectiveTz();
+        if (info.allDay) {
+          const startDay = info.startStr.slice(0, 10);
+          let endDay = shiftDateStr(info.endStr, -1); // DTEND exclusive → inclusive
+          if (endDay < startDay) endDay = startDay;
+          openCreateModal(
+            luxon.DateTime.fromISO(startDay, { zone: tz }),
+            luxon.DateTime.fromISO(endDay, { zone: tz }),
+            true,
+          );
+        } else {
+          openCreateModal(
+            luxon.DateTime.fromISO(info.startStr, { setZone: true }).setZone(tz),
+            luxon.DateTime.fromISO(info.endStr, { setZone: true }).setZone(tz),
+            false,
+          );
+        }
+      },
+      eventDidMount: function (info) {
+        const props = info.event.extendedProps || {};
+        // Demo events have no calendar; skip the right-click menu for them.
+        if (props.calendarId == null) return;
+        info.el.addEventListener('contextmenu', function (e) {
+          e.preventDefault();
+          showContextMenu(e.pageX, e.pageY, info.event);
+        });
       },
       eventDrop: onEventChange,
       eventResize: onEventChange,

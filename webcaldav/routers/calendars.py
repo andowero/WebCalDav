@@ -17,11 +17,13 @@ class CalendarOut(BaseModel):
     display_name: str
     color: str
     enabled: bool
+    is_default: bool
 
 
 class CalendarPatch(BaseModel):
     color: str | None = None
     enabled: bool | None = None
+    is_default: bool | None = None
 
 
 @router.get("")
@@ -43,6 +45,7 @@ async def list_calendars(
             display_name=c.display_name,
             color=c.color,
             enabled=c.enabled,
+            is_default=c.is_default,
         )
         for c in calendars
     ]
@@ -68,6 +71,21 @@ async def patch_calendar(
         cal.color = body.color
     if body.enabled is not None:
         cal.enabled = body.enabled
+    if body.is_default is not None:
+        if body.is_default:
+            # At most one default per user; clear the others.
+            others = await db.execute(
+                select(Calendar)
+                .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
+                .where(
+                    CalDAVAccount.user_id == entry.user_id,
+                    Calendar.id != cal.id,
+                    Calendar.is_default == True,  # noqa: E712
+                )
+            )
+            for other in others.scalars().all():
+                other.is_default = False
+        cal.is_default = body.is_default
     await db.commit()
 
     return CalendarOut(
@@ -77,4 +95,5 @@ async def patch_calendar(
         display_name=cal.display_name,
         color=cal.color,
         enabled=cal.enabled,
+        is_default=cal.is_default,
     )

@@ -261,6 +261,17 @@ body {
   cursor: pointer;
 }
 
+.cal-default-label {
+  margin-left: auto;
+  font-size: 12px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 details#add-account-details {
   margin-top: 0.75rem;
 }
@@ -645,3 +656,83 @@ details#add-account-details summary {
   border-radius: 4px;
 }
 .ev-reminder.empty-note { background: none; padding: 0; }
+
+.event-modal-body select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  background: #fafafa;
+  color: #222;
+}
+
+/* Footer Delete sits on the left; Cancel/Save stay right. */
+#btn-event-delete { margin-right: auto; }
+
+.btn-danger {
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #dc2626;
+  border-radius: 4px;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn-danger:hover { background: #fee2e2; }
+.btn-danger:disabled { opacity: .6; cursor: default; }
+
+/* Right-click context menu on events. */
+.ev-context-menu {
+  position: fixed;
+  z-index: 250;
+  min-width: 120px;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+}
+.ev-context-menu button {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: #222;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ev-context-menu button:hover { background: #f0f0f0; }
+.ev-context-menu #ctx-delete { color: #b91c1c; }
+.ev-context-menu #ctx-delete:hover { background: #fee2e2; }
+
+/* Confirm (yes/no) dialog — above the event modal. */
+#confirm-overlay { z-index: 300; }
+.confirm-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 320px;
+  max-width: 90vw;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  z-index: 301;
+  padding: 1.25rem;
+}
+.confirm-modal p {
+  margin: 0 0 1rem;
+  font-size: 14px;
+  color: #222;
+}
+.confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}

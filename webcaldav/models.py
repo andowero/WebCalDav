@@ -54,6 +54,7 @@ class Calendar(Base):
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     color: Mapped[str] = mapped_column(String, default="#3788d8", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     account: Mapped["CalDAVAccount"] = relationship(back_populates="calendars")
 

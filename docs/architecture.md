@@ -49,6 +49,8 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 ### Storage layer
 
 - SQLAlchemy 2.x models for `users`, `caldav_accounts`, `calendars`, `user_settings`.
+- `calendars.is_default` marks the per-user calendar pre-selected for new events
+  (at most one, enforced at the API layer).
 - SQLite in WAL mode on a named Docker volume.
 
 ### API layer
@@ -62,10 +64,16 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 - Static assets: FullCalendar.js bundle (+ luxon and the `@fullcalendar/luxon3`
   plugin for named-IANA-timezone rendering) plus a small vanilla-JS glue layer
   that calls the API via `fetch`.
-- A read-only event detail window opens on event click, populated from the event's
-  `extendedProps` (`description`, `location`, `recurrence`, `reminders`,
+- An event modal opens on event click for viewing/editing, populated from the
+  event's `extendedProps` (`description`, `location`, `recurrence`, `reminders`,
   `rawStart`/`rawEnd`); dates are formatted client-side per the timezone + time
-  format settings.
+  format settings. Recurrence and reminders remain read-only.
+- Creating events: clicking empty grid space (or dragging in week/day) opens the
+  same modal blank with view-specific prefilled times and a calendar picker that
+  defaults to the user's default calendar. The picker is also shown when editing,
+  so an event can be moved between calendars.
+- Deleting events: a Delete button in the modal, plus a right-click context menu
+  (Edit / Delete) with a yes/no confirm before removal.
 - No build step beyond bundling FullCalendar's CSS/JS.
 
 ### Observability
@@ -151,11 +159,17 @@ merge + normalize responses → JSON
 
 No local event cache.
 
-### Edit event
+### Create / edit / delete event
 
 ```
-browser ── PUT /events/{uid} ──► DEK-decrypt CalDAV creds ──► CalDAV PUT ──► return updated event
+create:  POST   /events                       ──► DEK-decrypt creds ──► CalDAV PUT (new UID)
+edit:    PUT    /events/{uid}                  ──► DEK-decrypt creds ──► CalDAV PUT (in place)
+move:    PUT    /events/{uid}                  ──► create on target calendar (same UID),
+           (original_calendar_id ≠ calendar_id)     then delete from source calendar
+delete:  DELETE /events/{uid}?calendar_id=…    ──► DEK-decrypt creds ──► CalDAV DELETE
 ```
+
+Recurring events are refused for edit/move (422). No local event cache.
 
 ### Logout or expiry
 

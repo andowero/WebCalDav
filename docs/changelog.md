@@ -2,6 +2,33 @@
 
 ## Unreleased — MVP
 
+### Added — default calendar & calendar move (2026-06-03)
+- New `Calendar.is_default` column (one default per user, enforced in
+  `PATCH /calendars/{id}`; setting it clears the others). Surfaced as a "Default"
+  checkbox per row in Settings. The create modal pre-selects the default calendar.
+- The edit modal now shows a calendar picker (previously create-only). Changing it
+  moves the event: `PUT /events/{uid}` takes `original_calendar_id` and, when it
+  differs from `calendar_id`, recreates the event on the target (same UID) then
+  deletes it from the source.
+
+### Added — event creation & deletion (2026-06-03)
+- `POST /events` creates a new event on the chosen calendar (server-generated
+  `<uuid>@webcaldav` UID); `DELETE /events/{uid}?calendar_id=…` removes one.
+  New `create_event` / `delete_event` in the CalDAV layer (radicale integration
+  tests cover timed, all-day, and not-found cases).
+- Create from the calendar grid:
+  - Month: click a day → modal prefilled with that day as From/To and the current
+    time rounded to 5 min, 1-hour default duration.
+  - Week/Day: click empty space → nearest half-hour, 30-min slot; the all-day
+    lane → a one-day all-day event.
+  - Week/Day: drag empty space → modal spanning the dragged range (a 5px
+    `selectMinDistance` separates click from drag).
+- The create modal adds a calendar picker; closing without saving discards the
+  event and clears the selection. Save still requires a name.
+- Delete button added to the edit modal (deletes immediately).
+- Right-click an event → context menu with **Edit** (opens the modal) and
+  **Delete** (yes/no confirm dialog before removing).
+
 ### Added — modal date/time fields honour user settings (2026-06-03)
 - New `date_format` user setting (`UserSettings.date_format`, default `YYYY-MM-DD`;
   also `MM/DD/YYYY`, `DD/MM/YYYY`) plumbed through `GET/PUT /settings` and the host
