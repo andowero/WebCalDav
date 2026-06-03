@@ -86,6 +86,19 @@ Existing events are now editable in place — the detail window doubles as the e
   timed edits round-trip through the user's effective timezone (luxon → zoneinfo).
 - 33 tests passing (added timed / all-day / recurring-refusal / not-found cases).
 
+### Modal date/time UX (2026-06-03)
+
+Edit-modal date and time fields now respect the user's locale-style preferences.
+
+- New `date_format` setting (`YYYY-MM-DD` / `MM/DD/YYYY` / `DD/MM/YYYY`) drives
+  forced-format date inputs (year/month/day numeric fields), replacing the
+  locale-dependent native date input.
+- Time fields honour the 12h/24h `time_format`: 24h HH:MM, or 12h 1–12 + AM/PM
+  toggle; the value sent to the API is always 24h.
+- The 📅 picker is now a custom popup calendar honouring `first_day_of_week`
+  (the native picker ignored it and always started on Sunday).
+- Modal widened so the time picker is no longer clipped.
+
 ## What is next
 
 - v1 remainder: event create (`POST /events`) and delete (`DELETE /events/{uid}`).

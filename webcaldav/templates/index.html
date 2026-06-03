@@ -16,7 +16,7 @@
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }} };
 </script>
 
 <!-- ── Login ── -->
@@ -86,21 +86,13 @@
       <label class="ev-check"><input type="checkbox" id="ev-allday"> All day</label>
       <div class="ev-dt-row">
         <span class="ev-label">From</span>
-        <input type="date" id="ev-start-date">
-        <span class="ev-time ev-time-fields">
-          <input type="text" id="ev-start-hh" class="ev-hh" inputmode="numeric" maxlength="2">
-          <span class="ev-colon">:</span>
-          <input type="text" id="ev-start-mm" class="ev-mm" inputmode="numeric" maxlength="2">
-        </span>
+        <span class="ev-date-fields" id="ev-start-date-fields"></span>
+        <span class="ev-time ev-time-fields" id="ev-start-time-fields"></span>
       </div>
       <div class="ev-dt-row">
         <span class="ev-label">To</span>
-        <input type="date" id="ev-end-date">
-        <span class="ev-time ev-time-fields">
-          <input type="text" id="ev-end-hh" class="ev-hh" inputmode="numeric" maxlength="2">
-          <span class="ev-colon">:</span>
-          <input type="text" id="ev-end-mm" class="ev-mm" inputmode="numeric" maxlength="2">
-        </span>
+        <span class="ev-date-fields" id="ev-end-date-fields"></span>
+        <span class="ev-time ev-time-fields" id="ev-end-time-fields"></span>
       </div>
     </fieldset>
 
@@ -180,6 +172,12 @@
       <select id="pref-timefmt">
         <option value="24h">24-hour (13:00)</option>
         <option value="12h">12-hour (1pm)</option>
+      </select>
+      <label>Date format</label>
+      <select id="pref-datefmt">
+        <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+        <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+        <option value="DD/MM/YYYY">DD/MM/YYYY</option>
       </select>
       <button type="submit">Save</button>
     </form>

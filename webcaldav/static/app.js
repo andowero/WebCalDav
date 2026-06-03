@@ -120,6 +120,27 @@
     return (window.__SETTINGS__ || {}).time_format || '24h';
   }
 
+  function dateFormatKey() {
+    return (window.__SETTINGS__ || {}).date_format || 'YYYY-MM-DD';
+  }
+
+  // Map the stored date_format setting to a luxon format string (the luxon3
+  // FullCalendar plugin lets us pass string formats to *Format options).
+  function luxonDateFmt(key) {
+    if (key === 'MM/DD/YYYY') return 'MM/dd/yyyy';
+    if (key === 'DD/MM/YYYY') return 'dd/MM/yyyy';
+    return 'yyyy-MM-dd';
+  }
+
+  // Per-view date formats so week/day headers honor the user's date_format.
+  function fcViewFormats(dateKey) {
+    const ds = luxonDateFmt(dateKey);
+    return {
+      timeGridWeek: { dayHeaderFormat: 'EEE ' + ds },
+      timeGridDay: { dayHeaderFormat: 'EEEE ' + ds, titleFormat: ds },
+    };
+  }
+
   function fcTimeFormats(key) {
     if (key === '12h') {
       return {
@@ -152,7 +173,7 @@
     sel.value = selected || 'UTC';
   }
 
-  function applyCalendarPrefs(tz, fdow, timefmt) {
+  function applyCalendarPrefs(tz, fdow, timefmt, datefmt) {
     if (!_fcCalendar) return;
     const fmts = fcTimeFormats(timefmt);
     _fcCalendar.batchRendering(function () {
@@ -160,6 +181,7 @@
       _fcCalendar.setOption('firstDay', fdow);
       _fcCalendar.setOption('eventTimeFormat', fmts.eventTimeFormat);
       _fcCalendar.setOption('slotLabelFormat', fmts.slotLabelFormat);
+      _fcCalendar.setOption('views', fcViewFormats(datefmt));
       _fcCalendar.refetchEvents();
     });
   }
@@ -257,14 +279,17 @@
   async function loadPrefs() {
     let tz = 'UTC';
     let timefmt = timeFormatKey();
+    let datefmt = dateFormatKey();
     try {
       const s = await apiGet('/settings');
       tz = s.timezone || 'UTC';
       timefmt = s.time_format || '24h';
+      datefmt = s.date_format || 'YYYY-MM-DD';
       document.getElementById('pref-fdow').value = String(s.first_day_of_week ?? 1);
     } catch (_) {}
     populateTimezones(tz);
     document.getElementById('pref-timefmt').value = timefmt;
+    document.getElementById('pref-datefmt').value = datefmt;
   }
 
   function initSettingsPanel() {
@@ -307,16 +332,19 @@
         const tz = document.getElementById('pref-tz').value || 'UTC';
         const fdow = parseInt(document.getElementById('pref-fdow').value, 10);
         const timefmt = document.getElementById('pref-timefmt').value;
+        const datefmt = document.getElementById('pref-datefmt').value;
         await apiPut('/settings', {
           timezone: tz,
           first_day_of_week: fdow,
           time_format: timefmt,
+          date_format: datefmt,
         });
         window.__SETTINGS__ = window.__SETTINGS__ || {};
         window.__SETTINGS__.timezone = tz;
         window.__SETTINGS__.first_day_of_week = fdow;
         window.__SETTINGS__.time_format = timefmt;
-        applyCalendarPrefs(tz, fdow, timefmt);
+        window.__SETTINGS__.date_format = datefmt;
+        applyCalendarPrefs(tz, fdow, timefmt, datefmt);
         msg.textContent = 'Saved.';
         msg.className = 'info-msg';
         msg.style.display = '';
@@ -394,13 +422,189 @@
     return String(n).padStart(2, '0');
   }
 
+  // ── Custom date fields (forced format) ──────────────────────────────────────
+  // Native <input type="date"> renders per OS locale and can't be forced, so —
+  // like the hh/mm time fields — dates use three numeric inputs (year/month/day)
+  // ordered per the date_format setting, plus a 📅 button that pops the browser's
+  // native mini-calendar via a hidden date input. Canonical value stays yyyy-MM-dd.
+
+  function dateFieldParts(key) {
+    if (key === 'MM/DD/YYYY') return { order: ['month', 'day', 'year'], sep: '/' };
+    if (key === 'DD/MM/YYYY') return { order: ['day', 'month', 'year'], sep: '/' };
+    return { order: ['year', 'month', 'day'], sep: '-' }; // YYYY-MM-DD
+  }
+
+  const DATE_PART_RANGE = { year: [1, 9999], month: [1, 12], day: [1, 31] };
+
+  // Read the three numeric inputs into a canonical 'yyyy-MM-dd', or '' if empty/invalid.
+  function getDateFieldValue(prefix) {
+    const yEl = document.getElementById(`ev-${prefix}-year`);
+    const mEl = document.getElementById(`ev-${prefix}-month`);
+    const dEl = document.getElementById(`ev-${prefix}-day`);
+    if (!yEl || !mEl || !dEl) return '';
+    if (yEl.value === '' || mEl.value === '' || dEl.value === '') return '';
+    const dt = luxon.DateTime.fromObject({
+      year: clampInt(yEl.value, 1, 9999),
+      month: clampInt(mEl.value, 1, 12),
+      day: clampInt(dEl.value, 1, 31),
+    });
+    return dt.isValid ? dt.toFormat('yyyy-MM-dd') : '';
+  }
+
+  // Write a canonical 'yyyy-MM-dd' into the three inputs + sync the hidden picker.
+  function setDateFieldValue(prefix, canon) {
+    const yEl = document.getElementById(`ev-${prefix}-year`);
+    const mEl = document.getElementById(`ev-${prefix}-month`);
+    const dEl = document.getElementById(`ev-${prefix}-day`);
+    const picker = document.getElementById(`ev-${prefix}-picker`);
+    const c = String(canon || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(c)) {
+      if (yEl) yEl.value = '';
+      if (mEl) mEl.value = '';
+      if (dEl) dEl.value = '';
+      if (picker) picker.value = '';
+      return;
+    }
+    if (yEl) yEl.value = c.slice(0, 4);
+    if (mEl) mEl.value = c.slice(5, 7);
+    if (dEl) dEl.value = c.slice(8, 10);
+    if (picker) picker.value = c;
+  }
+
+  // (Re)build the date inputs for one boundary in the configured order. Called on
+  // each modal open so a date_format change (no reload) takes effect; replacing
+  // innerHTML drops any stale listeners.
+  function renderDateFields(prefix, onChange) {
+    const container = document.getElementById(`ev-${prefix}-date-fields`);
+    if (!container) return;
+    const { order, sep } = dateFieldParts(dateFormatKey());
+    const pieces = order.map((part) => {
+      const max = part === 'year' ? 4 : 2;
+      return `<input type="text" inputmode="numeric" maxlength="${max}"` +
+        ` id="ev-${prefix}-${part}" class="ev-dnum ev-${part}">`;
+    });
+    container.innerHTML =
+      pieces.join(`<span class="ev-dsep">${sep}</span>`) +
+      `<button type="button" class="ev-cal-btn" tabindex="-1" aria-label="Pick date">📅</button>`;
+
+    order.forEach((part) => {
+      const [lo, hi] = DATE_PART_RANGE[part];
+      const pad = part === 'year' ? 4 : 2;
+      const input = document.getElementById(`ev-${prefix}-${part}`);
+      input.addEventListener('blur', () => {
+        if (input.value === '') return;
+        input.value = String(clampInt(input.value, lo, hi)).padStart(pad, '0');
+      });
+      input.addEventListener('change', onChange);
+    });
+
+    const btn = container.querySelector('.ev-cal-btn');
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      openDatePicker(prefix, btn, onChange);
+    });
+  }
+
+  // ── Custom mini date picker ──────────────────────────────────────────────────
+  // Native <input type="date"> renders its month grid per OS locale and ignores
+  // the user's first-day-of-week setting, so the 📅 button pops this custom
+  // calendar instead. first_day_of_week: 0=Sun … 6=Sat (matches FullCalendar).
+  const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+  let _calPop = null;
+  let _calState = null; // { prefix, onChange, view: luxon DateTime (month) }
+
+  function firstDayOfWeek() {
+    const v = (window.__SETTINGS__ || {}).first_day_of_week;
+    return v == null ? 1 : ((v % 7) + 7) % 7;
+  }
+
+  function ensureCalPop() {
+    if (_calPop) return _calPop;
+    const pop = document.createElement('div');
+    pop.className = 'ev-cal-pop';
+    pop.hidden = true;
+    pop.innerHTML =
+      `<div class="ev-cal-pop-head">` +
+      `<button type="button" class="ev-cal-nav" data-d="-1" aria-label="Previous month">‹</button>` +
+      `<span class="ev-cal-title"></span>` +
+      `<button type="button" class="ev-cal-nav" data-d="1" aria-label="Next month">›</button>` +
+      `</div><div class="ev-cal-grid"></div>`;
+    document.body.appendChild(pop);
+    pop.querySelectorAll('.ev-cal-nav').forEach((b) => {
+      b.addEventListener('click', () => {
+        if (!_calState) return;
+        _calState.view = _calState.view.plus({ months: +b.dataset.d });
+        renderCalGrid();
+      });
+    });
+    // Click outside or Escape closes; mousedown so a re-click on the button toggles.
+    document.addEventListener('mousedown', (e) => {
+      if (pop.hidden) return;
+      if (pop.contains(e.target) || e.target.closest('.ev-cal-btn')) return;
+      closeDatePicker();
+    });
+    _calPop = pop;
+    return pop;
+  }
+
+  function renderCalGrid() {
+    const pop = _calPop;
+    const view = _calState.view;
+    pop.querySelector('.ev-cal-title').textContent = view.toFormat('LLLL yyyy');
+    const fdow = firstDayOfWeek();
+    const header = Array.from({ length: 7 }, (_, i) =>
+      `<span class="ev-cal-dow">${WEEKDAY_LABELS[(fdow + i) % 7]}</span>`).join('');
+    const monthStart = view.startOf('month');
+    // luxon weekday: 1=Mon … 7=Sun → 0=Sun … 6=Sat.
+    const startDow = monthStart.weekday % 7;
+    const lead = ((startDow - fdow) % 7 + 7) % 7;
+    const gridStart = monthStart.minus({ days: lead });
+    const selected = getDateFieldValue(_calState.prefix);
+    const today = luxon.DateTime.local().toFormat('yyyy-MM-dd');
+    let cells = '';
+    for (let i = 0; i < 42; i++) {
+      const d = gridStart.plus({ days: i });
+      const iso = d.toFormat('yyyy-MM-dd');
+      const cls = ['ev-cal-day'];
+      if (d.month !== view.month) cls.push('other-month');
+      if (iso === selected) cls.push('selected');
+      if (iso === today) cls.push('today');
+      cells += `<button type="button" class="${cls.join(' ')}" data-iso="${iso}">${d.day}</button>`;
+    }
+    pop.querySelector('.ev-cal-grid').innerHTML = header + cells;
+    pop.querySelectorAll('.ev-cal-day').forEach((b) => {
+      b.addEventListener('click', () => {
+        setDateFieldValue(_calState.prefix, b.dataset.iso);
+        _calState.onChange();
+        closeDatePicker();
+      });
+    });
+  }
+
+  function openDatePicker(prefix, btn, onChange) {
+    const pop = ensureCalPop();
+    const cur = getDateFieldValue(prefix);
+    const view = (cur ? luxon.DateTime.fromISO(cur) : luxon.DateTime.local()).startOf('month');
+    _calState = { prefix, onChange, view };
+    renderCalGrid();
+    pop.hidden = false;
+    const r = btn.getBoundingClientRect();
+    pop.style.top = `${r.bottom + 4}px`;
+    pop.style.left = `${Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)}px`;
+  }
+
+  function closeDatePicker() {
+    if (_calPop) _calPop.hidden = true;
+    _calState = null;
+  }
+
   // Turn a text input into a zero-padded numeric stepper with ▲▼ buttons.
-  // Arrow keys and buttons step by `step`, clamped to [0, max]; blur re-pads.
-  function attachStepper(id, step, max, onChange) {
+  // Arrow keys and buttons step by `step`, clamped to [min, max]; blur re-pads.
+  function attachStepper(id, step, max, onChange, min = 0) {
     const input = document.getElementById(id);
     const bump = (delta) => {
       if (input.disabled) return;
-      input.value = pad2(clampInt(clampInt(input.value, 0, max) + delta, 0, max));
+      input.value = pad2(clampInt(clampInt(input.value, min, max) + delta, min, max));
       onChange();
     };
     const spin = document.createElement('span');
@@ -425,29 +629,88 @@
       else if (e.key === 'ArrowDown') { e.preventDefault(); bump(-step); }
     });
     input.addEventListener('blur', () => {
-      input.value = pad2(clampInt(input.value, 0, max));
+      input.value = pad2(clampInt(input.value, min, max));
     });
+  }
+
+  // ── Time fields (24h or 12h per time_format setting) ─────────────────────────
+  // Like the date fields, the hh/mm inputs are rebuilt on each modal open so a
+  // time_format change (no reload) takes effect. In 12h mode the hour input is
+  // 1–12 and an AM/PM toggle button is appended. The canonical value handed to
+  // luxon / the API is always 24h.
+
+  function timeIs12h() {
+    return timeFormatKey() === '12h';
+  }
+
+  // Read the hh/mm (+ AM/PM) inputs as canonical 24h { h24, m }.
+  function getTimeParts(prefix) {
+    const m = clampInt(document.getElementById(`ev-${prefix}-mm`).value, 0, 59);
+    if (timeIs12h()) {
+      let h = clampInt(document.getElementById(`ev-${prefix}-hh`).value, 1, 12) % 12;
+      const ampm = document.getElementById(`ev-${prefix}-ampm`);
+      if (ampm && ampm.textContent === 'PM') h += 12;
+      return { h24: h, m };
+    }
+    return { h24: clampInt(document.getElementById(`ev-${prefix}-hh`).value, 0, 23), m };
+  }
+
+  // Write a canonical 24h time into the inputs, formatted per the setting.
+  function setTimeParts(prefix, h24, m) {
+    const hEl = document.getElementById(`ev-${prefix}-hh`);
+    if (timeIs12h()) {
+      let h12 = h24 % 12;
+      if (h12 === 0) h12 = 12;
+      hEl.value = pad2(h12);
+      const ampm = document.getElementById(`ev-${prefix}-ampm`);
+      if (ampm) ampm.textContent = h24 >= 12 ? 'PM' : 'AM';
+    } else {
+      hEl.value = pad2(h24);
+    }
+    document.getElementById(`ev-${prefix}-mm`).value = pad2(m);
+  }
+
+  // (Re)build one time row's inputs + steppers (+ AM/PM toggle in 12h mode).
+  function renderTimeFields(prefix, onChange) {
+    const container = document.getElementById(`ev-${prefix}-time-fields`);
+    if (!container) return;
+    const h12 = timeIs12h();
+    container.innerHTML =
+      `<input type="text" id="ev-${prefix}-hh" class="ev-hh" inputmode="numeric" maxlength="2">` +
+      `<span class="ev-colon">:</span>` +
+      `<input type="text" id="ev-${prefix}-mm" class="ev-mm" inputmode="numeric" maxlength="2">` +
+      (h12 ? `<button type="button" class="ev-ampm" id="ev-${prefix}-ampm" tabindex="-1">AM</button>` : '');
+
+    document.getElementById(`ev-${prefix}-hh`).addEventListener('change', onChange);
+    document.getElementById(`ev-${prefix}-mm`).addEventListener('change', onChange);
+    attachStepper(`ev-${prefix}-hh`, 1, h12 ? 12 : 23, onChange, h12 ? 1 : 0);
+    attachStepper(`ev-${prefix}-mm`, 5, 59, onChange);
+
+    if (h12) {
+      const ampm = document.getElementById(`ev-${prefix}-ampm`);
+      ampm.addEventListener('click', () => {
+        if (ampm.disabled) return;
+        ampm.textContent = ampm.textContent === 'AM' ? 'PM' : 'AM';
+        onChange();
+      });
+    }
   }
 
   // Read a From/To row (date + hh/mm) into a luxon DateTime in the given zone.
   function readBoundary(prefix, allDay, tz) {
-    const d = document.getElementById(`ev-${prefix}-date`).value;
+    const d = getDateFieldValue(prefix);
     if (!d) return null;
     if (allDay) return luxon.DateTime.fromISO(d, { zone: tz });
-    const h = clampInt(document.getElementById(`ev-${prefix}-hh`).value, 0, 23);
-    const m = clampInt(document.getElementById(`ev-${prefix}-mm`).value, 0, 59);
+    const { h24, m } = getTimeParts(prefix);
     return luxon.DateTime.fromObject(
-      { year: +d.slice(0, 4), month: +d.slice(5, 7), day: +d.slice(8, 10), hour: h, minute: m },
+      { year: +d.slice(0, 4), month: +d.slice(5, 7), day: +d.slice(8, 10), hour: h24, minute: m },
       { zone: tz },
     );
   }
 
   function writeBoundary(prefix, dt, allDay) {
-    document.getElementById(`ev-${prefix}-date`).value = dt.toFormat('yyyy-MM-dd');
-    if (!allDay) {
-      document.getElementById(`ev-${prefix}-hh`).value = pad2(dt.hour);
-      document.getElementById(`ev-${prefix}-mm`).value = pad2(dt.minute);
-    }
+    setDateFieldValue(prefix, dt.toFormat('yyyy-MM-dd'));
+    if (!allDay) setTimeParts(prefix, dt.hour, dt.minute);
   }
 
   function refreshPrevBoundaries() {
@@ -495,9 +758,14 @@
   }
 
   function setEditable(on) {
-    ['ev-name', 'ev-allday', 'ev-start-date', 'ev-start-hh', 'ev-start-mm',
-     'ev-end-date', 'ev-end-hh', 'ev-end-mm', 'ev-location', 'ev-notes'].forEach((id) => {
+    ['ev-name', 'ev-allday', 'ev-start-hh', 'ev-start-mm',
+     'ev-end-hh', 'ev-end-mm', 'ev-location', 'ev-notes'].forEach((id) => {
       document.getElementById(id).disabled = !on;
+    });
+    document.querySelectorAll(
+      '.ev-date-fields input, .ev-date-fields button, .ev-time-fields input, .ev-ampm',
+    ).forEach((el) => {
+      el.disabled = !on;
     });
     document.getElementById('btn-event-save').style.display = on ? '' : 'none';
   }
@@ -516,18 +784,23 @@
     // iCal all-day DTEND is exclusive — show the inclusive last day.
     if (event.allDay && props.rawEnd) rawEnd = shiftDateStr(props.rawEnd, -1);
 
+    // Rebuild date + time inputs per current date_format / time_format before
+    // populating values.
+    renderDateFields('start', onFromChange);
+    renderDateFields('end', onToChange);
+    renderTimeFields('start', onFromChange);
+    renderTimeFields('end', onToChange);
+
     if (event.allDay) {
-      document.getElementById('ev-start-date').value = String(rawStart || '').slice(0, 10);
-      document.getElementById('ev-end-date').value = String(rawEnd || rawStart || '').slice(0, 10);
+      setDateFieldValue('start', String(rawStart || '').slice(0, 10));
+      setDateFieldValue('end', String(rawEnd || rawStart || '').slice(0, 10));
     } else {
       const from = isoToInputs(rawStart, tz);
       const to = isoToInputs(rawEnd, tz);
-      document.getElementById('ev-start-date').value = from.date;
-      document.getElementById('ev-start-hh').value = pad2(from.hour);
-      document.getElementById('ev-start-mm').value = pad2(from.minute);
-      document.getElementById('ev-end-date').value = to.date;
-      document.getElementById('ev-end-hh').value = pad2(to.hour);
-      document.getElementById('ev-end-mm').value = pad2(to.minute);
+      setDateFieldValue('start', from.date);
+      setTimeParts('start', from.hour, from.minute);
+      setDateFieldValue('end', to.date);
+      setTimeParts('end', to.hour, to.minute);
     }
 
     const recurrence = props.recurrence || '';
@@ -573,6 +846,7 @@
   }
 
   function closeEventModal() {
+    closeDatePicker();
     hide('event-overlay');
     hide('event-modal');
     _currentEvent = null;
@@ -582,8 +856,8 @@
     if (!_currentEvent || !_currentEvent.editable) return;
     hideError('ev-error');
     const allDay = document.getElementById('ev-allday').checked;
-    const startDate = document.getElementById('ev-start-date').value;
-    const endDate = document.getElementById('ev-end-date').value;
+    const startDate = getDateFieldValue('start');
+    const endDate = getDateFieldValue('end');
     const name = document.getElementById('ev-name').value.trim();
 
     if (!name) { showError('ev-error', 'Name is required.'); return; }
@@ -591,9 +865,8 @@
 
     const pad = (n) => String(n).padStart(2, '0');
     const timeStr = (prefix) => {
-      const h = clampInt(document.getElementById(`ev-${prefix}-hh`).value, 0, 23);
-      const m = clampInt(document.getElementById(`ev-${prefix}-mm`).value, 0, 59);
-      return `${pad(h)}:${pad(m)}`;
+      const { h24, m } = getTimeParts(prefix);
+      return `${pad(h24)}:${pad(m)}`;
     };
 
     const body = {
@@ -640,16 +913,8 @@
       applyAllDayToggle();
       refreshPrevBoundaries();
     });
-    ['ev-start-date', 'ev-start-hh', 'ev-start-mm'].forEach((id) => {
-      document.getElementById(id).addEventListener('change', onFromChange);
-    });
-    ['ev-end-date', 'ev-end-hh', 'ev-end-mm'].forEach((id) => {
-      document.getElementById(id).addEventListener('change', onToChange);
-    });
-    attachStepper('ev-start-hh', 1, 23, onFromChange);
-    attachStepper('ev-start-mm', 5, 59, onFromChange);
-    attachStepper('ev-end-hh', 1, 23, onToChange);
-    attachStepper('ev-end-mm', 5, 59, onToChange);
+    // Date-field and time-field listeners/steppers are bound per-open inside
+    // renderDateFields / renderTimeFields.
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeEventModal();
     });
@@ -728,6 +993,7 @@
       timeZone: s.timezone || 'local',
       eventTimeFormat: tf.eventTimeFormat,
       slotLabelFormat: tf.slotLabelFormat,
+      views: fcViewFormats(dateFormatKey()),
       height: '100%',
       // Enable drag-to-move and edge-resize; both start and end edges.
       editable: true,

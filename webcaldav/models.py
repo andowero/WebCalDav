@@ -65,5 +65,6 @@ class UserSettings(Base):
     timezone: Mapped[str] = mapped_column(String, default="UTC", nullable=False)
     first_day_of_week: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     time_format: Mapped[str] = mapped_column(String, default="24h", nullable=False)
+    date_format: Mapped[str] = mapped_column(String, default="YYYY-MM-DD", nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="settings")

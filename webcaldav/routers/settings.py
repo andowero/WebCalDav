@@ -14,12 +14,14 @@ class SettingsOut(BaseModel):
     timezone: str
     first_day_of_week: int
     time_format: str
+    date_format: str
 
 
 class SettingsIn(BaseModel):
     timezone: str | None = None
     first_day_of_week: int | None = None
     time_format: str | None = None
+    date_format: str | None = None
 
 
 @router.get("")
@@ -32,11 +34,17 @@ async def get_settings(
     )
     s = result.scalar_one_or_none()
     if s is None:
-        return SettingsOut(timezone="UTC", first_day_of_week=1, time_format="24h")
+        return SettingsOut(
+            timezone="UTC",
+            first_day_of_week=1,
+            time_format="24h",
+            date_format="YYYY-MM-DD",
+        )
     return SettingsOut(
         timezone=s.timezone,
         first_day_of_week=s.first_day_of_week,
         time_format=s.time_format,
+        date_format=s.date_format,
     )
 
 
@@ -52,7 +60,11 @@ async def put_settings(
     s = result.scalar_one_or_none()
     if s is None:
         s = UserSettings(
-            user_id=entry.user_id, timezone="UTC", first_day_of_week=1, time_format="24h"
+            user_id=entry.user_id,
+            timezone="UTC",
+            first_day_of_week=1,
+            time_format="24h",
+            date_format="YYYY-MM-DD",
         )
         db.add(s)
 
@@ -62,10 +74,13 @@ async def put_settings(
         s.first_day_of_week = body.first_day_of_week
     if body.time_format is not None:
         s.time_format = body.time_format
+    if body.date_format is not None:
+        s.date_format = body.date_format
 
     await db.commit()
     return SettingsOut(
         timezone=s.timezone,
         first_day_of_week=s.first_day_of_week,
         time_format=s.time_format,
+        date_format=s.date_format,
     )

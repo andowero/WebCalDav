@@ -328,9 +328,9 @@ details#add-account-details summary {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 420px;
+  width: 500px;
   height: auto;
-  min-width: 420px;
+  min-width: 340px;
   min-height: fit-content;
   max-width: min(90vw, 760px);
   max-height: calc(100vh - 2rem);
@@ -381,7 +381,7 @@ details#add-account-details summary {
 }
 
 .event-modal-body input[type="text"],
-.event-modal-body input[type="date"],
+.event-modal-body .ev-dnum,
 .event-modal-body textarea {
   padding: 0.4rem 0.5rem;
   border: 1px solid #d0d0d0;
@@ -394,12 +394,130 @@ details#add-account-details summary {
 
 .event-modal-body textarea { resize: vertical; }
 
-/* HH:MM spinner pair — always-visible native number arrows, fixed 24h format. */
+/* Custom date fields: year/month/day numeric inputs + 📅 picker button. The
+   hidden native date input only hosts the browser's calendar popup. */
+.ev-date-fields {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 0.15rem;
+}
+
+.event-modal-body .ev-dnum {
+  width: 3.4em;
+  text-align: center;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
+
+.event-modal-body .ev-year { width: 4.6em; }
+
+.ev-dsep {
+  display: flex;
+  align-items: center;
+  color: #888;
+  font-weight: 600;
+}
+
+.ev-cal-btn {
+  margin-left: 0.25rem;
+  padding: 0 0.4rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #fafafa;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ev-cal-btn:hover { background: #e6e6e6; }
+.ev-cal-btn:disabled { cursor: default; opacity: 0.5; }
+
+/* Custom mini date picker popup (replaces the native one so it can honour the
+   user's first-day-of-week setting). Appended to <body>, positioned in JS. */
+.ev-cal-pop {
+  position: fixed;
+  z-index: 210;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  padding: 0.5rem;
+  width: 15rem;
+  font-size: 13px;
+}
+
+.ev-cal-pop[hidden] { display: none; }
+
+.ev-cal-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+
+.ev-cal-title { font-weight: 600; }
+
+.ev-cal-nav {
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #fafafa;
+  width: 1.8em;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.ev-cal-nav:hover { background: #e6e6e6; }
+
+.ev-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.ev-cal-dow {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  padding: 0.2rem 0;
+}
+
+.ev-cal-day {
+  border: 0;
+  background: none;
+  padding: 0.3rem 0;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #222;
+}
+
+.ev-cal-day:hover { background: #e6e6e6; }
+.ev-cal-day.other-month { color: #bbb; }
+.ev-cal-day.today { outline: 1px solid #93c5fd; }
+.ev-cal-day.selected { background: #2563eb; color: #fff; }
+
+/* HH:MM spinner pair (+ AM/PM toggle in 12h mode). Rebuilt per modal-open to
+   match the time_format setting. */
 .ev-time-fields {
   display: inline-flex;
   align-items: stretch;
   gap: 0.15rem;
 }
+
+.ev-ampm {
+  margin-left: 0.25rem;
+  padding: 0 0.5rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #fafafa;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ev-ampm:hover { background: #e6e6e6; }
+.ev-ampm:disabled { cursor: default; opacity: 0.6; }
 
 .event-modal-body .ev-hh,
 .event-modal-body .ev-mm {
@@ -502,6 +620,7 @@ details#add-account-details summary {
 .ev-dt-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.4rem;
 }
 

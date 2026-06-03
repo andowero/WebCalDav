@@ -2,6 +2,25 @@
 
 ## Unreleased — MVP
 
+### Added — modal date/time fields honour user settings (2026-06-03)
+- New `date_format` user setting (`UserSettings.date_format`, default `YYYY-MM-DD`;
+  also `MM/DD/YYYY`, `DD/MM/YYYY`) plumbed through `GET/PUT /settings` and the host
+  page so the edit modal renders dates in the chosen order with no reload.
+- Edit-modal date inputs are now three forced-format numeric fields (year/month/day)
+  rebuilt per open, replacing the locale-dependent native `<input type="date">`.
+- Time inputs honour the 12h/24h `time_format` setting: 24h shows HH:MM, 12h shows
+  1–12 plus an AM/PM toggle. Inputs are rebuilt per open; the canonical value sent
+  to the API stays 24h. Custom ▲▼ steppers replace native number spinners.
+
+### Fixed — modal date/time pickers (2026-06-03)
+- Edit modal widened (420→500px) and the from/to row wraps, so the time picker is
+  no longer clipped behind the modal edge.
+- Time picker always rendered 24h regardless of the `time_format` setting; now
+  follows it (12h with AM/PM toggle).
+- The 📅 mini date picker always started the week on Sunday: the native picker
+  ignores first-day-of-week. Replaced with a custom popup calendar that honours the
+  `first_day_of_week` setting (0=Sun … 6=Sat).
+
 ### Added — drag & resize editing (2026-05-31)
 - Events are now movable/resizable by mouse in all views, persisted via the
   existing `PUT /events/{uid}` (`eventDrop` / `eventResize` handlers).

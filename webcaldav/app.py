@@ -85,6 +85,7 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_tz = "UTC"
     user_settings_fdow = 1
     user_settings_timefmt = "24h"
+    user_settings_datefmt = "YYYY-MM-DD"
 
     if session_id:
         try:
@@ -107,6 +108,7 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_tz = s.timezone
                         user_settings_fdow = s.first_day_of_week
                         user_settings_timefmt = s.time_format
+                        user_settings_datefmt = s.date_format
         except Exception:
             pass
 
@@ -119,6 +121,7 @@ async def root(request: Request) -> HTMLResponse:
             "tz": user_settings_tz,
             "fdow": user_settings_fdow,
             "timefmt": user_settings_timefmt,
+            "datefmt": user_settings_datefmt,
             "static_v": STATIC_VERSION,
         },
     )
