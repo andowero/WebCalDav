@@ -640,7 +640,38 @@ details#add-account-details summary {
   flex: none;
 }
 
-.ev-repeat-details input { width: 100%; }
+.ev-recur-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.ev-recur-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ev-recur-interval, .ev-recur-count { width: 4rem; }
+.ev-recur-row select { flex: none; }
+.ev-recur-row .ev-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 13px;
+}
+.ev-recur-unit { font-size: 13px; color: #555; }
+.ev-recur-summary {
+  font-size: 13px;
+  color: #555;
+  font-style: italic;
+  margin-bottom: 0.25rem;
+}
+.ev-recur-preview {
+  font-size: 13px;
+  color: #2563eb;
+  min-height: 1.2em;
+}
 
 .ev-reminders {
   display: flex;
@@ -735,4 +766,14 @@ details#add-account-details summary {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+.scope-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.scope-options button {
+  text-align: left;
+  width: 100%;
 }

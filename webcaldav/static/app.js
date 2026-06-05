@@ -418,6 +418,149 @@
   function applyRepeatsToggle() {
     const repeats = document.getElementById('ev-repeats').checked;
     document.getElementById('ev-repeat-details').style.display = repeats ? '' : 'none';
+    if (repeats) { updateRecurUI(); scheduleRecurPreview(); }
+  }
+
+  // ── Recurrence editor ────────────────────────────────────────────────────────
+  const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th'];
+
+  // Build the ISO start the rule is anchored to, from the modal's From inputs.
+  function currentStartISO() {
+    const d = getDateFieldValue('start');
+    if (!d) return null;
+    if (document.getElementById('ev-allday').checked) return d;
+    const { h24, m } = getTimeParts('start');
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d}T${pad(h24)}:${pad(m)}:00`;
+  }
+
+  // Refresh the "day N" / "Nth weekday" labels from the current start date.
+  function recurDescriptions() {
+    const d = getDateFieldValue('start');
+    if (!d) return;
+    const dt = luxon.DateTime.fromISO(d);
+    if (!dt.isValid) return;
+    const ord = Math.floor((dt.day - 1) / 7) + 1;
+    document.getElementById('ev-recur-monthday-desc').textContent = String(dt.day);
+    document.getElementById('ev-recur-weekday-desc').textContent =
+      `${ORDINALS[ord - 1] || ord + 'th'} ${dt.toFormat('cccc')}`;
+  }
+
+  function updateRecurUI() {
+    const freq = document.getElementById('ev-recur-freq').value;
+    document.getElementById('ev-recur-monthly').style.display = freq === 'monthly' ? '' : 'none';
+    recurDescriptions();
+    const endCount = document.getElementById('ev-recur-end-count').checked;
+    const endDate = document.getElementById('ev-recur-end-date').checked;
+    document.getElementById('ev-recur-count').disabled = !endCount;
+    document.querySelectorAll(
+      '#ev-recur-until-date-fields input, #ev-recur-until-date-fields button',
+    ).forEach((el) => { el.disabled = !endDate; });
+  }
+
+  // Collect the editor state into the API's recurrence model, or null if off.
+  function getRecurrence() {
+    if (!document.getElementById('ev-repeats').checked) return null;
+    const rule = {
+      freq: document.getElementById('ev-recur-freq').value,
+      interval: Math.max(1, parseInt(document.getElementById('ev-recur-interval').value, 10) || 1),
+    };
+    if (rule.freq === 'monthly') {
+      const mode = document.querySelector('input[name="ev-monthly-mode"]:checked');
+      rule.monthly_mode = mode ? mode.value : 'monthday';
+    }
+    if (document.getElementById('ev-recur-end-count').checked) {
+      rule.count = Math.max(1, parseInt(document.getElementById('ev-recur-count').value, 10) || 1);
+    } else if (document.getElementById('ev-recur-end-date').checked) {
+      const until = getDateFieldValue('recur-until');
+      if (until) rule.until = `${until}T23:59:59`;
+    }
+    return rule;
+  }
+
+  // Populate the editor from a structured rule returned by the server.
+  function setRecurrence(struct) {
+    if (!struct) return;
+    document.getElementById('ev-recur-freq').value = struct.freq || 'weekly';
+    document.getElementById('ev-recur-interval').value = struct.interval || 1;
+    if (struct.monthly_mode) {
+      const r = document.querySelector(
+        `input[name="ev-monthly-mode"][value="${struct.monthly_mode}"]`,
+      );
+      if (r) r.checked = true;
+    }
+    document.getElementById('ev-recur-end-count').checked = struct.count != null;
+    document.getElementById('ev-recur-end-date').checked = struct.until != null;
+    if (struct.count != null) document.getElementById('ev-recur-count').value = struct.count;
+    if (struct.until) setDateFieldValue('recur-until', String(struct.until).slice(0, 10));
+  }
+
+  function resetRecurEditorDefaults() {
+    document.getElementById('ev-recur-freq').value = 'weekly';
+    document.getElementById('ev-recur-interval').value = 1;
+    const md = document.querySelector('input[name="ev-monthly-mode"][value="monthday"]');
+    if (md) md.checked = true;
+    document.getElementById('ev-recur-end-count').checked = false;
+    document.getElementById('ev-recur-end-date').checked = false;
+    document.getElementById('ev-recur-count').value = 10;
+    setDateFieldValue('recur-until', '');
+    document.getElementById('ev-recur-preview').textContent = '';
+  }
+
+  // Called when the From date/time changes, to keep labels + preview in sync.
+  function recurOnStartChange() {
+    if (document.getElementById('ev-repeats').checked) { recurDescriptions(); scheduleRecurPreview(); }
+  }
+
+  let _recurPreviewTimer = null;
+  function scheduleRecurPreview() {
+    clearTimeout(_recurPreviewTimer);
+    _recurPreviewTimer = setTimeout(previewRecur, 250);
+  }
+
+  async function previewRecur() {
+    const box = document.getElementById('ev-recur-preview');
+    const rule = getRecurrence();
+    const start = currentStartISO();
+    if (!rule || !start) { box.textContent = ''; return; }
+    if (rule.count == null && rule.until == null) { box.textContent = 'Repeats forever.'; return; }
+    try {
+      const res = await apiPost('/events/recurrence-preview', {
+        start,
+        all_day: document.getElementById('ev-allday').checked,
+        timezone: effectiveTz(),
+        recurrence: rule,
+      });
+      box.textContent = res.last
+        ? `${res.count} occurrence(s); last on ${String(res.last).slice(0, 10)}.`
+        : 'No occurrences in range.';
+    } catch (_) {
+      box.textContent = '';
+    }
+  }
+
+  function initRecurEditor() {
+    renderDateFields('recur-until', scheduleRecurPreview);
+    document.getElementById('ev-recur-freq').addEventListener('change', () => {
+      updateRecurUI(); scheduleRecurPreview();
+    });
+    ['ev-recur-interval', 'ev-recur-count'].forEach((id) => {
+      document.getElementById(id).addEventListener('input', scheduleRecurPreview);
+    });
+    document.querySelectorAll('input[name="ev-monthly-mode"]').forEach((r) => {
+      r.addEventListener('change', scheduleRecurPreview);
+    });
+    const ec = document.getElementById('ev-recur-end-count');
+    const ed = document.getElementById('ev-recur-end-date');
+    // The two end modes are mutually exclusive.
+    ec.addEventListener('change', () => {
+      if (ec.checked) ed.checked = false;
+      updateRecurUI(); scheduleRecurPreview();
+    });
+    ed.addEventListener('change', () => {
+      if (ed.checked) ec.checked = false;
+      updateRecurUI(); scheduleRecurPreview();
+    });
   }
 
   // Split an ISO instant into { date, hour, minute } as wall-clock time in the
@@ -755,6 +898,7 @@
       _prevEnd = newEnd;
     }
     _prevStart = newStart;
+    recurOnStartChange();
   }
 
   // To changed: leave From alone, but never let To fall before From.
@@ -822,7 +966,17 @@
 
     const recurrence = props.recurrence || '';
     document.getElementById('ev-repeats').checked = !!recurrence;
-    document.getElementById('ev-rrule').value = recurrence;
+    // A recurring series can't be un-recurred from here, so lock the toggle.
+    document.getElementById('ev-repeats').disabled = !!recurrence;
+    const sumEl = document.getElementById('ev-recur-summary');
+    if (recurrence) {
+      sumEl.textContent = `Current: ${recurrence}`;
+      sumEl.style.display = '';
+    } else {
+      sumEl.style.display = 'none';
+    }
+    resetRecurEditorDefaults();
+    if (props.recurrenceRule) setRecurrence(props.recurrenceRule);
 
     document.getElementById('ev-location').value = props.location || '';
     document.getElementById('ev-notes').value = props.description || '';
@@ -837,7 +991,8 @@
       remEl.innerHTML = '<div class="ev-reminder empty-note">None</div>';
     }
 
-    // Editing scope (v1): no recurring events, and demo events have no calendar.
+    // Demo events have no calendar and stay read-only. Recurring events are
+    // editable, but saving asks which occurrences to change.
     const noteEl = document.getElementById('ev-edit-note');
     let editable = true;
     let note = '';
@@ -845,8 +1000,7 @@
       editable = false;
       note = 'Demo event — connect a CalDAV account to add real events.';
     } else if (recurrence) {
-      editable = false;
-      note = 'Recurring events can’t be edited yet.';
+      note = 'Recurring event — you’ll choose which occurrences to change when you save.';
     }
     noteEl.textContent = note;
     noteEl.style.display = note ? '' : 'none';
@@ -865,11 +1019,16 @@
         .map((c) => `<option value="${c.id}">${escHtml(c.display_name)}</option>`)
         .join('');
       calSel.value = String(props.calendarId);
+      // Moving recreates a single event, so recurring series can't be moved.
+      calSel.disabled = !!recurrence;
       calField.style.display = '';
     } else {
       calField.style.display = 'none';
     }
-    document.getElementById('btn-event-delete').style.display = editable ? '' : 'none';
+    // Recurring events are editable and deletable by scope, so offer Delete
+    // whenever the event is calendar-backed.
+    const deletable = props.calendarId != null;
+    document.getElementById('btn-event-delete').style.display = deletable ? '' : 'none';
     setEditable(editable);
 
     _currentEvent = {
@@ -877,6 +1036,8 @@
       calendarId: props.calendarId,
       originalCalendarId: props.calendarId,
       editable,
+      recurring: !!recurrence,
+      rawStart: props.rawStart || (event.start ? event.start.toISOString() : null),
       isNew: false,
     };
 
@@ -922,7 +1083,9 @@
     document.getElementById('ev-location').value = '';
     document.getElementById('ev-notes').value = '';
     document.getElementById('ev-repeats').checked = false;
-    document.getElementById('ev-rrule').value = '';
+    document.getElementById('ev-repeats').disabled = false;
+    document.getElementById('ev-recur-summary').style.display = 'none';
+    resetRecurEditorDefaults();
     document.getElementById('ev-reminders').innerHTML =
       '<div class="ev-reminder empty-note">None</div>';
 
@@ -1009,6 +1172,8 @@
       description: document.getElementById('ev-notes').value,
       timezone: effectiveTz(),
     };
+    const recurrence = getRecurrence();
+    if (recurrence) body.recurrence = recurrence;
     if (allDay) {
       body.start = startDate;
       body.end = endDate || startDate;
@@ -1019,6 +1184,14 @@
       }
       body.start = `${startDate}T${timeStr('start')}:00`;
       body.end = `${endDate}T${timeStr('end')}:00`;
+    }
+
+    // Editing a recurring event: pick which occurrences the change applies to.
+    if (!_currentEvent.isNew && _currentEvent.recurring) {
+      const scope = await chooseScope('What to change?');
+      if (!scope) return;
+      body.scope = scope;
+      if (_currentEvent.rawStart) body.recurrence_id = _currentEvent.rawStart;
     }
 
     const btn = document.getElementById('btn-event-save');
@@ -1047,12 +1220,20 @@
   // here — the spec reserves the "are you sure" prompt for the right-click menu.
   async function deleteCurrentEvent() {
     if (!_currentEvent || _currentEvent.isNew || _currentEvent.calendarId == null) return;
+    // Recurring events delete by scope; pick one before hitting the server.
+    let qs = `calendar_id=${_currentEvent.calendarId}`;
+    if (_currentEvent.recurring) {
+      const scope = await chooseScope('What to delete?');
+      if (!scope) return;
+      qs += `&scope=${scope}`;
+      if (_currentEvent.rawStart) {
+        qs += `&recurrence_id=${encodeURIComponent(_currentEvent.rawStart)}`;
+      }
+    }
     const btn = document.getElementById('btn-event-delete');
     btn.disabled = true;
     try {
-      await apiDelete(
-        `/events/${encodeURIComponent(_currentEvent.id)}?calendar_id=${_currentEvent.calendarId}`,
-      );
+      await apiDelete(`/events/${encodeURIComponent(_currentEvent.id)}?${qs}`);
       closeEventModal();
       if (_fcCalendar) _fcCalendar.refetchEvents();
     } catch (err) {
@@ -1074,14 +1255,18 @@
     document.getElementById('ev-allday').addEventListener('change', () => {
       applyAllDayToggle();
       refreshPrevBoundaries();
+      recurOnStartChange();
     });
+    document.getElementById('ev-repeats').addEventListener('change', applyRepeatsToggle);
+    initRecurEditor();
     // Date-field and time-field listeners/steppers are bound per-open inside
     // renderDateFields / renderTimeFields.
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { closeEventModal(); hideContextMenu(); closeConfirm(); }
+      if (e.key === 'Escape') { closeEventModal(); hideContextMenu(); closeConfirm(); closeScope(); }
     });
     initContextMenu();
     initConfirm();
+    initScopeChooser();
   }
 
   // ── Right-click context menu ─────────────────────────────────────────────────
@@ -1117,12 +1302,20 @@
       if (!ev) return;
       const props = ev.extendedProps || {};
       if (props.calendarId == null) return;
-      const ok = await confirmDialog(`Delete "${ev.title || 'this event'}"?`);
-      if (!ok) return;
+      let qs = `calendar_id=${props.calendarId}`;
+      if (props.recurrence) {
+        // Recurring: a scope choice replaces the plain yes/no confirm.
+        const scope = await chooseScope('What to delete?');
+        if (!scope) return;
+        qs += `&scope=${scope}`;
+        const rawStart = props.rawStart || (ev.start ? ev.start.toISOString() : null);
+        if (rawStart) qs += `&recurrence_id=${encodeURIComponent(rawStart)}`;
+      } else {
+        const ok = await confirmDialog(`Delete "${ev.title || 'this event'}"?`);
+        if (!ok) return;
+      }
       try {
-        await apiDelete(
-          `/events/${encodeURIComponent(ev.id)}?calendar_id=${props.calendarId}`,
-        );
+        await apiDelete(`/events/${encodeURIComponent(ev.id)}?${qs}`);
         if (_fcCalendar) _fcCalendar.refetchEvents();
       } catch (err) {
         alert(err.message);
@@ -1163,6 +1356,35 @@
     document.getElementById('confirm-overlay').addEventListener('click', () => closeConfirm(false));
   }
 
+  // ── Recurring scope chooser ──────────────────────────────────────────────────
+  // Resolves to one of all|thisprev|this|thisfuture, or null if cancelled.
+
+  let _scopeResolve = null;
+
+  function chooseScope(text) {
+    document.getElementById('scope-title').textContent = text;
+    show('scope-overlay');
+    show('scope-modal');
+    return new Promise((resolve) => { _scopeResolve = resolve; });
+  }
+
+  function closeScope(result) {
+    hide('scope-overlay');
+    hide('scope-modal');
+    if (_scopeResolve) {
+      _scopeResolve(result || null);
+      _scopeResolve = null;
+    }
+  }
+
+  function initScopeChooser() {
+    document.querySelectorAll('#scope-modal [data-scope]').forEach((btn) => {
+      btn.addEventListener('click', () => closeScope(btn.getAttribute('data-scope')));
+    });
+    document.getElementById('scope-cancel').addEventListener('click', () => closeScope(null));
+    document.getElementById('scope-overlay').addEventListener('click', () => closeScope(null));
+  }
+
   // ── Drag / resize editing ───────────────────────────────────────────────────
 
   // Build a PUT body from an event's current (post-drag/resize) span. Title,
@@ -1194,12 +1416,24 @@
   // Persist a drag (eventDrop) or resize (eventResize); revert on failure.
   async function onEventChange(info) {
     const props = info.event.extendedProps || {};
-    if (props.calendarId == null || props.recurrence) {
+    if (props.calendarId == null) {
       info.revert();
       return;
     }
+    const body = eventToBody(info.event);
+    if (props.recurrence) {
+      const scope = await chooseScope('What to change?');
+      if (!scope) { info.revert(); return; }
+      body.scope = scope;
+      // recurrence_id is the ORIGINAL (pre-drag) occurrence start — the pivot.
+      const rawStart =
+        props.rawStart || (info.oldEvent && info.oldEvent.start ? info.oldEvent.start.toISOString() : null);
+      if (rawStart) body.recurrence_id = rawStart;
+    }
     try {
-      await apiPut(`/events/${encodeURIComponent(info.event.id)}`, eventToBody(info.event));
+      await apiPut(`/events/${encodeURIComponent(info.event.id)}`, body);
+      // Reload so scope splits / overrides (new resources) render correctly.
+      if (_fcCalendar) _fcCalendar.refetchEvents();
     } catch (err) {
       alert(err.message);
       info.revert();
@@ -1251,10 +1485,11 @@
           const r = await fetch('/events?' + params.toString());
           if (!r.ok) throw new Error('Failed to fetch events');
           const data = await r.json();
-          // Only real (calendar-backed), non-recurring events are editable.
+          // Only real (calendar-backed) events are editable; recurring ones
+          // prompt for occurrence scope on drop (see onEventChange).
           data.forEach((e) => {
             const p = e.extendedProps || {};
-            e.editable = p.calendarId != null && !p.recurrence;
+            e.editable = p.calendarId != null;
           });
           successCallback(data);
         } catch (err) {

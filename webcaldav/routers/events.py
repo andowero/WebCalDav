@@ -12,10 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..caldav_client import (
     EventNotFoundError,
-    RecurringEventError,
     create_event,
     delete_event,
     fetch_events,
+    preview_recurrence,
     update_event,
 )
 from ..crypto import decrypt_bytes
@@ -155,6 +155,18 @@ async def get_events(
     return events
 
 
+_RECUR_SCOPES = {"all", "this", "thisfuture", "thisprev"}
+
+
+class RecurrenceRule(BaseModel):
+    freq: str  # yearly|monthly|weekly|daily|hourly
+    interval: int = 1
+    monthly_mode: str | None = None  # "monthday" | "weekday"
+    ordinal: int | None = None  # Nth weekday of month; -1 = last
+    until: str | None = None  # ISO date/datetime; mutually exclusive with count
+    count: int | None = None
+
+
 class EventUpdate(BaseModel):
     calendar_id: int
     # Set on edit when the user moves the event to a different calendar; the
@@ -167,6 +179,12 @@ class EventUpdate(BaseModel):
     location: str | None = None
     description: str | None = None
     timezone: str | None = None
+    # Recurring-event controls. scope selects which occurrences a write touches;
+    # recurrence_id is the pivot occurrence's original start (the client's
+    # rawStart); recurrence is the rule to (re)build on create / scoped edits.
+    scope: str = "all"
+    recurrence_id: str | None = None
+    recurrence: RecurrenceRule | None = None
 
 
 async def _calendar_for(
@@ -227,6 +245,7 @@ async def post_event(
     start, end = _resolve_span(body)
     uid = f"{uuid.uuid4()}@webcaldav"
 
+    rrule = body.recurrence.model_dump() if body.recurrence else None
     password = decrypt_bytes(account.encrypted_password, account.nonce, entry.dek).decode()
     try:
         await create_event(
@@ -241,6 +260,7 @@ async def post_event(
             end=end,
             location=body.location,
             description=body.description,
+            rrule=rrule,
         )
     except Exception as e:
         logger.warning("event_create_failed", error=repr(e))
@@ -250,6 +270,39 @@ async def post_event(
     return {"status": "ok", "id": uid}
 
 
+class RecurrencePreview(BaseModel):
+    start: str
+    all_day: bool = False
+    timezone: str | None = None
+    recurrence: RecurrenceRule
+
+
+@router.post("/recurrence-preview")
+async def recurrence_preview(
+    body: RecurrencePreview,
+    entry: SessionEntry = Depends(get_unrestricted_session),
+) -> dict:
+    """Compute the last occurrence + total count for a recurrence rule."""
+    try:
+        if body.all_day:
+            start: date | dt_type = date.fromisoformat(body.start[:10])
+        else:
+            try:
+                tz = ZoneInfo(body.timezone) if body.timezone else timezone.utc
+            except ZoneInfoNotFoundError:
+                tz = timezone.utc
+            start = dt_type.fromisoformat(body.start)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=tz)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid start")
+    try:
+        last, count = preview_recurrence(start, body.recurrence.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"last": last, "count": count}
+
+
 @router.put("/{uid:path}")
 async def put_event(
     uid: str,
@@ -257,6 +310,8 @@ async def put_event(
     entry: SessionEntry = Depends(get_unrestricted_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    if body.scope not in _RECUR_SCOPES:
+        raise HTTPException(status_code=400, detail="Invalid scope")
     cal, account = await _calendar_for(body.calendar_id, entry, db)
     start, end = _resolve_span(body)
     password = decrypt_bytes(account.encrypted_password, account.nonce, entry.dek).decode()
@@ -264,6 +319,18 @@ async def put_event(
     moved = (
         body.original_calendar_id is not None
         and body.original_calendar_id != body.calendar_id
+    )
+    # A calendar move recreates a single VEVENT, so it can't carry a series; only
+    # whole-event ("all") edits may move.
+    if moved and body.scope != "all":
+        raise HTTPException(
+            status_code=400, detail="Moving an event is only supported for the whole series"
+        )
+    # Rule (re)builds apply to the whole series or the future split only.
+    rrule = (
+        body.recurrence.model_dump()
+        if body.recurrence and body.scope in ("all", "thisfuture")
+        else None
     )
 
     try:
@@ -307,11 +374,10 @@ async def put_event(
                 end=end,
                 location=body.location,
                 description=body.description,
+                scope=body.scope,
+                recurrence_id=body.recurrence_id,
+                rrule=rrule,
             )
-    except RecurringEventError:
-        raise HTTPException(
-            status_code=422, detail="Editing recurring events is not supported yet"
-        )
     except EventNotFoundError:
         raise HTTPException(status_code=404, detail="Event not found")
     except Exception as e:
@@ -326,9 +392,13 @@ async def put_event(
 async def delete_event_route(
     uid: str,
     calendar_id: int = Query(...),
+    scope: str = Query("all"),
+    recurrence_id: str | None = Query(None),
     entry: SessionEntry = Depends(get_unrestricted_session),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    if scope not in _RECUR_SCOPES:
+        raise HTTPException(status_code=400, detail="Invalid scope")
     cal, account = await _calendar_for(calendar_id, entry, db)
 
     password = decrypt_bytes(account.encrypted_password, account.nonce, entry.dek).decode()
@@ -339,6 +409,8 @@ async def delete_event_route(
             password=password,
             calendar_url=cal.caldav_id,
             uid=uid,
+            scope=scope,
+            recurrence_id=recurrence_id,
         )
     except EventNotFoundError:
         raise HTTPException(status_code=404, detail="Event not found")

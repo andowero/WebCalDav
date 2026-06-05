@@ -103,9 +103,46 @@
 
     <fieldset class="ev-group">
       <legend>Repetition</legend>
-      <label class="ev-check"><input type="checkbox" id="ev-repeats" disabled> Repeats</label>
-      <div id="ev-repeat-details" class="ev-repeat-details">
-        <input id="ev-rrule" type="text" readonly>
+      <label class="ev-check"><input type="checkbox" id="ev-repeats"> Repeats</label>
+      <div id="ev-repeat-details" class="ev-repeat-details" style="display:none">
+        <div id="ev-recur-summary" class="ev-recur-summary" style="display:none"></div>
+        <div id="ev-recur-editor" class="ev-recur-editor">
+          <div class="ev-recur-row">
+            <span class="ev-label">Every</span>
+            <input id="ev-recur-interval" type="number" min="1" value="1" class="ev-recur-interval">
+            <select id="ev-recur-freq">
+              <option value="hourly">hour(s)</option>
+              <option value="daily">day(s)</option>
+              <option value="weekly">week(s)</option>
+              <option value="monthly">month(s)</option>
+              <option value="yearly">year(s)</option>
+            </select>
+          </div>
+          <div class="ev-recur-row" id="ev-recur-monthly" style="display:none">
+            <label class="ev-radio">
+              <input type="radio" name="ev-monthly-mode" value="monthday" checked>
+              On day <span id="ev-recur-monthday-desc"></span>
+            </label>
+            <label class="ev-radio">
+              <input type="radio" name="ev-monthly-mode" value="weekday">
+              On the <span id="ev-recur-weekday-desc"></span>
+            </label>
+          </div>
+          <div class="ev-recur-row">
+            <label class="ev-check">
+              <input type="checkbox" id="ev-recur-end-date"> End by date
+            </label>
+            <span class="ev-date-fields" id="ev-recur-until-date-fields"></span>
+          </div>
+          <div class="ev-recur-row">
+            <label class="ev-check">
+              <input type="checkbox" id="ev-recur-end-count"> End after
+            </label>
+            <input id="ev-recur-count" type="number" min="1" value="10" class="ev-recur-count">
+            <span class="ev-recur-unit">occurrence(s)</span>
+          </div>
+          <div id="ev-recur-preview" class="ev-recur-preview"></div>
+        </div>
       </div>
     </fieldset>
 
@@ -144,6 +181,21 @@
   <div class="confirm-footer">
     <button id="confirm-no" class="btn-outline">No</button>
     <button id="confirm-yes" class="btn-danger">Yes</button>
+  </div>
+</div>
+
+<!-- ── Recurring scope chooser (delete / edit a series) ── -->
+<div id="scope-overlay" class="event-overlay" style="display:none"></div>
+<div id="scope-modal" class="confirm-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="scope-title">
+  <p id="scope-title"></p>
+  <div class="scope-options">
+    <button type="button" class="btn-outline" data-scope="all">All events in the series</button>
+    <button type="button" class="btn-outline" data-scope="thisprev">This and all previous events</button>
+    <button type="button" class="btn-outline" data-scope="this">This event only</button>
+    <button type="button" class="btn-outline" data-scope="thisfuture">This and all future events</button>
+  </div>
+  <div class="confirm-footer">
+    <button id="scope-cancel" class="btn-outline">Cancel</button>
   </div>
 </div>
 

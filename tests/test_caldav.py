@@ -17,7 +17,6 @@ import pytest
 
 from webcaldav.caldav_client import (
     EventNotFoundError,
-    RecurringEventError,
     create_event,
     delete_event,
     discover_calendars,
@@ -276,16 +275,85 @@ async def test_update_event_allday(edit_calendar):
     assert ev["end"] == "2026-06-18"
 
 
-async def test_update_event_recurring_refused(edit_calendar):
+async def _recur_view(base_url, url) -> list[tuple[str, str]]:
+    """(start ISO, title) for every occurrence on/after the recur series start."""
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    return sorted((e["start"], e["title"]) for e in events if e["start"][:10] >= "2026-06-12")
+
+
+async def test_update_recurring_all(edit_calendar):
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 12, 11, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
-    with pytest.raises(RecurringEventError):
-        await update_event(
-            base_url, USER, PASSWORD, url, "recur-event",
-            title="Nope", all_day=False, start=start, end=end,
-            location=None, description=None,
-        )
+    # User clicks the Jun 19 occurrence and renames the whole series (no time change).
+    start = datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Renamed", all_day=False, start=start, end=end,
+        location=None, description=None, scope="all", recurrence_id=_PIVOT,
+    )
+    view = await _recur_view(base_url, url)
+    # All four occurrences keep their dates (anchor preserved) and get the new title.
+    assert [v[1] for v in view] == ["Renamed"] * 4
+    assert [v[0][:10] for v in view] == [
+        "2026-06-12", "2026-06-19", "2026-06-26", "2026-07-03",
+    ]
+
+
+async def test_update_recurring_this(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo", all_day=False, start=start, end=end,
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+    )
+    view = await _recur_view(base_url, url)
+    # The Jun 19 occurrence is detached (new title + 11:00); the rest are untouched.
+    titles = {v[1] for v in view}
+    assert titles == {"Weekly sync", "Solo"}
+    solo = [v for v in view if v[1] == "Solo"]
+    assert len(solo) == 1 and solo[0][0].startswith("2026-06-19T11:00:00")
+    assert len(view) == 4
+
+
+async def test_update_recurring_thisfuture(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Future", all_day=False, start=start, end=end,
+        location=None, description=None, scope="thisfuture", recurrence_id=_PIVOT,
+    )
+    view = await _recur_view(base_url, url)
+    # Jun 12 stays on the original series; Jun 19/26/Jul 3 become the new 11:00 series.
+    assert (v := [x for x in view if x[1] == "Weekly sync"]) and len(v) == 1
+    assert v[0][0].startswith("2026-06-12T09:00:00")
+    future = sorted(x[0][:10] for x in view if x[1] == "Future")
+    assert future == ["2026-06-19", "2026-06-26", "2026-07-03"]
+    assert all(x[0][11:16] == "11:00" for x in view if x[1] == "Future")
+
+
+async def test_update_recurring_thisprev(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc)  # +1h delta
+    end = datetime(2026, 6, 19, 10, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Past", all_day=False, start=start, end=end,
+        location=None, description=None, scope="thisprev", recurrence_id=_PIVOT,
+    )
+    view = await _recur_view(base_url, url)
+    # Past+current shifted +1h to 10:00 and renamed; future stays at 09:00.
+    past = sorted(x[0] for x in view if x[1] == "Past")
+    assert [p[:10] for p in past] == ["2026-06-12", "2026-06-19"]
+    assert all(p[11:16] == "10:00" for p in past)
+    future = sorted(x[0] for x in view if x[1] == "Weekly sync")
+    assert [f[:10] for f in future] == ["2026-06-26", "2026-07-03"]
+    assert all(f[11:16] == "09:00" for f in future)
 
 
 async def test_update_event_not_found(edit_calendar):
@@ -356,3 +424,110 @@ async def test_delete_event_not_found(edit_calendar):
     base_url, url = edit_calendar
     with pytest.raises(EventNotFoundError):
         await delete_event(base_url, USER, PASSWORD, url, "does-not-exist")
+
+
+# ── Recurring delete scopes ──────────────────────────────────────────────────
+# _RECUR_EVENT is FREQ=WEEKLY;COUNT=4 from 2026-06-12 09:00Z, i.e. occurrences
+# on Jun 12, 19, 26 and Jul 3. The pivot used below is the Jun 19 occurrence.
+
+_PIVOT = "2026-06-19T09:00:00+00:00"
+
+
+async def _recur_starts(base_url, url) -> list[str]:
+    """Sorted YYYY-MM-DD start dates of every surviving recur-event occurrence."""
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    return sorted(e["start"][:10] for e in events if e["id"] == "recur-event")
+
+
+async def test_create_recurring_weekly_count(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 22, 9, 30, tzinfo=timezone.utc)
+    await create_event(
+        base_url, USER, PASSWORD, url, "new-recur@webcaldav",
+        title="Standup", all_day=False, start=start, end=end,
+        location=None, description=None,
+        rrule={"freq": "weekly", "interval": 1, "count": 3},
+    )
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    occ = sorted(e["start"][:10] for e in events if e["id"] == "new-recur@webcaldav")
+    assert occ == ["2026-06-22", "2026-06-29", "2026-07-06"]
+    ev = next(e for e in events if e["id"] == "new-recur@webcaldav")
+    assert ev["extendedProps"]["recurrenceRule"]["freq"] == "weekly"
+    assert ev["extendedProps"]["recurrenceRule"]["count"] == 3
+
+
+def test_preview_recurrence_count():
+    from webcaldav.caldav_client import preview_recurrence
+
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    last, count = preview_recurrence(start, {"freq": "weekly", "count": 3})
+    assert count == 3
+    assert last.startswith("2026-07-06")
+
+
+def test_preview_recurrence_until():
+    from webcaldav.caldav_client import preview_recurrence
+
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    last, count = preview_recurrence(start, {"freq": "weekly", "until": "2026-07-07T00:00:00Z"})
+    # Jun 22, 29, Jul 6 fall before the until bound.
+    assert count == 3
+    assert last.startswith("2026-07-06")
+
+
+def test_preview_recurrence_infinite():
+    from webcaldav.caldav_client import preview_recurrence
+
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    assert preview_recurrence(start, {"freq": "daily"}) == (None, None)
+
+
+def test_preview_recurrence_monthly_weekday():
+    from webcaldav.caldav_client import preview_recurrence
+
+    # 2026-06-22 is the 4th Monday of June; weekday mode should keep Mondays.
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    last, count = preview_recurrence(
+        start, {"freq": "monthly", "monthly_mode": "weekday", "count": 2}
+    )
+    assert count == 2
+    # 4th Monday of July 2026 is the 27th.
+    assert last.startswith("2026-07-27")
+
+
+async def test_delete_recurring_all(edit_calendar):
+    base_url, url = edit_calendar
+    await delete_event(base_url, USER, PASSWORD, url, "recur-event", scope="all")
+    assert await _recur_starts(base_url, url) == []
+
+
+async def test_delete_recurring_this(edit_calendar):
+    base_url, url = edit_calendar
+    await delete_event(
+        base_url, USER, PASSWORD, url, "recur-event", scope="this", recurrence_id=_PIVOT
+    )
+    # Only the Jun 19 occurrence is removed (EXDATE); the rest remain.
+    assert await _recur_starts(base_url, url) == ["2026-06-12", "2026-06-26", "2026-07-03"]
+
+
+async def test_delete_recurring_thisfuture(edit_calendar):
+    base_url, url = edit_calendar
+    await delete_event(
+        base_url, USER, PASSWORD, url, "recur-event", scope="thisfuture", recurrence_id=_PIVOT
+    )
+    # Pivot and everything after it are dropped; only the earlier date survives.
+    assert await _recur_starts(base_url, url) == ["2026-06-12"]
+
+
+async def test_delete_recurring_thisprev(edit_calendar):
+    base_url, url = edit_calendar
+    await delete_event(
+        base_url, USER, PASSWORD, url, "recur-event", scope="thisprev", recurrence_id=_PIVOT
+    )
+    # Pivot and everything before it are dropped; only later dates survive.
+    assert await _recur_starts(base_url, url) == ["2026-06-26", "2026-07-03"]

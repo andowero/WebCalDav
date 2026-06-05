@@ -2,6 +2,44 @@
 
 ## Unreleased — MVP
 
+### Added — drag/resize recurring events; lock "Repeats" (2026-06-05)
+- Recurring events are now draggable and resizable on the month/week/day grid
+  (previously the drag reverted). On drop/resize a "What to change?" scope chooser
+  (`all` / `this` / `thisfuture` / `thisprev`) opens; the chosen scope and the
+  occurrence's original `rawStart` pivot are sent to `PUT /events/{uid}`, reusing
+  the same backend contract as the modal edit. Cancelling the chooser reverts.
+- The grid now refetches after a successful drag/resize so scope splits and
+  `RECURRENCE-ID` overrides (new resources) render immediately.
+- The "Repeats" checkbox is locked when editing an existing recurring series — a
+  series can't be un-recurred from the modal (unchecking had no backend effect).
+- **Known bug:** editing only "this" occurrence of a recurring event sometimes
+  duplicates the occurrence. See Project status → Known issues.
+
+### Added — recurring events: create, edit, delete (2026-06-03)
+- Recurring events are no longer read-only. Writes now take a `scope`
+  (`all` / `this` / `thisfuture` / `thisprev`) plus a `recurrence_id` pivot (the
+  clicked occurrence's original start, sent as the client's `rawStart`).
+- **Delete** a recurring event opens a "What to delete?" chooser:
+  - `all` drops the resource; `this` adds an `EXDATE`; `thisfuture` caps the rule
+    with `UNTIL`; `thisprev` moves `DTSTART` past the pivot (decrementing `COUNT`).
+- **Edit** a recurring event opens a "What to change?" chooser:
+  - `all` rewrites the series (start changes applied as a delta so the anchor is
+    preserved); `this` writes a `RECURRENCE-ID` override; `thisfuture` and
+    `thisprev` split the series into two resources at the pivot.
+  - Rule changes (frequency / interval / `UNTIL` / `COUNT`) apply on `all` and
+    `thisfuture`. Recurring events can't be moved between calendars (a move
+    recreates a single VEVENT) — the picker is disabled and the API returns 400.
+- **Create** gains a full recurrence editor: frequency (hourly→yearly), "every X"
+  interval, monthly by day-of-month or by Nth/last weekday, and a mutually
+  exclusive end-by-date / end-after-N-occurrences control with a live "last
+  occurrence" preview.
+- New `POST /events/recurrence-preview` computes the last occurrence + count for a
+  rule (via `python-dateutil`); `GET /events` now also emits a structured
+  `extendedProps.recurrenceRule` so the editor can round-trip existing series.
+- CalDAV-layer tests cover all four delete scopes, all four edit scopes (override
+  + both split directions), rrule creation, and the preview helper; API tests
+  cover the preview route and scope validation.
+
 ### Added — default calendar & calendar move (2026-06-03)
 - New `Calendar.is_default` column (one default per user, enforced in
   `PATCH /calendars/{id}`; setting it clears the others). Surfaced as a "Default"

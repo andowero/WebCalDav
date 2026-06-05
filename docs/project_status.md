@@ -6,8 +6,16 @@
 |-----------|-----------------------------------------------------------|--------|
 | MVP       | Secure user login, read-only view of calendar events      | Complete |
 | v1        | Basic editing of calendar events -> without repetition    | Complete |
-| v2        | Editing of calendar events -> repetition                  | Not started |
+| v2        | Editing of calendar events -> repetition                  | Complete |
 | v3        | Reminders and browser notifications                       | Not started |
+
+## Known issues
+
+- **Recurring "this" edit can duplicate the occurrence.** Editing only a single
+  occurrence (`scope="this"`) of a recurring event sometimes produces a duplicate
+  of that occurrence. Affects both modal edits and grid drag/resize. Root cause
+  not yet isolated (likely the `RECURRENCE-ID` override coexisting with the
+  still-expanded master occurrence). Not yet fixed.
 
 ## What has been accomplished
 
@@ -123,6 +131,27 @@ Completes the v1 editing milestone — events can now be created and removed, no
   Moving sends `original_calendar_id`; the server recreates on the target (same
   UID) and deletes from the source.
 
+### Recurring events — v2 (2026-06-03)
+
+Full create / edit / delete support for recurring events, with per-occurrence scoping.
+
+- Recurring writes take a `scope` (`all` / `this` / `thisfuture` / `thisprev`) and a
+  `recurrence_id` pivot (the clicked occurrence's `rawStart`). Delete and edit each
+  open a scope chooser in the UI.
+- Delete: `all` removes the resource, `this` adds `EXDATE`, `thisfuture` caps with
+  `UNTIL`, `thisprev` advances `DTSTART` past the pivot.
+- Edit: `all` rewrites the series (start as a delta to preserve the anchor), `this`
+  writes a `RECURRENCE-ID` override, `thisfuture` / `thisprev` split the series in
+  two at the pivot. Rule edits (`FREQ`/`INTERVAL`/`UNTIL`/`COUNT`) apply on `all`
+  and `thisfuture`. Recurring events can't be moved between calendars (400).
+- Create: a recurrence editor (frequency, interval, monthly by day-of-month or
+  Nth/last weekday, end-by-date / end-after-N) with a live last-occurrence preview
+  via `POST /events/recurrence-preview`. Occurrence math uses `python-dateutil`;
+  `GET /events` emits a structured `recurrenceRule` so the editor round-trips
+  existing series.
+- 53 tests passing (added four delete scopes, four edit scopes, rrule creation,
+  preview helper + route, and scope validation).
+
 ## What is next
 
-- v2: editing recurrence (repetition) rules.
+- v3: reminders and browser notifications.

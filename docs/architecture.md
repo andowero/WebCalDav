@@ -65,9 +65,18 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   plugin for named-IANA-timezone rendering) plus a small vanilla-JS glue layer
   that calls the API via `fetch`.
 - An event modal opens on event click for viewing/editing, populated from the
-  event's `extendedProps` (`description`, `location`, `recurrence`, `reminders`,
-  `rawStart`/`rawEnd`); dates are formatted client-side per the timezone + time
-  format settings. Recurrence and reminders remain read-only.
+  event's `extendedProps` (`description`, `location`, `recurrence`,
+  `recurrenceRule`, `reminders`, `rawStart`/`rawEnd`); dates are formatted
+  client-side per the timezone + time format settings. Reminders remain
+  read-only; recurrence is fully editable via a recurrence editor (frequency,
+  interval, monthly by day-of-month or Nth/last weekday, end-by-date /
+  end-after-N) with a live last-occurrence preview.
+- Deleting or editing a recurring event opens a scope chooser
+  (`all` / `this+previous` / `this` / `this+future`); the chosen scope and the
+  occurrence's `rawStart` pivot are sent to the API. Dragging or resizing a
+  recurring occurrence on the grid opens the same chooser before persisting; the
+  modal's "Repeats" checkbox is locked when editing an existing recurring series
+  (a series can't be un-recurred from there).
 - Creating events: clicking empty grid space (or dragging in week/day) opens the
   same modal blank with view-specific prefilled times and a calendar picker that
   defaults to the user's default calendar. The picker is also shown when editing,
@@ -163,13 +172,20 @@ No local event cache.
 
 ```
 create:  POST   /events                       ──► DEK-decrypt creds ──► CalDAV PUT (new UID)
+                                                   (optional RRULE from recurrence editor)
 edit:    PUT    /events/{uid}                  ──► DEK-decrypt creds ──► CalDAV PUT (in place)
 move:    PUT    /events/{uid}                  ──► create on target calendar (same UID),
            (original_calendar_id ≠ calendar_id)     then delete from source calendar
 delete:  DELETE /events/{uid}?calendar_id=…    ──► DEK-decrypt creds ──► CalDAV DELETE
+preview: POST   /events/recurrence-preview     ──► dateutil.rrule ──► {last, count}
 ```
 
-Recurring events are refused for edit/move (422). No local event cache.
+Recurring writes carry a `scope` (`all` / `this` / `thisfuture` / `thisprev`)
+and a `recurrence_id` pivot (the occurrence's original start). The CalDAV layer
+maps these to iCalendar edits: whole-resource delete, `EXDATE`, `UNTIL`
+truncation, `DTSTART` advance, `RECURRENCE-ID` overrides, or splitting the
+series into two resources at the pivot. Moving a recurring event is rejected
+(400) since a move recreates a single VEVENT. No local event cache.
 
 ### Logout or expiry
 

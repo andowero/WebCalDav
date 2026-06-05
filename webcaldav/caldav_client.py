@@ -1,12 +1,15 @@
 import asyncio
 import logging
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
 
 import caldav
 from caldav.elements.ical import CalendarColor
+from dateutil.rrule import rrulestr
 from icalendar import Calendar as ICalendar
 from icalendar import Event as IEvent
+from icalendar.prop import vRecur
 
 from .metrics import caldav_request_duration_seconds, caldav_request_errors_total
 
@@ -135,6 +138,51 @@ def _rrule_to_text(rrule) -> str:
     return text
 
 
+def _rrule_to_struct(rrule, dtstart: date | datetime) -> dict:
+    """Render an icalendar vRecur into the editor's structured recurrence model."""
+    parts = {str(k).upper(): (v if isinstance(v, list) else [v]) for k, v in rrule.items()}
+    out: dict = {"freq": str((parts.get("FREQ") or ["DAILY"])[0]).lower(), "interval": 1}
+    try:
+        out["interval"] = int((parts.get("INTERVAL") or ["1"])[0])
+    except (ValueError, TypeError):
+        pass
+    if out["freq"] == "monthly":
+        byday = parts.get("BYDAY")
+        if byday:
+            token = str(byday[0])  # e.g. "2MO" or "-1FR"
+            out["monthly_mode"] = "weekday"
+            try:
+                out["ordinal"] = int(token[:-2])
+            except ValueError:
+                out["ordinal"] = None
+        else:
+            out["monthly_mode"] = "monthday"
+    count = parts.get("COUNT")
+    until = parts.get("UNTIL")
+    if count:
+        try:
+            out["count"] = int(count[0])
+        except (ValueError, TypeError):
+            pass
+    elif until:
+        u = until[0]
+        out["until"] = u.isoformat() if hasattr(u, "isoformat") else str(u)
+    return out
+
+
+def preview_recurrence(start: date | datetime, rule: dict) -> tuple[str | None, int | None]:
+    """Last occurrence ISO + total count for a rule, or (None, None) if infinite."""
+    parts = _build_rrule(rule, start)
+    robj = rrulestr(vRecur(parts).to_ical().decode("utf-8"), dtstart=_as_dt(start))
+    if "COUNT" not in parts and "UNTIL" not in parts:
+        return None, None
+    occs = list(robj)
+    if not occs:
+        return None, 0
+    last = occs[-1]
+    return (last.date().isoformat() if _is_all_day(start) else last.isoformat()), len(occs)
+
+
 def _reminder_to_text(trigger) -> str:
     """Render a VALARM trigger (timedelta or datetime) into friendly text."""
     if isinstance(trigger, datetime):
@@ -185,6 +233,10 @@ def _extract_props(vevent) -> dict:
     rrule = vevent.get("rrule")
     if rrule:
         out["recurrence"] = _rrule_to_text(rrule)
+        try:
+            out["recurrenceRule"] = _rrule_to_struct(rrule, vevent.decoded("dtstart"))
+        except Exception:
+            pass
     reminders = _extract_reminders(vevent)
     if reminders:
         out["reminders"] = reminders
@@ -217,12 +269,280 @@ def _master_meta(cal, from_dt: datetime, to_dt: datetime) -> dict[str, dict]:
     return meta
 
 
-class RecurringEventError(Exception):
-    """Raised when an edit is attempted on a recurring event (out of scope for v1)."""
-
-
 class EventNotFoundError(Exception):
     """Raised when the target event UID is not present on the calendar."""
+
+
+# ── Recurrence math ──────────────────────────────────────────────────────────
+#
+# Scoped recurring operations pivot on a single occurrence, identified by its
+# original start ("recurrence id"). dateutil.rrule does the occurrence math; the
+# helpers below translate between the master VEVENT and that engine, and mutate
+# the master's RRULE/DTSTART in place for truncate/shift operations.
+
+
+def _master_vevent(ical):
+    """The series master VEVENT (the one without a RECURRENCE-ID)."""
+    vevents = list(ical.walk("VEVENT"))
+    for v in vevents:
+        if "recurrence-id" not in v:
+            return v
+    return vevents[0] if vevents else None
+
+
+def _as_dt(d: date | datetime) -> datetime:
+    """Coerce a date/datetime to a datetime for rrule math (all-day -> midnight)."""
+    if isinstance(d, datetime):
+        return d
+    return datetime(d.year, d.month, d.day)
+
+
+def _is_all_day(d: date | datetime) -> bool:
+    return isinstance(d, date) and not isinstance(d, datetime)
+
+
+def _occurrence_dt(recurrence_id: str, dtstart: date | datetime) -> date | datetime:
+    """Coerce the pivot ISO string into dtstart's value type / timezone."""
+    if isinstance(dtstart, datetime):
+        dt = datetime.fromisoformat(recurrence_id)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=dtstart.tzinfo or timezone.utc)
+        elif dtstart.tzinfo is not None:
+            dt = dt.astimezone(dtstart.tzinfo)
+        return dt
+    return date.fromisoformat(recurrence_id[:10])
+
+
+def _rrule_text(vevent) -> str | None:
+    rr = vevent.get("rrule")
+    if not rr:
+        return None
+    return rr.to_ical().decode("utf-8")
+
+
+def _rrule_parts(vevent) -> dict:
+    """RRULE as a plain {NAME: [values]} dict that can be re-added via vevent.add."""
+    rr = vevent.get("rrule")
+    return {str(k): (list(v) if isinstance(v, list) else [v]) for k, v in rr.items()}
+
+
+def _set_rrule(vevent, parts: dict) -> None:
+    vevent.pop("rrule", None)
+    vevent.add("rrule", parts)
+
+
+def _next_after(vevent, pivot: date | datetime) -> date | datetime | None:
+    """First occurrence strictly after the pivot, in the master's value type."""
+    base = _as_dt(vevent.decoded("dtstart"))
+    nxt = rrulestr(_rrule_text(vevent), dtstart=base).after(_as_dt(pivot), inc=False)
+    if nxt is None:
+        return None
+    return nxt.date() if _is_all_day(vevent.decoded("dtstart")) else nxt
+
+
+def _count_through(vevent, pivot: date | datetime, inc: bool = True) -> int:
+    """Number of occurrences from the series start through the pivot."""
+    base = _as_dt(vevent.decoded("dtstart"))
+    return len(rrulestr(_rrule_text(vevent), dtstart=base).between(base, _as_dt(pivot), inc=inc))
+
+
+def _truncate_until(vevent, pivot: date | datetime) -> None:
+    """Cap the series so the pivot and every later occurrence are dropped."""
+    parts = _rrule_parts(vevent)
+    parts.pop("COUNT", None)
+    if isinstance(pivot, datetime):
+        until: date | datetime = pivot.astimezone(timezone.utc) - timedelta(seconds=1)
+    else:
+        until = pivot - timedelta(days=1)
+    parts["UNTIL"] = [until]
+    _set_rrule(vevent, parts)
+
+
+def _shift_start_to(vevent, new_start: date | datetime, consumed: int) -> None:
+    """Move the series start forward, preserving duration and decrementing COUNT."""
+    old_start = vevent.decoded("dtstart")
+    dur = (vevent.decoded("dtend") - old_start) if "dtend" in vevent else None
+    vevent.pop("dtstart", None)
+    vevent.add("dtstart", new_start)
+    if dur is not None:
+        vevent.pop("dtend", None)
+        vevent.add("dtend", new_start + dur)
+    parts = _rrule_parts(vevent)
+    if "COUNT" in parts:
+        try:
+            newc = int(parts["COUNT"][0]) - consumed
+        except (ValueError, TypeError, IndexError):
+            newc = None
+        if newc is not None and newc > 0:
+            parts["COUNT"] = [newc]
+            _set_rrule(vevent, parts)
+
+
+def _add_exdate(vevent, pivot: date | datetime) -> None:
+    vevent.add("exdate", pivot)
+
+
+_FREQ_MAP = {
+    "yearly": "YEARLY", "monthly": "MONTHLY", "weekly": "WEEKLY",
+    "daily": "DAILY", "hourly": "HOURLY",
+}
+_WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+
+
+def _build_rrule(rule: dict, dtstart: date | datetime) -> dict:
+    """Translate the editor's recurrence model into an icalendar RRULE dict.
+
+    Monthly has two modes: ``monthday`` keeps the day of month (falling back to
+    the last day for days >= 29, which February etc. cannot satisfy), and
+    ``weekday`` schedules the Nth / last weekday of the month (BYDAY=2MO, -1FR).
+    ``count`` and ``until`` are mutually exclusive; ``count`` wins if both arrive.
+    """
+    freq = _FREQ_MAP.get(str(rule.get("freq", "")).lower())
+    if not freq:
+        raise ValueError(f"unsupported recurrence frequency: {rule.get('freq')!r}")
+    parts: dict = {"FREQ": freq}
+    interval = int(rule.get("interval") or 1)
+    if interval > 1:
+        parts["INTERVAL"] = interval
+
+    if freq == "MONTHLY":
+        if (rule.get("monthly_mode") or "monthday") == "weekday":
+            anchor = _as_dt(dtstart)
+            ordinal = rule.get("ordinal")
+            if ordinal is None:
+                ordinal = (anchor.day - 1) // 7 + 1
+            parts["BYDAY"] = f"{int(ordinal)}{_WEEKDAYS[anchor.weekday()]}"
+        else:
+            day = _as_dt(dtstart).day
+            parts["BYMONTHDAY"] = -1 if day >= 29 else day
+
+    count = rule.get("count")
+    until = rule.get("until")
+    if count:
+        parts["COUNT"] = int(count)
+    elif until:
+        if _is_all_day(dtstart):
+            parts["UNTIL"] = date.fromisoformat(str(until)[:10])
+        else:
+            u = datetime.fromisoformat(str(until))
+            if u.tzinfo is None:
+                u = u.replace(tzinfo=timezone.utc)
+            parts["UNTIL"] = u.astimezone(timezone.utc)
+    return parts
+
+
+def _remaining_rule_parts(vevent, pivot: date | datetime) -> dict:
+    """Original rule, with COUNT reduced by the occurrences before the pivot."""
+    parts = _rrule_parts(vevent)
+    if "COUNT" in parts:
+        # Occurrences strictly before the pivot (the pivot itself stays).
+        before = _count_through(vevent, pivot, inc=True) - 1
+        try:
+            parts["COUNT"] = [max(1, int(parts["COUNT"][0]) - before)]
+        except (ValueError, IndexError):
+            pass
+    return parts
+
+
+def _bounded_rule_parts(vevent, count: int) -> dict:
+    """Original rule re-capped to exactly ``count`` occurrences (drops UNTIL)."""
+    parts = _rrule_parts(vevent)
+    parts.pop("UNTIL", None)
+    parts["COUNT"] = [count]
+    return parts
+
+
+def _apply_fields(
+    vevent,
+    title: str,
+    start: date | datetime,
+    end: date | datetime,
+    location: str | None,
+    description: str | None,
+) -> None:
+    """Overwrite a VEVENT's editable fields + time span, bumping SEQUENCE."""
+    def _replace(key: str, value) -> None:
+        vevent.pop(key, None)
+        if value is not None and value != "":
+            vevent.add(key, value)
+
+    _replace("summary", title)
+    _replace("location", location)
+    _replace("description", description)
+    vevent.pop("dtstart", None)
+    vevent.pop("dtend", None)
+    vevent.pop("duration", None)
+    vevent.add("dtstart", start)
+    vevent.add("dtend", end)
+    try:
+        seq = int(vevent.get("sequence", 0)) + 1
+    except (TypeError, ValueError):
+        seq = 1
+    vevent.pop("sequence", None)
+    vevent.add("sequence", seq)
+    _replace("last-modified", datetime.now(timezone.utc))
+
+
+def _upsert_override(
+    ical,
+    master,
+    pivot: date | datetime,
+    title: str,
+    start: date | datetime,
+    end: date | datetime,
+    location: str | None,
+    description: str | None,
+) -> None:
+    """Add/replace a detached single-occurrence override (RECURRENCE-ID = pivot)."""
+    for comp in list(ical.subcomponents):
+        if comp.name == "VEVENT" and "recurrence-id" in comp:
+            try:
+                if comp.decoded("recurrence-id") == pivot:
+                    ical.subcomponents.remove(comp)
+            except Exception:
+                pass
+    ov = IEvent()
+    ov.add("uid", str(master.get("uid")))
+    ov.add("recurrence-id", pivot)
+    ov.add("dtstamp", datetime.now(timezone.utc))
+    if title:
+        ov.add("summary", title)
+    ov.add("dtstart", start)
+    ov.add("dtend", end)
+    if location:
+        ov.add("location", location)
+    if description:
+        ov.add("description", description)
+    ical.add_component(ov)
+
+
+def _series_ical(
+    uid: str,
+    title: str,
+    start: date | datetime,
+    end: date | datetime,
+    location: str | None,
+    description: str | None,
+    rule_parts: dict | None,
+) -> str:
+    ical = ICalendar()
+    ical.add("prodid", "-//WebCalDav//EN")
+    ical.add("version", "2.0")
+    ve = IEvent()
+    ve.add("uid", uid)
+    ve.add("dtstamp", datetime.now(timezone.utc))
+    if title:
+        ve.add("summary", title)
+    ve.add("dtstart", start)
+    ve.add("dtend", end)
+    if location:
+        ve.add("location", location)
+    if description:
+        ve.add("description", description)
+    if rule_parts:
+        ve.add("rrule", rule_parts)
+    ical.add_component(ve)
+    return ical.to_ical().decode("utf-8")
 
 
 def _sync_fetch_events(
@@ -276,7 +596,9 @@ def _sync_fetch_events(
                     extended: dict = {"rawStart": ev["start"], "calendarId": calendar_id}
                     if "end" in ev:
                         extended["rawEnd"] = ev["end"]
-                    for key in ("description", "location", "recurrence", "reminders"):
+                    for key in (
+                        "description", "location", "recurrence", "recurrenceRule", "reminders",
+                    ):
                         val = inst.get(key, master.get(key))
                         if val:
                             extended[key] = val
@@ -328,6 +650,9 @@ def _sync_update_event(
     end: date | datetime,
     location: str | None,
     description: str | None,
+    scope: str = "all",
+    recurrence_id: str | None = None,
+    rrule: dict | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -337,41 +662,90 @@ def _sync_update_event(
             raise EventNotFoundError(uid) from e
 
         ical = event.icalendar_instance
-        vevent = next((c for c in ical.walk("VEVENT")), None)
-        if vevent is None:
+        master = _master_vevent(ical)
+        if master is None:
             raise EventNotFoundError(uid)
-        # v1 does not support editing recurring events; refuse rather than
-        # silently rewriting the whole series.
-        if vevent.get("rrule"):
-            raise RecurringEventError(uid)
 
-        def _replace(key: str, value) -> None:
-            vevent.pop(key, None)
-            if value is not None and value != "":
-                vevent.add(key, value)
+        is_recurring = bool(master.get("rrule"))
+        # A scoped op needs a pivot; without one (or on a plain event) treat as
+        # a whole-event edit.
+        if not is_recurring or not recurrence_id:
+            scope = "all"
 
-        _replace("summary", title)
-        _replace("location", location)
-        _replace("description", description)
+        if scope == "all":
+            # The client edits one occurrence; for the whole series apply that as
+            # a delta to the master so the anchor (and thus DTSTART) is preserved
+            # when only non-time fields change.
+            anchor_start = start
+            anchor_end = end
+            if is_recurring and recurrence_id:
+                pivot = _occurrence_dt(recurrence_id, master.decoded("dtstart"))
+                delta = start - pivot
+                old_start = master.decoded("dtstart")
+                anchor_start = old_start + delta
+                anchor_end = anchor_start + (end - start)
+            _apply_fields(master, title, anchor_start, anchor_end, location, description)
+            if rrule is not None:
+                _set_rrule(master, _build_rrule(rrule, anchor_start))
+            event.data = ical.to_ical().decode("utf-8")
+            event.save()
+            return
 
-        # Rewrite the time span; drop any DURATION so DTEND is authoritative.
-        vevent.pop("dtstart", None)
-        vevent.pop("dtend", None)
-        vevent.pop("duration", None)
-        vevent.add("dtstart", start)
-        vevent.add("dtend", end)
+        pivot = _occurrence_dt(recurrence_id, master.decoded("dtstart"))
 
-        # Bump SEQUENCE so compliant servers accept the update.
-        try:
-            seq = int(vevent.get("sequence", 0)) + 1
-        except (TypeError, ValueError):
-            seq = 1
-        vevent.pop("sequence", None)
-        vevent.add("sequence", seq)
-        _replace("last-modified", datetime.now(timezone.utc))
+        if scope == "this":
+            # Detach just this occurrence as a RECURRENCE-ID override.
+            _upsert_override(ical, master, pivot, title, start, end, location, description)
+            event.data = ical.to_ical().decode("utf-8")
+            event.save()
+            return
 
-        event.data = ical.to_ical().decode("utf-8")
-        event.save()
+        if scope == "thisfuture":
+            base = _as_dt(master.decoded("dtstart"))
+            new_rule = _build_rrule(rrule, start) if rrule else _remaining_rule_parts(master, pivot)
+            if _as_dt(pivot) <= base:
+                # Pivot is the first occurrence: just rewrite the whole series.
+                _apply_fields(master, title, start, end, location, description)
+                _set_rrule(master, new_rule)
+                event.data = ical.to_ical().decode("utf-8")
+                event.save()
+                return
+            # Cap the original before the pivot, then spin off a fresh series
+            # carrying the edited fields for the pivot and everything after it.
+            _truncate_until(master, pivot)
+            event.data = ical.to_ical().decode("utf-8")
+            event.save()
+            cal.save_event(_series_ical(
+                f"{uuid.uuid4()}@webcaldav", title, start, end, location, description, new_rule,
+            ))
+            return
+
+        if scope == "thisprev":
+            consumed = _count_through(master, pivot, inc=True)
+            nxt = _next_after(master, pivot)
+            orig_start = master.decoded("dtstart")
+            # Shift the whole past sub-series by the edit's start delta, capped
+            # to the occurrences up to and including the pivot.
+            delta = start - pivot
+            past_start = orig_start + delta
+            past_end = past_start + (end - start)
+            past_rule = _bounded_rule_parts(master, consumed)
+
+            if nxt is None:
+                # No future remains: the modified past series replaces the resource.
+                event.delete()
+            else:
+                _shift_start_to(master, nxt, consumed)
+                event.data = ical.to_ical().decode("utf-8")
+                event.save()
+            cal.save_event(_series_ical(
+                f"{uuid.uuid4()}@webcaldav", title, past_start, past_end,
+                location, description, past_rule,
+            ))
+            return
+
+        # Unknown scope: fail safe by leaving the event untouched.
+        raise ValueError(f"unknown scope: {scope!r}")
 
 
 async def update_event(
@@ -386,6 +760,9 @@ async def update_event(
     end: date | datetime,
     location: str | None,
     description: str | None,
+    scope: str = "all",
+    recurrence_id: str | None = None,
+    rrule: dict | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="update_event").time():
         try:
@@ -402,8 +779,11 @@ async def update_event(
                 end,
                 location,
                 description,
+                scope,
+                recurrence_id,
+                rrule,
             )
-        except (RecurringEventError, EventNotFoundError):
+        except EventNotFoundError:
             raise
         except Exception:
             caldav_request_errors_total.labels(operation="update_event").inc()
@@ -422,25 +802,12 @@ def _sync_create_event(
     end: date | datetime,
     location: str | None,
     description: str | None,
+    rrule: dict | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
-        ical = ICalendar()
-        ical.add("prodid", "-//WebCalDav//EN")
-        ical.add("version", "2.0")
-        vevent = IEvent()
-        vevent.add("uid", uid)
-        vevent.add("dtstamp", datetime.now(timezone.utc))
-        if title:
-            vevent.add("summary", title)
-        vevent.add("dtstart", start)
-        vevent.add("dtend", end)
-        if location:
-            vevent.add("location", location)
-        if description:
-            vevent.add("description", description)
-        ical.add_component(vevent)
-        cal.save_event(ical.to_ical().decode("utf-8"))
+        rule_parts = _build_rrule(rrule, start) if rrule else None
+        cal.save_event(_series_ical(uid, title, start, end, location, description, rule_parts))
 
 
 async def create_event(
@@ -455,6 +822,7 @@ async def create_event(
     end: date | datetime,
     location: str | None,
     description: str | None,
+    rrule: dict | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="create_event").time():
         try:
@@ -471,6 +839,7 @@ async def create_event(
                 end,
                 location,
                 description,
+                rrule,
             )
         except Exception:
             caldav_request_errors_total.labels(operation="create_event").inc()
@@ -483,6 +852,8 @@ def _sync_delete_event(
     password: str,
     calendar_url: str,
     uid: str,
+    scope: str = "all",
+    recurrence_id: str | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -490,7 +861,37 @@ def _sync_delete_event(
             event = cal.event_by_uid(uid)
         except caldav.lib.error.NotFoundError as e:
             raise EventNotFoundError(uid) from e
-        event.delete()
+
+        ical = event.icalendar_instance
+        master = _master_vevent(ical)
+        # Whole-series delete, or a non-recurring event: drop the resource.
+        if scope == "all" or master is None or not master.get("rrule") or not recurrence_id:
+            event.delete()
+            return
+
+        pivot = _occurrence_dt(recurrence_id, master.decoded("dtstart"))
+        base = _as_dt(master.decoded("dtstart"))
+
+        if scope == "this":
+            _add_exdate(master, pivot)
+        elif scope == "thisfuture":
+            if _as_dt(pivot) <= base:  # pivot is the first occurrence -> series gone
+                event.delete()
+                return
+            _truncate_until(master, pivot)
+        elif scope == "thisprev":
+            consumed = _count_through(master, pivot, inc=True)
+            nxt = _next_after(master, pivot)
+            if nxt is None:  # nothing survives after the pivot
+                event.delete()
+                return
+            _shift_start_to(master, nxt, consumed)
+        else:
+            event.delete()
+            return
+
+        event.data = ical.to_ical().decode("utf-8")
+        event.save()
 
 
 async def delete_event(
@@ -499,6 +900,8 @@ async def delete_event(
     password: str,
     calendar_url: str,
     uid: str,
+    scope: str = "all",
+    recurrence_id: str | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="delete_event").time():
         try:
@@ -509,6 +912,8 @@ async def delete_event(
                 password,
                 calendar_url,
                 uid,
+                scope,
+                recurrence_id,
             )
         except EventNotFoundError:
             raise
