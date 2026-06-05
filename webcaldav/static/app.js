@@ -1038,6 +1038,10 @@
       editable,
       recurring: !!recurrence,
       rawStart: props.rawStart || (event.start ? event.start.toISOString() : null),
+      // Stable pivot for scoped edits: an already-detached override keeps its
+      // RECURRENCE-ID even after being moved, so prefer it over the (mutable)
+      // current start to avoid creating a duplicate override on re-edit.
+      recurrenceId: props.recurrenceId || null,
       isNew: false,
     };
 
@@ -1191,7 +1195,8 @@
       const scope = await chooseScope('What to change?');
       if (!scope) return;
       body.scope = scope;
-      if (_currentEvent.rawStart) body.recurrence_id = _currentEvent.rawStart;
+      const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
+      if (pivot) body.recurrence_id = pivot;
     }
 
     const btn = document.getElementById('btn-event-save');
@@ -1226,8 +1231,9 @@
       const scope = await chooseScope('What to delete?');
       if (!scope) return;
       qs += `&scope=${scope}`;
-      if (_currentEvent.rawStart) {
-        qs += `&recurrence_id=${encodeURIComponent(_currentEvent.rawStart)}`;
+      const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
+      if (pivot) {
+        qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
       }
     }
     const btn = document.getElementById('btn-event-delete');
@@ -1308,8 +1314,9 @@
         const scope = await chooseScope('What to delete?');
         if (!scope) return;
         qs += `&scope=${scope}`;
-        const rawStart = props.rawStart || (ev.start ? ev.start.toISOString() : null);
-        if (rawStart) qs += `&recurrence_id=${encodeURIComponent(rawStart)}`;
+        const pivot =
+          props.recurrenceId || props.rawStart || (ev.start ? ev.start.toISOString() : null);
+        if (pivot) qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
       } else {
         const ok = await confirmDialog(`Delete "${ev.title || 'this event'}"?`);
         if (!ok) return;
@@ -1425,10 +1432,13 @@
       const scope = await chooseScope('What to change?');
       if (!scope) { info.revert(); return; }
       body.scope = scope;
-      // recurrence_id is the ORIGINAL (pre-drag) occurrence start — the pivot.
-      const rawStart =
-        props.rawStart || (info.oldEvent && info.oldEvent.start ? info.oldEvent.start.toISOString() : null);
-      if (rawStart) body.recurrence_id = rawStart;
+      // recurrence_id is the pivot: a detached override's stable RECURRENCE-ID
+      // when present, else the ORIGINAL (pre-drag) occurrence start.
+      const pivot =
+        props.recurrenceId ||
+        props.rawStart ||
+        (info.oldEvent && info.oldEvent.start ? info.oldEvent.start.toISOString() : null);
+      if (pivot) body.recurrence_id = pivot;
     }
     try {
       await apiPut(`/events/${encodeURIComponent(info.event.id)}`, body);

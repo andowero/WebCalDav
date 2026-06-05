@@ -596,6 +596,11 @@ def _sync_fetch_events(
                     extended: dict = {"rawStart": ev["start"], "calendarId": calendar_id}
                     if "end" in ev:
                         extended["rawEnd"] = ev["end"]
+                    # Detached overrides carry a stable RECURRENCE-ID that does not
+                    # change when the occurrence is moved; it is the pivot the
+                    # server keys overrides on, so expose it for scoped edits.
+                    if "recurrence-id" in vevent:
+                        extended["recurrenceId"] = _dt_to_iso(vevent.decoded("recurrence-id"))
                     for key in (
                         "description", "location", "recurrence", "recurrenceRule", "reminders",
                     ):

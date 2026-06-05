@@ -319,6 +319,49 @@ async def test_update_recurring_this(edit_calendar):
     assert len(view) == 4
 
 
+async def test_update_recurring_this_twice(edit_calendar):
+    """Re-editing a detached occurrence must update it, not spawn a duplicate.
+
+    Regression: the client must pivot the second edit on the override's stable
+    RECURRENCE-ID (exposed as extendedProps.recurrenceId), not its moved start.
+    """
+    base_url, url = edit_calendar
+    # First "this" edit: detach Jun 19, move it to 11:00 and rename to "Solo".
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo", all_day=False,
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+    )
+
+    # Client refetches; the moved occurrence keeps its original RECURRENCE-ID.
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    solo = [e for e in events if e["title"] == "Solo"]
+    assert len(solo) == 1
+    pivot = solo[0]["extendedProps"]["recurrenceId"]
+    assert pivot.startswith("2026-06-19T09:00:00")
+
+    # Second "this" edit on the same occurrence, pivoting on the stable id.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo2", all_day=False,
+        start=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 13, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this", recurrence_id=pivot,
+    )
+
+    view = await _recur_view(base_url, url)
+    # Still four occurrences: no duplicate. The detached one moved to 13:00.
+    assert len(view) == 4
+    titles = {v[1] for v in view}
+    assert titles == {"Weekly sync", "Solo2"}
+    solo2 = [v for v in view if v[1] == "Solo2"]
+    assert len(solo2) == 1 and solo2[0][0].startswith("2026-06-19T13:00:00")
+
+
 async def test_update_recurring_thisfuture(edit_calendar):
     base_url, url = edit_calendar
     start = datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc)
