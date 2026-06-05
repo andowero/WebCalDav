@@ -331,6 +331,25 @@ def _set_rrule(vevent, parts: dict) -> None:
     vevent.add("rrule", parts)
 
 
+def _shift_until(vevent, delta: timedelta) -> None:
+    """Shift an RRULE UNTIL bound by ``delta`` (no-op for COUNT/infinite rules).
+
+    Moving a whole series by dragging one occurrence shifts DTSTART; an UNTIL
+    bound must move with it, or occurrences past the (stationary) UNTIL silently
+    vanish.
+    """
+    if not delta:
+        return
+    parts = _rrule_parts(vevent)
+    if "UNTIL" not in parts:
+        return
+    try:
+        parts["UNTIL"] = [b + delta for b in parts["UNTIL"]]
+    except TypeError:
+        return
+    _set_rrule(vevent, parts)
+
+
 def _next_after(vevent, pivot: date | datetime) -> date | datetime | None:
     """First occurrence strictly after the pivot, in the master's value type."""
     base = _as_dt(vevent.decoded("dtstart"))
@@ -692,6 +711,10 @@ def _sync_update_event(
             _apply_fields(master, title, anchor_start, anchor_end, location, description)
             if rrule is not None:
                 _set_rrule(master, _build_rrule(rrule, anchor_start))
+            elif is_recurring and recurrence_id:
+                # No new rule supplied (e.g. a drag): keep the existing RRULE but
+                # carry its UNTIL bound along with the shifted DTSTART.
+                _shift_until(master, delta)
             event.data = ical.to_ical().decode("utf-8")
             event.save()
             return

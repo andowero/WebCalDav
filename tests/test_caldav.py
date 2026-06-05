@@ -213,6 +213,20 @@ SUMMARY:Weekly sync
 END:VEVENT
 END:VCALENDAR"""
 
+# UNTIL-bounded series: two occurrences, Jun 16 and Jun 23 (UNTIL Jun 24).
+_RECUR_UNTIL_EVENT = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//webcaldav-test//EN
+BEGIN:VEVENT
+UID:recur-until
+DTSTAMP:20260101T000000Z
+DTSTART:20260616T090000Z
+DTEND:20260616T093000Z
+RRULE:FREQ=WEEKLY;UNTIL=20260624T000000Z
+SUMMARY:Bounded sync
+END:VEVENT
+END:VCALENDAR"""
+
 
 @pytest.fixture()
 def edit_calendar(radicale_server):
@@ -299,6 +313,37 @@ async def test_update_recurring_all(edit_calendar):
     assert [v[0][:10] for v in view] == [
         "2026-06-12", "2026-06-19", "2026-06-26", "2026-07-03",
     ]
+
+
+async def test_update_recurring_all_until_drag(edit_calendar):
+    """Dragging the whole UNTIL-bounded series must shift UNTIL with DTSTART.
+
+    Regression: the series ran Jun 16 + Jun 23 (UNTIL Jun 24). Dragging the
+    Jun 23 occurrence to Jun 30 (scope "all") shifts the series +7d. If UNTIL
+    stays put, the new Jun 30 tail falls past it and silently disappears,
+    leaving a single occurrence on Jun 23.
+    """
+    import caldav
+
+    base_url, url = edit_calendar
+    with caldav.DAVClient(url=base_url, username=USER, password=PASSWORD) as client:
+        caldav.Calendar(client=client, url=url).save_event(_RECUR_UNTIL_EVENT)
+
+    start = datetime(2026, 6, 30, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 30, 9, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-until",
+        title="Bounded sync", all_day=False, start=start, end=end,
+        location=None, description=None, scope="all",
+        recurrence_id="2026-06-23T09:00:00+00:00",
+    )
+
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    dates = sorted(e["start"][:10] for e in events if e["id"] == "recur-until")
+    # Both occurrences survive, shifted +7d: Jun 23 and Jun 30.
+    assert dates == ["2026-06-23", "2026-06-30"]
 
 
 async def test_update_recurring_this(edit_calendar):

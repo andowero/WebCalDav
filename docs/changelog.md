@@ -2,6 +2,14 @@
 
 ## Unreleased — MVP
 
+### Fixed — whole-series drag dropped UNTIL-bounded tail (2026-06-05)
+- Dragging one occurrence of a recurring series with scope `all` shifts the
+  master `DTSTART` by the drag delta. Previously the `RRULE` was left untouched,
+  so an `UNTIL` bound stayed frozen and any occurrence shifted past it silently
+  vanished (e.g. a Jun 16 + Jun 23 weekly series dragged +7d collapsed to a
+  single Jun 23 event). `UNTIL` now shifts with `DTSTART`. `COUNT`-bounded and
+  infinite series were unaffected. Regression test added.
+
 ### Added — drag/resize recurring events; lock "Repeats" (2026-06-05)
 - Recurring events are now draggable and resizable on the month/week/day grid
   (previously the drag reverted). On drop/resize a "What to change?" scope chooser
