@@ -72,8 +72,8 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   interval, monthly by day-of-month or Nth/last weekday, end-by-date /
   end-after-N) with a live last-occurrence preview.
 - Deleting or editing a recurring event opens a scope chooser
-  (`all` / `this+previous` / `this` / `this+future`); the chosen scope and the
-  occurrence's `rawStart` pivot are sent to the API. Dragging or resizing a
+  (`this` / `this+future` / `all` — the three industry-standard options); the
+  chosen scope and the occurrence's pivot are sent to the API. Dragging or resizing a
   recurring occurrence on the grid opens the same chooser before persisting; the
   modal's "Repeats" checkbox is locked when editing an existing recurring series
   (a series can't be un-recurred from there).
@@ -180,12 +180,16 @@ delete:  DELETE /events/{uid}?calendar_id=…    ──► DEK-decrypt creds ─
 preview: POST   /events/recurrence-preview     ──► dateutil.rrule ──► {last, count}
 ```
 
-Recurring writes carry a `scope` (`all` / `this` / `thisfuture` / `thisprev`)
-and a `recurrence_id` pivot (the occurrence's original start). The CalDAV layer
-maps these to iCalendar edits: whole-resource delete, `EXDATE`, `UNTIL`
-truncation, `DTSTART` advance, `RECURRENCE-ID` overrides, or splitting the
-series into two resources at the pivot. Moving a recurring event is rejected
-(400) since a move recreates a single VEVENT. No local event cache.
+Recurring writes carry a `scope` (`this` / `thisfuture` / `all` — the three
+standard options Google/Apple/Outlook use) and a `recurrence_id` pivot (the
+occurrence's original start). The CalDAV layer maps these to iCalendar edits:
+whole-resource delete, `EXDATE`, `UNTIL` truncation, `RECURRENCE-ID` overrides,
+or splitting the series at the pivot. A `thisfuture` split produces two **fully
+independent** resources (new UID for the spun-off series, no `RELATED-TO` link),
+matching the de-facto standard: editing or deleting one half never touches the
+other. Overrides outside a surviving range are garbage-collected rather than
+orphaned. Moving a recurring event is rejected (400) since a move recreates a
+single VEVENT. No local event cache.
 
 ### Logout or expiry
 

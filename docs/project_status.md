@@ -11,11 +11,7 @@
 
 ## Known issues
 
-- **Recurring "this" edit can duplicate the occurrence.** Editing only a single
-  occurrence (`scope="this"`) of a recurring event sometimes produces a duplicate
-  of that occurrence. Affects both modal edits and grid drag/resize. Root cause
-  not yet isolated (likely the `RECURRENCE-ID` override coexisting with the
-  still-expanded master occurrence). Not yet fixed.
+- None currently open.
 
 ## What has been accomplished
 
@@ -151,6 +147,26 @@ Full create / edit / delete support for recurring events, with per-occurrence sc
   existing series.
 - 53 tests passing (added four delete scopes, four edit scopes, rrule creation,
   preview helper + route, and scope validation).
+
+### Recurring scoped-edit redesign (2026-06-06)
+
+Aligned recurring-event editing to the industry standard and fixed two bugs.
+
+- Scope set reduced to the three standard options — **This** / **This and
+  following** / **All** — matching Google/Apple/Outlook. The non-standard
+  `thisprev` scope was removed everywhere (`scope=thisprev` → 400) and its dead
+  CalDAV helpers deleted.
+- A `thisfuture` split produces two **fully independent** series (new UID, no
+  `RELATED-TO` link): editing or deleting one half never affects the other.
+  Single-occurrence change → `RECURRENCE-ID` override; single delete → `EXDATE`.
+- Fixed the "this" duplicate: the fetch layer now suppresses a plain occurrence
+  at any slot already covered by an override (the override wins).
+- Fixed orphaned overrides: deleting `thisfuture` now garbage-collects overrides
+  past the pivot instead of leaving them on the truncated master.
+- Fixed a `thisfuture`-split ghost: the master's `UNTIL` is now pinned to the last
+  real occurrence before the pivot (was `pivot − 1s`, mid-day), so a later
+  date-granular "all" edit no longer re-admits the pivot occurrence.
+- 59 tests passing.
 
 ## What is next
 

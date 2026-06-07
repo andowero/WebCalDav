@@ -425,23 +425,128 @@ async def test_update_recurring_thisfuture(edit_calendar):
     assert all(x[0][11:16] == "11:00" for x in view if x[1] == "Future")
 
 
-async def test_update_recurring_thisprev(edit_calendar):
+async def test_thisfuture_split_until_survives_all_rename(edit_calendar):
+    """A this+future split must bound the master at its last real occurrence.
+
+    Regression: the split set the master UNTIL to pivot-1s (mid-day on the pivot
+    day). The editor's end-by-date is date-granular, so a later "all" edit
+    round-tripped that to end-of-day and re-admitted the pivot occurrence -> a
+    ghost third event appeared on the master.
+    """
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc)  # +1h delta
-    end = datetime(2026, 6, 19, 10, 30, tzinfo=timezone.utc)
+    # 1. Split off Jun 19+ to a new 11:00 series; master keeps Jun 12 only.
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
-        title="Past", all_day=False, start=start, end=end,
-        location=None, description=None, scope="thisprev", recurrence_id=_PIVOT,
+        title="Future", all_day=False,
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="thisfuture", recurrence_id=_PIVOT,
+    )
+    # 2. Re-open the master and round-trip its rule exactly as the UI does: the
+    #    end-by-date field is date-granular and re-serializes to end-of-day.
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    rule = dict({e["id"]: e for e in events}["recur-event"]["extendedProps"]["recurrenceRule"])
+    assert rule.get("until")
+    rule["until"] = f'{rule["until"][:10]}T23:59:59'
+    # 3. Rename the whole (remaining) series.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Renamed", all_day=False,
+        start=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 12, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="all",
+        recurrence_id="2026-06-12T09:00:00+00:00", rrule=rule,
     )
     view = await _recur_view(base_url, url)
-    # Past+current shifted +1h to 10:00 and renamed; future stays at 09:00.
-    past = sorted(x[0] for x in view if x[1] == "Past")
-    assert [p[:10] for p in past] == ["2026-06-12", "2026-06-19"]
-    assert all(p[11:16] == "10:00" for p in past)
-    future = sorted(x[0] for x in view if x[1] == "Weekly sync")
-    assert [f[:10] for f in future] == ["2026-06-26", "2026-07-03"]
-    assert all(f[11:16] == "09:00" for f in future)
+    # No ghost: the master holds exactly its one occurrence, not the pivot day too.
+    renamed = sorted(x[0][:10] for x in view if x[1] == "Renamed")
+    assert renamed == ["2026-06-12"]
+
+
+async def test_update_recurring_thisfuture_after_this_override(edit_calendar):
+    """A this+future split must carry a prior "this only" override with it.
+
+    Regression: detaching Jun 26 ("this"), then splitting from Jun 19 forward
+    ("thisfuture") left the Jun 26 override orphaned on the truncated master
+    while the new series regenerated Jun 26 -> two events that day.
+    """
+    base_url, url = edit_calendar
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo", all_day=False,
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this",
+        recurrence_id="2026-06-26T09:00:00+00:00",
+    )
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Future", all_day=False,
+        start=datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="thisfuture", recurrence_id=_PIVOT,
+    )
+    view = await _recur_view(base_url, url)
+    jun26 = [v for v in view if v[0][:10] == "2026-06-26"]
+    assert len(jun26) == 1 and jun26[0][1] == "Solo"
+    assert len(view) == 4  # no duplicate
+
+
+async def test_update_recurring_all_drag_after_this_override(edit_calendar):
+    """A whole-series drag must move a prior override too, without clobbering it."""
+    base_url, url = edit_calendar
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo", all_day=False,
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this",
+        recurrence_id="2026-06-26T09:00:00+00:00",
+    )
+    # Drag the whole series +7d (click Jun 19, drop on Jun 26) and rename.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Renamed", all_day=False,
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="all", recurrence_id=_PIVOT,
+    )
+    view = await _recur_view(base_url, url)
+    assert len(view) == 4  # no duplicate
+    days = [v[0][:10] for v in view]
+    assert len(set(days)) == len(days)  # one event per day
+    # The override followed the +7d shift (Jun 26 -> Jul 3) and kept its title.
+    jul3 = [v for v in view if v[0][:10] == "2026-07-03"]
+    assert len(jul3) == 1 and jul3[0][1] == "Solo"
+
+
+async def test_update_recurring_two_this_overrides_isolated(edit_calendar):
+    """Two "this only" overrides coexist; neither affects the other or the series."""
+    base_url, url = edit_calendar
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo", all_day=False,
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this",
+        recurrence_id="2026-06-26T09:00:00+00:00",
+    )
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Other", all_day=False,
+        start=datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+    )
+    view = await _recur_view(base_url, url)
+    assert len(view) == 4
+    by_day = {v[0][:10]: v[1] for v in view}
+    assert by_day["2026-06-26"] == "Solo"
+    assert by_day["2026-06-19"] == "Other"
+    assert by_day["2026-06-12"] == "Weekly sync"
+    assert by_day["2026-07-03"] == "Weekly sync"
 
 
 async def test_update_event_not_found(edit_calendar):
@@ -612,10 +717,38 @@ async def test_delete_recurring_thisfuture(edit_calendar):
     assert await _recur_starts(base_url, url) == ["2026-06-12"]
 
 
-async def test_delete_recurring_thisprev(edit_calendar):
+async def test_delete_recurring_thisfuture_drops_orphan_override(edit_calendar):
+    """Deleting this+future must not leave an override past the pivot orphaned."""
     base_url, url = edit_calendar
-    await delete_event(
-        base_url, USER, PASSWORD, url, "recur-event", scope="thisprev", recurrence_id=_PIVOT
+    # Detach a late occurrence (Jun 26) as its own override...
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo", all_day=False,
+        start=datetime(2026, 6, 26, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 26, 11, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this",
+        recurrence_id="2026-06-26T09:00:00+00:00",
     )
-    # Pivot and everything before it are dropped; only later dates survive.
-    assert await _recur_starts(base_url, url) == ["2026-06-26", "2026-07-03"]
+    # ...then delete from Jun 19 forward. The Jun 26 override sits past the pivot
+    # and must be removed, not left orphaned on the truncated master.
+    await delete_event(
+        base_url, USER, PASSWORD, url, "recur-event", scope="thisfuture", recurrence_id=_PIVOT
+    )
+    assert await _recur_starts(base_url, url) == ["2026-06-12"]
+
+
+async def test_update_recurring_this_no_duplicate(edit_calendar):
+    """A moved single occurrence shows exactly once (no master/override dup)."""
+    base_url, url = edit_calendar
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Moved", all_day=False,
+        start=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 13, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+    )
+    view = await _recur_view(base_url, url)
+    # No plain occurrence lingers at the original 09:00 slot alongside the move.
+    jun19 = [v for v in view if v[0][:10] == "2026-06-19"]
+    assert len(jun19) == 1
+    assert jun19[0][1] == "Moved" and jun19[0][0][11:16] == "13:00"

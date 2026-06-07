@@ -58,9 +58,11 @@ async def test_recurrence_preview_requires_session(client: AsyncClient, db_engin
 @pytest.mark.asyncio
 async def test_put_invalid_scope_rejected(client: AsyncClient, db_engine):
     await _unrestricted(client, "rp3@example.com")
-    r = await client.put(
-        "/events/whatever@webcaldav",
-        json={"calendar_id": 1, "title": "x", "start": "2026-06-22T09:00:00+00:00",
-              "end": "2026-06-22T10:00:00+00:00", "scope": "bogus"},
-    )
-    assert r.status_code == 400
+    # "thisprev" was dropped: only this / thisfuture / all are standard scopes.
+    for scope in ("bogus", "thisprev"):
+        r = await client.put(
+            "/events/whatever@webcaldav",
+            json={"calendar_id": 1, "title": "x", "start": "2026-06-22T09:00:00+00:00",
+                  "end": "2026-06-22T10:00:00+00:00", "scope": scope},
+        )
+        assert r.status_code == 400

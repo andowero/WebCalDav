@@ -155,7 +155,7 @@ async def get_events(
     return events
 
 
-_RECUR_SCOPES = {"all", "this", "thisfuture", "thisprev"}
+_RECUR_SCOPES = {"all", "this", "thisfuture"}
 
 
 class RecurrenceRule(BaseModel):

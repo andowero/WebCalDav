@@ -350,15 +350,6 @@ def _shift_until(vevent, delta: timedelta) -> None:
     _set_rrule(vevent, parts)
 
 
-def _next_after(vevent, pivot: date | datetime) -> date | datetime | None:
-    """First occurrence strictly after the pivot, in the master's value type."""
-    base = _as_dt(vevent.decoded("dtstart"))
-    nxt = rrulestr(_rrule_text(vevent), dtstart=base).after(_as_dt(pivot), inc=False)
-    if nxt is None:
-        return None
-    return nxt.date() if _is_all_day(vevent.decoded("dtstart")) else nxt
-
-
 def _count_through(vevent, pivot: date | datetime, inc: bool = True) -> int:
     """Number of occurrences from the series start through the pivot."""
     base = _as_dt(vevent.decoded("dtstart"))
@@ -366,35 +357,31 @@ def _count_through(vevent, pivot: date | datetime, inc: bool = True) -> int:
 
 
 def _truncate_until(vevent, pivot: date | datetime) -> None:
-    """Cap the series so the pivot and every later occurrence are dropped."""
+    """Cap the series so the pivot and every later occurrence are dropped.
+
+    UNTIL is set to the *last actual occurrence strictly before the pivot*, not
+    ``pivot - epsilon``. The editor's end-by-date field is date-granular, so a
+    mid-day UNTIL on the pivot's own day would round-trip to end-of-day on the
+    next "all" edit and silently re-admit the pivot occurrence into the series.
+    """
     parts = _rrule_parts(vevent)
     parts.pop("COUNT", None)
-    if isinstance(pivot, datetime):
-        until: date | datetime = pivot.astimezone(timezone.utc) - timedelta(seconds=1)
+    dtstart = vevent.decoded("dtstart")
+    base = _as_dt(dtstart)
+    last = rrulestr(_rrule_text(vevent), dtstart=base).before(_as_dt(pivot), inc=False)
+    until: date | datetime
+    if last is None:
+        # No occurrence before the pivot (callers guard against this); fall back.
+        if isinstance(pivot, datetime):
+            until = pivot.astimezone(timezone.utc) - timedelta(seconds=1)
+        else:
+            until = pivot - timedelta(days=1)
+    elif _is_all_day(dtstart):
+        until = last.date()
     else:
-        until = pivot - timedelta(days=1)
+        until = last.astimezone(timezone.utc)
     parts["UNTIL"] = [until]
     _set_rrule(vevent, parts)
-
-
-def _shift_start_to(vevent, new_start: date | datetime, consumed: int) -> None:
-    """Move the series start forward, preserving duration and decrementing COUNT."""
-    old_start = vevent.decoded("dtstart")
-    dur = (vevent.decoded("dtend") - old_start) if "dtend" in vevent else None
-    vevent.pop("dtstart", None)
-    vevent.add("dtstart", new_start)
-    if dur is not None:
-        vevent.pop("dtend", None)
-        vevent.add("dtend", new_start + dur)
-    parts = _rrule_parts(vevent)
-    if "COUNT" in parts:
-        try:
-            newc = int(parts["COUNT"][0]) - consumed
-        except (ValueError, TypeError, IndexError):
-            newc = None
-        if newc is not None and newc > 0:
-            parts["COUNT"] = [newc]
-            _set_rrule(vevent, parts)
 
 
 def _add_exdate(vevent, pivot: date | datetime) -> None:
@@ -463,14 +450,6 @@ def _remaining_rule_parts(vevent, pivot: date | datetime) -> dict:
     return parts
 
 
-def _bounded_rule_parts(vevent, count: int) -> dict:
-    """Original rule re-capped to exactly ``count`` occurrences (drops UNTIL)."""
-    parts = _rrule_parts(vevent)
-    parts.pop("UNTIL", None)
-    parts["COUNT"] = [count]
-    return parts
-
-
 def _apply_fields(
     vevent,
     title: str,
@@ -535,6 +514,51 @@ def _upsert_override(
     ical.add_component(ov)
 
 
+def _overrides(ical) -> list:
+    """Detached single-occurrence override VEVENTs (those with a RECURRENCE-ID)."""
+    return [
+        c for c in ical.subcomponents
+        if c.name == "VEVENT" and "recurrence-id" in c
+    ]
+
+
+def _shift_override(ve, delta: timedelta, new_uid: str | None = None) -> None:
+    """Relocate a detached override by ``delta`` (and optionally re-key its UID).
+
+    Only the recurrence id and time span move; the override's own customized
+    text fields (summary/location/description) are intentionally left alone so a
+    scoped edit on a *sibling* occurrence never clobbers them.
+    """
+    if new_uid is not None:
+        ve.pop("uid", None)
+        ve.add("uid", new_uid)
+    if not delta:
+        return
+    for key in ("recurrence-id", "dtstart", "dtend"):
+        if key in ve:
+            val = ve.decoded(key)
+            ve.pop(key, None)
+            ve.add(key, val + delta)
+
+
+def _pop_overrides(ical, keep) -> list:
+    """Remove overrides whose recurrence id fails ``keep(rid)``; return the removed.
+
+    ``keep`` receives the decoded RECURRENCE-ID; overrides it rejects are
+    detached from ``ical`` (to migrate elsewhere) and returned in document order.
+    """
+    removed = []
+    for comp in _overrides(ical):
+        try:
+            rid = comp.decoded("recurrence-id")
+        except Exception:
+            continue
+        if not keep(rid):
+            ical.subcomponents.remove(comp)
+            removed.append(comp)
+    return removed
+
+
 def _series_ical(
     uid: str,
     title: str,
@@ -543,6 +567,7 @@ def _series_ical(
     location: str | None,
     description: str | None,
     rule_parts: dict | None,
+    overrides: list | None = None,
 ) -> str:
     ical = ICalendar()
     ical.add("prodid", "-//WebCalDav//EN")
@@ -561,6 +586,8 @@ def _series_ical(
     if rule_parts:
         ve.add("rrule", rule_parts)
     ical.add_component(ve)
+    for ov in overrides or []:
+        ical.add_component(ov)
     return ical.to_ical().decode("utf-8")
 
 
@@ -582,6 +609,22 @@ def _sync_fetch_events(
             calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(events),
         )
         meta = _master_meta(cal, from_dt, to_dt)
+
+        # Slots covered by a detached override (keyed by uid + its RECURRENCE-ID).
+        # Some servers' expand still emits the master-generated occurrence at that
+        # slot alongside the moved override, which would show as a duplicate; the
+        # override wins, so suppress the plain occurrence at the same slot below.
+        overridden: set[tuple[str, str]] = set()
+        for event in events:
+            try:
+                for vevent in event.icalendar_instance.walk("VEVENT"):
+                    if "recurrence-id" not in vevent:
+                        continue
+                    uid = str(vevent.get("uid")) if vevent.get("uid") else str(event.url)
+                    overridden.add((uid, _dt_to_iso(vevent.decoded("recurrence-id"))))
+            except Exception as e:
+                logger.warning("Failed to scan event for overrides: %s", e)
+
         result: list[dict] = []
         for event in events:
             try:
@@ -590,6 +633,9 @@ def _sync_fetch_events(
                     if "dtstart" not in vevent:
                         continue
                     uid = str(vevent.get("uid")) if vevent.get("uid") else str(event.url)
+                    # Drop a plain occurrence that an override already covers.
+                    if "recurrence-id" not in vevent and (uid, _dt_to_iso(vevent.decoded("dtstart"))) in overridden:
+                        continue
                     summary = vevent.get("summary")
                     title = str(summary) if summary else "(No title)"
                     dtstart = vevent.decoded("dtstart")
@@ -708,6 +754,11 @@ def _sync_update_event(
                 old_start = master.decoded("dtstart")
                 anchor_start = old_start + delta
                 anchor_end = anchor_start + (end - start)
+                # A whole-series time shift moves every generated slot; carry the
+                # detached overrides along (times only) so they stay bound and
+                # keep their own customized fields rather than orphaning.
+                for ov in _overrides(ical):
+                    _shift_override(ov, delta)
             _apply_fields(master, title, anchor_start, anchor_end, location, description)
             if rrule is not None:
                 _set_rrule(master, _build_rrule(rrule, anchor_start))
@@ -733,6 +784,9 @@ def _sync_update_event(
             new_rule = _build_rrule(rrule, start) if rrule else _remaining_rule_parts(master, pivot)
             if _as_dt(pivot) <= base:
                 # Pivot is the first occurrence: just rewrite the whole series.
+                # A start shift moves every slot, so carry the overrides with it.
+                for ov in _overrides(ical):
+                    _shift_override(ov, start - base)
                 _apply_fields(master, title, start, end, location, description)
                 _set_rrule(master, new_rule)
                 event.data = ical.to_ical().decode("utf-8")
@@ -740,35 +794,18 @@ def _sync_update_event(
                 return
             # Cap the original before the pivot, then spin off a fresh series
             # carrying the edited fields for the pivot and everything after it.
+            # Overrides at/after the pivot belong to that new series, rebased by
+            # the start delta; ones before the pivot stay with the old master.
+            new_uid = f"{uuid.uuid4()}@webcaldav"
+            migrated = _pop_overrides(ical, keep=lambda rid: _as_dt(rid) < _as_dt(pivot))
+            for ov in migrated:
+                _shift_override(ov, start - pivot, new_uid=new_uid)
             _truncate_until(master, pivot)
             event.data = ical.to_ical().decode("utf-8")
             event.save()
             cal.save_event(_series_ical(
-                f"{uuid.uuid4()}@webcaldav", title, start, end, location, description, new_rule,
-            ))
-            return
-
-        if scope == "thisprev":
-            consumed = _count_through(master, pivot, inc=True)
-            nxt = _next_after(master, pivot)
-            orig_start = master.decoded("dtstart")
-            # Shift the whole past sub-series by the edit's start delta, capped
-            # to the occurrences up to and including the pivot.
-            delta = start - pivot
-            past_start = orig_start + delta
-            past_end = past_start + (end - start)
-            past_rule = _bounded_rule_parts(master, consumed)
-
-            if nxt is None:
-                # No future remains: the modified past series replaces the resource.
-                event.delete()
-            else:
-                _shift_start_to(master, nxt, consumed)
-                event.data = ical.to_ical().decode("utf-8")
-                event.save()
-            cal.save_event(_series_ical(
-                f"{uuid.uuid4()}@webcaldav", title, past_start, past_end,
-                location, description, past_rule,
+                new_uid, title, start, end, location, description, new_rule,
+                overrides=migrated,
             ))
             return
 
@@ -907,13 +944,9 @@ def _sync_delete_event(
                 event.delete()
                 return
             _truncate_until(master, pivot)
-        elif scope == "thisprev":
-            consumed = _count_through(master, pivot, inc=True)
-            nxt = _next_after(master, pivot)
-            if nxt is None:  # nothing survives after the pivot
-                event.delete()
-                return
-            _shift_start_to(master, nxt, consumed)
+            # Drop now-orphaned overrides at/after the pivot: their slots no
+            # longer exist on the shortened master.
+            _pop_overrides(ical, keep=lambda rid: _as_dt(rid) < _as_dt(pivot))
         else:
             event.delete()
             return

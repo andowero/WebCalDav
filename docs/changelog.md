@@ -2,6 +2,35 @@
 
 ## Unreleased — MVP
 
+### Fixed — "this and future" split left a ghost occurrence on re-edit (2026-06-07)
+- A `thisfuture` split capped the master's `RRULE` `UNTIL` at `pivot − 1 second`,
+  i.e. mid-day on the pivot's own day. Harmless alone, but the modal's end-by-date
+  field is date-granular: a later "All events" edit round-tripped that `UNTIL` to
+  end-of-day, which re-admitted the pivot occurrence into the master series — a
+  duplicate "ghost" event appeared on the pivot day. `_truncate_until` now sets
+  `UNTIL` to the **last actual occurrence strictly before the pivot**, so the
+  date-granular round-trip stays within the series. Regression test added.
+- Known limitation: sub-daily (hourly) frequencies still can't represent a
+  same-day split exactly via a date-granular end-by field; weekly/daily+ are fixed.
+
+### Changed — recurring scoped-edit redesign (2026-06-06)
+- Aligned the scope set to the three industry-standard options
+  (**This** / **This and following** / **All**); the non-standard
+  `thisprev` ("this and previous") scope was removed from the API, CalDAV
+  layer, and the scope chooser. `scope=thisprev` now returns 400.
+- A `thisfuture` split is documented as producing two **fully independent**
+  series (new UID, no `RELATED-TO` link) — matching Google/Apple/Outlook:
+  editing or deleting one half never affects the other. Single-occurrence
+  changes stay one resource via `RECURRENCE-ID` overrides; single deletes use
+  `EXDATE`.
+- **Fixed:** the "this" edit could duplicate the occurrence. A moved override
+  and its original master-generated slot could both render; the fetch layer now
+  suppresses the plain occurrence at any slot an override already covers.
+- **Fixed:** deleting `thisfuture` left `RECURRENCE-ID` overrides past the pivot
+  orphaned on the truncated master; they are now garbage-collected.
+- Tests: dropped the `thisprev` cases, added a `thisprev`→400 route test, a
+  no-duplicate regression, and an orphan-GC regression.
+
 ### Fixed — whole-series drag dropped UNTIL-bounded tail (2026-06-05)
 - Dragging one occurrence of a recurring series with scope `all` shifts the
   master `DTSTART` by the drag delta. Previously the `RRULE` was left untouched,

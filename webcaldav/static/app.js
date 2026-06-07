@@ -1364,7 +1364,7 @@
   }
 
   // ── Recurring scope chooser ──────────────────────────────────────────────────
-  // Resolves to one of all|thisprev|this|thisfuture, or null if cancelled.
+  // Resolves to one of this|thisfuture|all, or null if cancelled.
 
   let _scopeResolve = null;
 
