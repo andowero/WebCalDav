@@ -346,6 +346,65 @@ async def test_update_recurring_all_until_drag(edit_calendar):
     assert dates == ["2026-06-23", "2026-06-30"]
 
 
+async def test_update_recurring_all_shifts_exdate(edit_calendar):
+    """A deleted occurrence must stay deleted after the whole series is dragged.
+
+    Regression: delete Jun 19 (EXDATE), then drag the series +7d (scope "all")
+    by moving the Jun 26 occurrence to Jul 3. If the EXDATE does not shift with
+    DTSTART it stops matching any slot and the deleted day reappears.
+    """
+    base_url, url = edit_calendar
+    # Delete the Jun 19 occurrence -> EXDATE at 2026-06-19T09:00.
+    await delete_event(
+        base_url, USER, PASSWORD, url, "recur-event", scope="this", recurrence_id=_PIVOT
+    )
+    # Drag the whole series +7d.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Shifted", all_day=False,
+        start=datetime(2026, 7, 3, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 7, 3, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="all",
+        recurrence_id="2026-06-26T09:00:00+00:00",
+    )
+    starts = await _recur_starts(base_url, url)
+    # Series shifts to Jun 19, 26, Jul 3, 10. The Jun 19 EXDATE moves with it to
+    # Jun 26, so Jun 26 is excluded; Jun 19 is now a real slot and survives.
+    assert "2026-06-26" not in starts
+    assert "2026-06-19" in starts
+
+
+async def test_update_recurring_thisfuture_carries_exdate(edit_calendar):
+    """A deleted future occurrence stays deleted after a this+future split.
+
+    Regression: delete Jul 3 (EXDATE), then split the series at Jun 26 (scope
+    "thisfuture") onto a fresh series. The new series must carry the Jul 3
+    exclusion or the deleted occurrence reappears on it.
+    """
+    base_url, url = edit_calendar
+    # Delete the Jul 3 occurrence -> EXDATE.
+    await delete_event(
+        base_url, USER, PASSWORD, url, "recur-event", scope="this",
+        recurrence_id="2026-07-03T09:00:00+00:00",
+    )
+    # Split from Jun 26 forward onto a new series (no time change).
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Split", all_day=False,
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="thisfuture",
+        recurrence_id="2026-06-26T09:00:00+00:00",
+    )
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    dates = sorted(e["start"][:10] for e in events)
+    # Jul 3 stays excluded on the spun-off series; earlier + pivot slots survive.
+    assert "2026-07-03" not in dates
+    assert "2026-06-19" in dates and "2026-06-26" in dates
+
+
 async def test_update_recurring_this(edit_calendar):
     base_url, url = edit_calendar
     start = datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc)

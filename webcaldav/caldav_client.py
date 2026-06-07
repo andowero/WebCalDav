@@ -388,6 +388,35 @@ def _add_exdate(vevent, pivot: date | datetime) -> None:
     vevent.add("exdate", pivot)
 
 
+def _exdates(vevent) -> list:
+    """All EXDATE exclusion points as a flat list of date/datetime values."""
+    prop = vevent.get("exdate")
+    if not prop:
+        return []
+    props = prop if isinstance(prop, list) else [prop]
+    return [d.dt for p in props for d in p.dts]
+
+
+def _set_exdates(vevent, dts) -> None:
+    vevent.pop("exdate", None)
+    for d in dts:
+        vevent.add("exdate", d)
+
+
+def _shift_exdate(vevent, delta: timedelta) -> None:
+    """Shift EXDATE exclusion points by ``delta`` to track a whole-series move.
+
+    A deleted occurrence is recorded as an EXDATE at its original time. When the
+    series start shifts, every generated slot moves; the EXDATE must move with it
+    or it stops matching any occurrence and the deleted day silently reappears.
+    """
+    if not delta:
+        return
+    ex = _exdates(vevent)
+    if ex:
+        _set_exdates(vevent, [d + delta for d in ex])
+
+
 _FREQ_MAP = {
     "yearly": "YEARLY", "monthly": "MONTHLY", "weekly": "WEEKLY",
     "daily": "DAILY", "hourly": "HOURLY",
@@ -568,6 +597,7 @@ def _series_ical(
     description: str | None,
     rule_parts: dict | None,
     overrides: list | None = None,
+    exdates: list | None = None,
 ) -> str:
     ical = ICalendar()
     ical.add("prodid", "-//WebCalDav//EN")
@@ -585,6 +615,8 @@ def _series_ical(
         ve.add("description", description)
     if rule_parts:
         ve.add("rrule", rule_parts)
+    for d in exdates or []:
+        ve.add("exdate", d)
     ical.add_component(ve)
     for ov in overrides or []:
         ical.add_component(ov)
@@ -759,6 +791,7 @@ def _sync_update_event(
                 # keep their own customized fields rather than orphaning.
                 for ov in _overrides(ical):
                     _shift_override(ov, delta)
+                _shift_exdate(master, delta)
             _apply_fields(master, title, anchor_start, anchor_end, location, description)
             if rrule is not None:
                 _set_rrule(master, _build_rrule(rrule, anchor_start))
@@ -787,6 +820,7 @@ def _sync_update_event(
                 # A start shift moves every slot, so carry the overrides with it.
                 for ov in _overrides(ical):
                     _shift_override(ov, start - base)
+                _shift_exdate(master, start - base)
                 _apply_fields(master, title, start, end, location, description)
                 _set_rrule(master, new_rule)
                 event.data = ical.to_ical().decode("utf-8")
@@ -800,12 +834,15 @@ def _sync_update_event(
             migrated = _pop_overrides(ical, keep=lambda rid: _as_dt(rid) < _as_dt(pivot))
             for ov in migrated:
                 _shift_override(ov, start - pivot, new_uid=new_uid)
+            old_ex = _exdates(master)
+            _set_exdates(master, [d for d in old_ex if _as_dt(d) < _as_dt(pivot)])
+            migrated_ex = [d + (start - pivot) for d in old_ex if _as_dt(d) >= _as_dt(pivot)]
             _truncate_until(master, pivot)
             event.data = ical.to_ical().decode("utf-8")
             event.save()
             cal.save_event(_series_ical(
                 new_uid, title, start, end, location, description, new_rule,
-                overrides=migrated,
+                overrides=migrated, exdates=migrated_ex,
             ))
             return
 

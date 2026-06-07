@@ -31,7 +31,8 @@ Full application skeleton implemented and tested.
 - `GET/POST/DELETE /caldav-accounts`
 - `GET /calendars`, `PATCH /calendars/{id}`
 - `GET /events` (dummy demo events until real CalDAV is wired)
-- `GET/PUT /settings`
+- `GET/PUT /settings` (includes `auto_logout_enabled` / `auto_logout_timeout_seconds`)
+- `GET /auth/session` (non-refreshing idle-logout countdown state)
 - `GET /health`, `GET /metrics` (Prometheus)
 
 **Frontend**
@@ -167,6 +168,21 @@ Aligned recurring-event editing to the industry standard and fixed two bugs.
   real occurrence before the pivot (was `pivot − 1s`, mid-day), so a later
   date-granular "all" edit no longer re-admits the pivot occurrence.
 - 59 tests passing.
+
+### Recurring EXDATE follows whole-series moves (2026-06-07)
+
+Fixed a deleted occurrence reappearing after the series was moved.
+
+- A single delete records an `EXDATE`; a whole-series move (`all`) shifted
+  `DTSTART` / overrides / `UNTIL` but not `EXDATE`, so the exclusion stopped
+  matching any slot and the deleted day came back (and toggled on drag-back).
+  `_shift_exdate` now moves `EXDATE` with the series.
+- The `thisfuture` path is fixed too: the first-occurrence rewrite shifts
+  `EXDATE`, and a split migrates post-pivot exclusions onto the new series
+  (rebased), keeping pre-pivot ones on the master; EXDATEs thread through
+  `_series_ical`.
+- 76 tests passing (added two EXDATE-shift regressions; total also includes the
+  auto-logout suite).
 
 ## What is next
 

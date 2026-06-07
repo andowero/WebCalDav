@@ -2,6 +2,34 @@
 
 ## Unreleased — MVP
 
+### Added — adjustable / disableable auto-logout with live countdown (2026-06-07)
+- The top bar now shows a live "Logout in mm:ss" countdown until automatic
+  session logout (turns red under 60s, redirects to login at zero).
+- New per-user settings `auto_logout_enabled` and `auto_logout_timeout_seconds`
+  (Preferences panel: enable checkbox + minutes field), persisted on
+  `UserSettings`. Disabling auto-logout keeps the session alive indefinitely.
+- The timeout is carried on the in-memory `SessionEntry` (seeded at login from
+  the user's settings, falling back to the global `SESSION_IDLE_TIMEOUT`), and
+  updated live on settings save — no re-login needed.
+- New non-refreshing `GET /auth/session` endpoint reports
+  `{enabled, timeout_seconds, remaining_seconds}` for the countdown. Crucially it
+  uses `SessionStore.peek()`/`status()` which do **not** reset the sliding idle
+  window, so polling the countdown cannot keep an idle session alive.
+- Server rejects timeouts below 60s (`422`). No DB migration — schema is recreated.
+
+### Fixed — deleted occurrence reappeared after moving the whole series (2026-06-07)
+- A single-occurrence delete records an `EXDATE` at that occurrence's original
+  time. Moving the **whole** series (drag, scope `all`) shifted `DTSTART`,
+  detached overrides, and the `RRULE` `UNTIL` bound by the same delta — but left
+  `EXDATE` stationary, so it no longer matched any generated slot and the deleted
+  day reappeared; dragging the series back re-aligned the slots and it vanished
+  again. `_shift_exdate` now carries `EXDATE` along with the series.
+- The same gap on the **"this and following"** path is closed too: the
+  first-occurrence rewrite shifts `EXDATE` with `DTSTART`, and a split migrates
+  the master's post-pivot exclusions onto the spun-off series (rebased by the
+  start delta), keeping pre-pivot ones on the truncated master. EXDATEs now
+  thread through `_series_ical`. Two regression tests added.
+
 ### Fixed — "this and future" split left a ghost occurrence on re-edit (2026-06-07)
 - A `thisfuture` split capped the master's `RRULE` `UNTIL` at `pivot − 1 second`,
   i.e. mid-day on the pivot's own day. Harmless alone, but the modal's end-by-date
