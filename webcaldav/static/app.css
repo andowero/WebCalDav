@@ -122,6 +122,18 @@ body {
   flex: 1;
 }
 
+.logout-countdown {
+  color: #888;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.logout-countdown--warn {
+  color: #c0392b;
+  font-weight: 600;
+}
+
 .btn-outline {
   padding: 0.3rem 0.8rem;
   border: 1px solid #ccc;

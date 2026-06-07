@@ -302,6 +302,13 @@
       timefmt = s.time_format || '24h';
       datefmt = s.date_format || 'YYYY-MM-DD';
       document.getElementById('pref-fdow').value = String(s.first_day_of_week ?? 1);
+      const enabled = s.auto_logout_enabled ?? true;
+      const mins = Math.max(1, Math.round((s.auto_logout_timeout_seconds ?? 3600) / 60));
+      const enEl = document.getElementById('pref-auto-logout-enabled');
+      const minEl = document.getElementById('pref-auto-logout-min');
+      enEl.checked = enabled;
+      minEl.value = String(mins);
+      minEl.disabled = !enabled;
     } catch (_) {}
     populateTimezones(tz);
     document.getElementById('pref-timefmt').value = timefmt;
@@ -338,6 +345,12 @@
       }
     });
 
+    // Grey out the minutes field while auto-logout is disabled.
+    const autoLogoutEnabledEl = document.getElementById('pref-auto-logout-enabled');
+    autoLogoutEnabledEl.addEventListener('change', () => {
+      document.getElementById('pref-auto-logout-min').disabled = !autoLogoutEnabledEl.checked;
+    });
+
     // Prefs form
     const prefsForm = document.getElementById('prefs-form');
     prefsForm.addEventListener('submit', async (e) => {
@@ -349,18 +362,30 @@
         const fdow = parseInt(document.getElementById('pref-fdow').value, 10);
         const timefmt = document.getElementById('pref-timefmt').value;
         const datefmt = document.getElementById('pref-datefmt').value;
+        const autoEnabled = document.getElementById('pref-auto-logout-enabled').checked;
+        const autoMin = parseInt(document.getElementById('pref-auto-logout-min').value, 10);
+        if (autoEnabled && (!Number.isFinite(autoMin) || autoMin < 1)) {
+          throw new Error('Logout time must be at least 1 minute');
+        }
+        const autoSecs = autoEnabled ? autoMin * 60 : (window.__SETTINGS__?.auto_logout_timeout_seconds ?? 3600);
         await apiPut('/settings', {
           timezone: tz,
           first_day_of_week: fdow,
           time_format: timefmt,
           date_format: datefmt,
+          auto_logout_enabled: autoEnabled,
+          auto_logout_timeout_seconds: autoSecs,
         });
         window.__SETTINGS__ = window.__SETTINGS__ || {};
         window.__SETTINGS__.timezone = tz;
         window.__SETTINGS__.first_day_of_week = fdow;
         window.__SETTINGS__.time_format = timefmt;
         window.__SETTINGS__.date_format = datefmt;
+        window.__SETTINGS__.auto_logout_enabled = autoEnabled;
+        window.__SETTINGS__.auto_logout_timeout_seconds = autoSecs;
         applyCalendarPrefs(tz, fdow, timefmt, datefmt);
+        // Live session timeout changed server-side; resync the countdown.
+        refreshLogoutCountdown();
         msg.textContent = 'Saved.';
         msg.className = 'info-msg';
         msg.style.display = '';
@@ -1450,6 +1475,79 @@
     }
   }
 
+  // ── Idle-logout countdown ───────────────────────────────────────────────────
+  // The server uses a sliding idle window reset by any data request. We poll the
+  // non-refreshing GET /auth/session to read the true remaining time, then tick
+  // locally between polls. Hitting zero logs the user out.
+
+  let _logoutEnabled = true;
+  let _logoutRemaining = null; // seconds, locally interpolated
+  let _logoutTick = null;
+  let _logoutPoll = null;
+  let _loggingOut = false;
+
+  function fmtDuration(secs) {
+    secs = Math.max(0, Math.floor(secs));
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+  }
+
+  function renderLogoutCountdown() {
+    const el = document.getElementById('logout-countdown');
+    if (!el) return;
+    if (!_logoutEnabled) {
+      el.textContent = 'Auto-logout off';
+      el.classList.remove('logout-countdown--warn');
+      return;
+    }
+    if (_logoutRemaining == null) {
+      el.textContent = '';
+      return;
+    }
+    el.textContent = 'Logout in ' + fmtDuration(_logoutRemaining);
+    el.classList.toggle('logout-countdown--warn', _logoutRemaining <= 60);
+  }
+
+  async function doAutoLogout() {
+    if (_loggingOut) return;
+    _loggingOut = true;
+    if (_logoutTick) clearInterval(_logoutTick);
+    if (_logoutPoll) clearInterval(_logoutPoll);
+    try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
+    window.location.href = '/';
+  }
+
+  async function refreshLogoutCountdown() {
+    try {
+      const r = await fetch('/auth/session');
+      if (r.status === 401) { doAutoLogout(); return; }
+      if (!r.ok) return;
+      const d = await r.json();
+      _logoutEnabled = !!d.enabled;
+      _logoutRemaining = d.enabled ? d.remaining_seconds : null;
+      renderLogoutCountdown();
+    } catch (_) {}
+  }
+
+  function startLogoutCountdown() {
+    const s = window.__SETTINGS__ || {};
+    _logoutEnabled = s.auto_logout_enabled ?? true;
+    _logoutRemaining = _logoutEnabled ? (s.auto_logout_timeout_seconds ?? null) : null;
+    renderLogoutCountdown();
+    refreshLogoutCountdown();
+    _logoutTick = setInterval(() => {
+      if (!_logoutEnabled || _logoutRemaining == null) return;
+      _logoutRemaining -= 1;
+      if (_logoutRemaining <= 0) { _logoutRemaining = 0; renderLogoutCountdown(); doAutoLogout(); return; }
+      renderLogoutCountdown();
+    }, 1000);
+    // Resync with server truth (also catches activity from other tabs/requests).
+    _logoutPoll = setInterval(refreshLogoutCountdown, 10000);
+  }
+
   // ── Calendar page ───────────────────────────────────────────────────────────
 
   function initCalendar() {
@@ -1459,10 +1557,13 @@
     if (window.__USER_EMAIL__) emailEl.textContent = window.__USER_EMAIL__;
 
     document.getElementById('btn-logout').addEventListener('click', async () => {
+      if (_logoutTick) clearInterval(_logoutTick);
+      if (_logoutPoll) clearInterval(_logoutPoll);
       await fetch('/auth/logout', { method: 'POST' });
       window.location.href = '/';
     });
 
+    startLogoutCountdown();
     initSettingsPanel();
     initEventModal();
 

@@ -16,7 +16,7 @@
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }} };
 </script>
 
 <!-- ── Login ── -->
@@ -57,6 +57,7 @@
   <header class="top-bar">
     <span class="app-name">WebCalDav</span>
     <span class="user-email" id="header-email"></span>
+    <span class="logout-countdown" id="logout-countdown" title="Time until automatic logout"></span>
     <button id="btn-settings" class="btn-outline">Settings</button>
     <button id="btn-logout" class="btn-outline">Log out</button>
   </header>
@@ -252,6 +253,12 @@
         <option value="MM/DD/YYYY">MM/DD/YYYY</option>
         <option value="DD/MM/YYYY">DD/MM/YYYY</option>
       </select>
+      <label class="ev-check">
+        <input type="checkbox" id="pref-auto-logout-enabled">
+        Automatic logout after inactivity
+      </label>
+      <label>Logout after (minutes)</label>
+      <input id="pref-auto-logout-min" type="number" min="1" step="1" value="60">
       <button type="submit">Save</button>
     </form>
   </section>

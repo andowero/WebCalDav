@@ -12,7 +12,7 @@ from ..config import settings
 from ..crypto import derive_kek, generate_dek, make_verifier, unwrap_dek, verify_kek, wrap_dek
 from ..deps import get_current_session, get_db, get_session_store
 from ..metrics import active_sessions
-from ..models import User
+from ..models import User, UserSettings
 from ..session import SessionEntry, SessionStore
 
 logger = structlog.get_logger()
@@ -63,7 +63,17 @@ async def login(
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    session_id = store.create(user.id, dek, user.must_change_password)
+    s = (
+        await db.execute(select(UserSettings).where(UserSettings.user_id == user.id))
+    ).scalar_one_or_none()
+    if s is not None and not s.auto_logout_enabled:
+        idle_timeout: int | None = None
+    elif s is not None:
+        idle_timeout = s.auto_logout_timeout_seconds
+    else:
+        idle_timeout = settings.session_idle_timeout
+
+    session_id = store.create(user.id, dek, user.must_change_password, idle_timeout)
     active_sessions.set(store.active_count)
 
     logger.info("login", user_id=user.id, restricted=user.must_change_password)
@@ -89,6 +99,24 @@ async def logout(
         active_sessions.set(store.active_count)
     response.delete_cookie("session_id")
     return {"ok": True}
+
+
+@router.get("/session")
+async def session_status(
+    session_id: str | None = Cookie(default=None),
+    store: SessionStore = Depends(get_session_store),
+) -> dict:
+    """Idle-logout countdown state. Non-refreshing: does NOT reset the timer."""
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    status = store.status(session_id)
+    if status is None:
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+    return {
+        "enabled": status.enabled,
+        "timeout_seconds": status.timeout_seconds,
+        "remaining_seconds": status.remaining_seconds,
+    }
 
 
 @router.post("/change-password")
