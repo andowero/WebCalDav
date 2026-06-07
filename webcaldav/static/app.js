@@ -709,22 +709,30 @@
     pop.hidden = true;
     pop.innerHTML =
       `<div class="ev-cal-pop-head">` +
-      `<button type="button" class="ev-cal-nav" data-d="-1" aria-label="Previous month">‹</button>` +
-      `<span class="ev-cal-title"></span>` +
-      `<button type="button" class="ev-cal-nav" data-d="1" aria-label="Next month">›</button>` +
+      `<button type="button" class="ev-cal-nav" data-d="-1" aria-label="Previous">‹</button>` +
+      `<button type="button" class="ev-cal-title"></button>` +
+      `<button type="button" class="ev-cal-nav" data-d="1" aria-label="Next">›</button>` +
       `</div><div class="ev-cal-grid"></div>`;
     document.body.appendChild(pop);
     pop.querySelectorAll('.ev-cal-nav').forEach((b) => {
       b.addEventListener('click', () => {
         if (!_calState) return;
-        _calState.view = _calState.view.plus({ months: +b.dataset.d });
+        // Day grid steps by month; month grid steps by year.
+        const unit = _calState.mode === 'months' ? 'years' : 'months';
+        _calState.view = _calState.view.plus({ [unit]: +b.dataset.d });
         renderCalGrid();
       });
+    });
+    // Clicking the title drills out from days to the month picker.
+    pop.querySelector('.ev-cal-title').addEventListener('click', () => {
+      if (!_calState || _calState.mode === 'months') return;
+      _calState.mode = 'months';
+      renderCalGrid();
     });
     // Click outside or Escape closes; mousedown so a re-click on the button toggles.
     document.addEventListener('mousedown', (e) => {
       if (pop.hidden) return;
-      if (pop.contains(e.target) || e.target.closest('.ev-cal-btn')) return;
+      if (pop.contains(e.target) || e.target.closest('.ev-cal-btn, .fc-toolbar-title')) return;
       closeDatePicker();
     });
     _calPop = pop;
@@ -732,8 +740,10 @@
   }
 
   function renderCalGrid() {
+    if (_calState.mode === 'months') { renderCalMonths(); return; }
     const pop = _calPop;
     const view = _calState.view;
+    pop.querySelector('.ev-cal-grid').classList.remove('months');
     pop.querySelector('.ev-cal-title').textContent = view.toFormat('LLLL yyyy');
     const fdow = firstDayOfWeek();
     const header = Array.from({ length: 7 }, (_, i) =>
@@ -743,7 +753,7 @@
     const startDow = monthStart.weekday % 7;
     const lead = ((startDow - fdow) % 7 + 7) % 7;
     const gridStart = monthStart.minus({ days: lead });
-    const selected = getDateFieldValue(_calState.prefix);
+    const selected = _calState.getSelected();
     const today = luxon.DateTime.local().toFormat('yyyy-MM-dd');
     let cells = '';
     for (let i = 0; i < 42; i++) {
@@ -758,23 +768,83 @@
     pop.querySelector('.ev-cal-grid').innerHTML = header + cells;
     pop.querySelectorAll('.ev-cal-day').forEach((b) => {
       b.addEventListener('click', () => {
-        setDateFieldValue(_calState.prefix, b.dataset.iso);
-        _calState.onChange();
+        _calState.commit(b.dataset.iso);
         closeDatePicker();
       });
     });
   }
 
-  function openDatePicker(prefix, btn, onChange) {
+  function renderCalMonths() {
+    const pop = _calPop;
+    const view = _calState.view;
+    const grid = pop.querySelector('.ev-cal-grid');
+    grid.classList.add('months');
+    pop.querySelector('.ev-cal-title').textContent = view.toFormat('yyyy');
+    const labels = luxon.Info.months('short');
+    const selISO = _calState.getSelected();
+    const sel = selISO ? luxon.DateTime.fromISO(selISO) : null;
+    const now = luxon.DateTime.local();
+    let cells = '';
+    for (let m = 1; m <= 12; m++) {
+      const cls = ['ev-cal-month'];
+      if (sel && sel.year === view.year && sel.month === m) cls.push('selected');
+      else if (now.year === view.year && now.month === m) cls.push('today');
+      cells += `<button type="button" class="${cls.join(' ')}" data-month="${m}">${labels[m - 1]}</button>`;
+    }
+    grid.innerHTML = cells;
+    grid.querySelectorAll('.ev-cal-month').forEach((b) => {
+      b.addEventListener('click', () => {
+        const m = +b.dataset.month;
+        if (_calState.selectMonth) {
+          _calState.commit(view.set({ month: m }).startOf('month').toFormat('yyyy-MM-dd'));
+          closeDatePicker();
+        } else {
+          _calState.view = view.set({ month: m });
+          _calState.mode = 'days';
+          renderCalGrid();
+        }
+      });
+    });
+  }
+
+  // Generic mini-picker open. `commit(iso)` applies the chosen date; `getSelected`
+  // returns the value to highlight; `selectMonth` makes the month grid commit
+  // directly instead of drilling into days.
+  function openCalPicker({ anchor, base, mode, selectMonth, getSelected, commit }) {
     const pop = ensureCalPop();
-    const cur = getDateFieldValue(prefix);
-    const view = (cur ? luxon.DateTime.fromISO(cur) : luxon.DateTime.local()).startOf('month');
-    _calState = { prefix, onChange, view };
+    const view = (base ? luxon.DateTime.fromISO(base) : luxon.DateTime.local()).startOf('month');
+    _calState = { view, mode: mode || 'days', selectMonth: !!selectMonth, getSelected, commit };
     renderCalGrid();
     pop.hidden = false;
-    const r = btn.getBoundingClientRect();
+    const r = anchor.getBoundingClientRect();
     pop.style.top = `${r.bottom + 4}px`;
     pop.style.left = `${Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)}px`;
+  }
+
+  function openDatePicker(prefix, btn, onChange) {
+    const cur = getDateFieldValue(prefix);
+    // Empty end-date field: open on the event's start month (not today) so a
+    // future event doesn't force the user to scroll forward.
+    const fallback = (prefix === 'recur-until' && getDateFieldValue('start')) || null;
+    openCalPicker({
+      anchor: btn, base: cur || fallback, mode: 'days', selectMonth: false,
+      getSelected: () => getDateFieldValue(prefix),
+      commit: (iso) => { setDateFieldValue(prefix, iso); onChange(); },
+    });
+  }
+
+  // Click on the FullCalendar header title → jump-to-date picker. Month view
+  // picks a month (arrows step years); week/day views pick a day.
+  function openCalTitlePicker(titleEl) {
+    const isMonth = _fcCalendar.view.type === 'dayGridMonth';
+    const cs = _fcCalendar.view.currentStart; // UTC-based date marker
+    const cur = luxon.DateTime.fromJSDate(cs, { zone: 'utc' }).toFormat('yyyy-MM-dd');
+    openCalPicker({
+      anchor: titleEl, base: cur,
+      mode: isMonth ? 'months' : 'days', selectMonth: isMonth,
+      getSelected: () => cur,
+      commit: (iso) => { _fcCalendar.gotoDate(iso); },
+    });
   }
 
   function closeDatePicker() {
@@ -1671,6 +1741,14 @@
       eventResize: onEventChange,
     });
     _fcCalendar.render();
+
+    // The title node is re-rendered on navigation, so delegate from the calendar.
+    calendarEl.addEventListener('click', (e) => {
+      const t = e.target.closest('.fc-toolbar-title');
+      if (!t) return;
+      if (_calPop && !_calPop.hidden) { closeDatePicker(); return; } // toggle
+      openCalTitlePicker(t);
+    });
   }
 
   document.addEventListener('DOMContentLoaded', function () {

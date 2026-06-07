@@ -478,7 +478,8 @@ details#add-account-details summary {
   margin-bottom: 0.4rem;
 }
 
-.ev-cal-title { font-weight: 600; }
+.ev-cal-title { font-weight: 600; border: 0; background: none; cursor: pointer; font-size: inherit; color: inherit; }
+.ev-cal-title:hover { text-decoration: underline; }
 
 .ev-cal-nav {
   border: 1px solid #d0d0d0;
@@ -518,6 +519,25 @@ details#add-account-details summary {
 .ev-cal-day.other-month { color: #bbb; }
 .ev-cal-day.today { outline: 1px solid #93c5fd; }
 .ev-cal-day.selected { background: #2563eb; color: #fff; }
+
+.ev-cal-grid.months { grid-template-columns: repeat(3, 1fr); }
+
+.ev-cal-month {
+  border: 0;
+  background: none;
+  padding: 0.5rem 0;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #222;
+}
+
+.ev-cal-month:hover { background: #e6e6e6; }
+.ev-cal-month.today { outline: 1px solid #93c5fd; }
+.ev-cal-month.selected { background: #2563eb; color: #fff; }
+
+/* Header title is a jump-to-date trigger (opens the mini picker). */
+.fc-toolbar-title { cursor: pointer; }
+.fc-toolbar-title:hover { text-decoration: underline; }
 
 /* HH:MM spinner pair (+ AM/PM toggle in 12h mode). Rebuilt per modal-open to
    match the time_format setting. */

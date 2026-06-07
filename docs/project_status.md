@@ -184,6 +184,17 @@ Fixed a deleted occurrence reappearing after the series was moved.
 - 76 tests passing (added two EXDATE-shift regressions; total also includes the
   auto-logout suite).
 
+### Faster date-picker navigation (2026-06-07)
+
+UX improvements to the custom mini date picker; frontend only.
+
+- The picker title drills into a **month grid** (arrows step years); the empty
+  recurrence end-date field opens on the event's start month.
+- The **FullCalendar header title** is clickable: month view jumps to a chosen
+  month (year-stepping arrows), week/day views open a day picker and jump to the
+  chosen date. The picker was generalised (`openCalPicker`) to drive a form
+  field or `_fcCalendar.gotoDate`.
+
 ## What is next
 
 - v3: reminders and browser notifications.

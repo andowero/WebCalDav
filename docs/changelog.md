@@ -2,6 +2,18 @@
 
 ## Unreleased — MVP
 
+### Added — faster date-picker navigation (2026-06-07)
+- The mini date picker's title is now clickable: it switches to a **month grid**
+  (title shows just the year) and the ‹ › arrows step whole **years**; clicking a
+  month returns to that month's day grid. Makes jumping years ahead quick.
+- The recurrence **end-date** picker now opens on the event's **start** month
+  when empty, instead of today, so a future series doesn't force scrolling.
+- The **FullCalendar header title** is now clickable too. In month view it opens
+  the month grid (arrows step years) and jumps to the chosen month; in week/day
+  view it opens a day picker and jumps to the chosen date's week/day. The custom
+  picker was generalised (`openCalPicker`) to drive either a form field or
+  `gotoDate`.
+
 ### Added — adjustable / disableable auto-logout with live countdown (2026-06-07)
 - The top bar now shows a live "Logout in mm:ss" countdown until automatic
   session logout (turns red under 60s, redirects to login at zero).
