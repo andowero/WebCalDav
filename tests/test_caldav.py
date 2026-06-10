@@ -213,6 +213,42 @@ SUMMARY:Weekly sync
 END:VEVENT
 END:VCALENDAR"""
 
+# Mixed VALARMs: three editable duration triggers plus one EMAIL alarm that
+# must survive untouched (the editable reminder model never rewrites it).
+_ALARM_EVENT = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//webcaldav-test//EN
+BEGIN:VEVENT
+UID:alarm-event
+DTSTAMP:20260101T000000Z
+DTSTART:20260605T090000Z
+DTEND:20260605T100000Z
+SUMMARY:Alarmed
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Reminder
+TRIGGER:-PT15M
+END:VALARM
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Reminder
+TRIGGER:-PT1H
+END:VALARM
+BEGIN:VALARM
+ACTION:DISPLAY
+DESCRIPTION:Reminder
+TRIGGER:-P1W
+END:VALARM
+BEGIN:VALARM
+ACTION:EMAIL
+SUMMARY:Mail reminder
+DESCRIPTION:Mail me
+ATTENDEE:mailto:alice@example.com
+TRIGGER:-PT30M
+END:VALARM
+END:VEVENT
+END:VCALENDAR"""
+
 # UNTIL-bounded series: two occurrences, Jun 16 and Jun 23 (UNTIL Jun 24).
 _RECUR_UNTIL_EVENT = """BEGIN:VCALENDAR
 VERSION:2.0
@@ -240,6 +276,7 @@ def edit_calendar(radicale_server):
         cal.save_event(_EDIT_EVENT)
         cal.save_event(_EDIT_ALLDAY)
         cal.save_event(_RECUR_EVENT)
+        cal.save_event(_ALARM_EVENT)
         url = str(cal.url)
         try:
             yield base_url, url
@@ -811,3 +848,233 @@ async def test_update_recurring_this_no_duplicate(edit_calendar):
     jun19 = [v for v in view if v[0][:10] == "2026-06-19"]
     assert len(jun19) == 1
     assert jun19[0][1] == "Moved" and jun19[0][0][11:16] == "13:00"
+
+
+# ── Reminders (VALARM) ───────────────────────────────────────────────────────
+
+
+async def _fetch_one(base_url, url, uid) -> dict:
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    return {e["id"]: e for e in events}[uid]
+
+
+def _raw_ical(base_url, url, uid) -> str:
+    import caldav
+
+    with caldav.DAVClient(url=base_url, username=USER, password=PASSWORD) as client:
+        cal = caldav.Calendar(client=client, url=url)
+        return cal.event_by_uid(uid).data
+
+
+def _editable(reminders) -> list[dict]:
+    return [r for r in reminders if not r.get("readonly")]
+
+
+async def test_fetch_structured_reminders(edit_calendar):
+    base_url, url = edit_calendar
+    ev = await _fetch_one(base_url, url, "alarm-event")
+    rems = ev["extendedProps"]["reminders"]
+    editable = _editable(rems)
+    # Units normalize to the largest that divides evenly.
+    assert {"value": 15, "unit": "minutes"} in editable
+    assert {"value": 1, "unit": "hours"} in editable
+    assert {"value": 1, "unit": "weeks"} in editable
+    locked = [r for r in rems if r.get("readonly")]
+    assert len(locked) == 1
+    assert "30 minutes before" in locked[0]["text"]
+
+
+async def test_create_event_with_reminders(edit_calendar):
+    from datetime import timedelta
+
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 24, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 24, 10, 0, tzinfo=timezone.utc)
+    await create_event(
+        base_url, USER, PASSWORD, url, "with-rem@webcaldav",
+        title="Pinged", all_day=False, start=start, end=end,
+        location=None, description=None,
+        reminders=[timedelta(minutes=-10), timedelta(hours=-2)],
+    )
+    ev = await _fetch_one(base_url, url, "with-rem@webcaldav")
+    editable = _editable(ev["extendedProps"]["reminders"])
+    assert sorted(editable, key=lambda r: r["value"]) == [
+        {"value": 2, "unit": "hours"},
+        {"value": 10, "unit": "minutes"},
+    ]
+
+
+async def test_update_event_replaces_reminders(edit_calendar):
+    from datetime import timedelta
+
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "alarm-event",
+        title="Alarmed", all_day=False, start=start, end=end,
+        location=None, description=None,
+        reminders=[timedelta(minutes=-5)],
+    )
+    ev = await _fetch_one(base_url, url, "alarm-event")
+    rems = ev["extendedProps"]["reminders"]
+    assert _editable(rems) == [{"value": 5, "unit": "minutes"}]
+    # The EMAIL alarm is outside the editable model and must survive.
+    assert any(r.get("readonly") for r in rems)
+    raw = _raw_ical(base_url, url, "alarm-event")
+    assert raw.count("BEGIN:VALARM") == 2
+    assert "ACTION:EMAIL" in raw
+
+
+async def test_update_event_reminders_none_untouched(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc)
+    # A drag-style update never sends reminders; all four alarms must remain.
+    await update_event(
+        base_url, USER, PASSWORD, url, "alarm-event",
+        title="Dragged", all_day=False, start=start, end=end,
+        location=None, description=None,
+    )
+    raw = _raw_ical(base_url, url, "alarm-event")
+    assert raw.count("BEGIN:VALARM") == 4
+
+
+async def test_update_event_clears_reminders(edit_calendar):
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "alarm-event",
+        title="Silenced", all_day=False, start=start, end=end,
+        location=None, description=None, reminders=[],
+    )
+    raw = _raw_ical(base_url, url, "alarm-event")
+    # Only the non-editable EMAIL alarm survives a clear.
+    assert raw.count("BEGIN:VALARM") == 1
+    assert "ACTION:EMAIL" in raw
+
+
+async def test_create_allday_reminders_roundtrip(edit_calendar):
+    from datetime import date, timedelta
+
+    base_url, url = edit_calendar
+    await create_event(
+        base_url, USER, PASSWORD, url, "allday-rem@webcaldav",
+        title="Big day", all_day=True,
+        start=date(2026, 6, 25), end=date(2026, 6, 26),
+        location=None, description=None,
+        reminders=[
+            timedelta(hours=9) - timedelta(weeks=2),  # 2 weeks before at 09:00
+            timedelta(hours=9),                        # on the day at 09:00
+        ],
+    )
+    raw = _raw_ical(base_url, url, "allday-rem@webcaldav")
+    assert "TRIGGER:-P13DT15H" in raw
+    assert "TRIGGER:PT9H" in raw
+    ev = await _fetch_one(base_url, url, "allday-rem@webcaldav")
+    editable = _editable(ev["extendedProps"]["reminders"])
+    assert {"value": 2, "unit": "weeks", "time": "09:00"} in editable
+    assert {"value": 0, "unit": "days", "time": "09:00"} in editable
+
+
+async def test_update_recurring_all_reminders(edit_calendar):
+    from datetime import timedelta
+
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Weekly sync", all_day=False, start=start, end=end,
+        location=None, description=None, scope="all", recurrence_id=_PIVOT,
+        reminders=[timedelta(minutes=-30)],
+    )
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    occurrences = [e for e in events if e["id"] == "recur-event"]
+    assert len(occurrences) == 4
+    for occ in occurrences:
+        assert _editable(occ["extendedProps"]["reminders"]) == [
+            {"value": 30, "unit": "minutes"}
+        ]
+
+
+async def test_update_recurring_this_reminders(edit_calendar):
+    from datetime import timedelta
+
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Weekly sync", all_day=False, start=start, end=end,
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+        reminders=[timedelta(minutes=-10)],
+    )
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    occurrences = {e["start"][:10]: e for e in events if e["id"] == "recur-event"}
+    assert _editable(occurrences["2026-06-19"]["extendedProps"].get("reminders", [])) == [
+        {"value": 10, "unit": "minutes"}
+    ]
+    # Siblings keep the master's (empty) alarm set — no leak from the override.
+    for day in ("2026-06-12", "2026-06-26", "2026-07-03"):
+        assert occurrences[day]["extendedProps"].get("reminders") in (None, [])
+
+
+async def test_update_recurring_thisfuture_reminders(edit_calendar):
+    from datetime import timedelta
+
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Weekly sync", all_day=False, start=start, end=end,
+        location=None, description=None, scope="thisfuture", recurrence_id=_PIVOT,
+        reminders=[timedelta(minutes=-20)],
+    )
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    with_rem = sorted(
+        e["start"][:10] for e in events
+        if e["title"] == "Weekly sync"
+        and _editable(e["extendedProps"].get("reminders", []))
+        == [{"value": 20, "unit": "minutes"}]
+    )
+    without = sorted(
+        e["start"][:10] for e in events
+        if e["title"] == "Weekly sync"
+        and not e["extendedProps"].get("reminders")
+    )
+    # The new series (pivot onward) carries the reminder; the capped old one doesn't.
+    assert with_rem == ["2026-06-19", "2026-06-26", "2026-07-03"]
+    assert without == ["2026-06-12"]
+
+
+def test_extract_reminders_absolute_trigger_carries_iso():
+    """Absolute datetime triggers stay read-only but include the ISO instant
+    so the client can format it per the user's date/time settings."""
+    from icalendar import Calendar as ICalendar
+
+    from webcaldav.caldav_client import _extract_reminders
+
+    ical = ICalendar.from_ical(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\n"
+        "BEGIN:VEVENT\r\nUID:abs\r\nDTSTAMP:20260101T000000Z\r\n"
+        "DTSTART;VALUE=DATE:20260615\r\nDTEND;VALUE=DATE:20260616\r\n"
+        "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:R\r\n"
+        "TRIGGER;VALUE=DATE-TIME:20260614T090000Z\r\nEND:VALARM\r\n"
+        "END:VEVENT\r\nEND:VCALENDAR\r\n"
+    )
+    vevent = next(c for c in ical.walk("VEVENT"))
+    rems = _extract_reminders(vevent)
+    assert len(rems) == 1
+    assert rems[0]["readonly"] is True
+    assert rems[0]["at"] == "2026-06-14T09:00:00+00:00"

@@ -846,6 +846,11 @@ details#add-account-details summary {
   min-height: 1.2em;
 }
 
+.ev-reminders-box {
+  display: flex;
+  flex-direction: column;
+}
+
 .ev-reminders {
   display: flex;
   flex-direction: column;
@@ -860,6 +865,49 @@ details#add-account-details summary {
   border-radius: 4px;
 }
 .ev-reminder.empty-note { background: none; padding: 0; }
+.ev-reminder-locked { color: #999; }
+
+.ev-reminder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.ev-reminder-row .ev-reminder { flex: 1; }
+.ev-reminder-row .ev-reminder-word {
+  font-size: 13px;
+  color: #333;
+}
+.ev-reminder-value {
+  width: 4.5rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+}
+.ev-reminder-unit {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+}
+.ev-reminder-row .ev-hh,
+.ev-reminder-row .ev-mm {
+  width: 2.6em;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+.ev-reminder-del { font-size: 14px; }
+.ev-reminder-add {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  font-size: 18px;
+}
 
 .event-modal-body select {
   padding: 0.4rem 0.5rem;

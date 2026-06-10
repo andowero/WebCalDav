@@ -2,6 +2,41 @@
 
 ## Unreleased — MVP
 
+### Added — editable reminders / VALARM support (2026-06-11)
+- Reminders are now fully editable in the event modal: a "+" button adds a row
+  (number + unit + delete button), committed rows sort soonest-first and can
+  only be deleted (delete + re-add to change one). Saving the event persists
+  the full set as `ACTION:DISPLAY` VALARMs.
+- Timed events take minutes/hours/days/weeks before the start ("months" is not
+  an RFC 5545 duration and is deliberately absent). All-day events use a
+  different model: days/weeks before **at a time of day** ("2 weeks before at
+  9:00"), encoded as a single duration trigger off the DATE start (midnight) —
+  e.g. `-P13DT15H`; "0 days before at 9:00" is the positive trigger `PT9H`.
+  Toggling all-day in the modal drops rows the new mode can't express.
+- Wire format both ways is structured: `reminders: [{value, unit, time?}]` in
+  POST/PUT `/events` (absent = leave alarms untouched, so drag/resize updates
+  never clobber them; `[]` = clear) and in `extendedProps.reminders` on fetch.
+  Validation: value 0–10000, ≤10 reminders, all-day rows need `HH:MM` + a
+  days/weeks unit (422 otherwise).
+- Alarms outside the editable model — EMAIL alarms, absolute datetime triggers,
+  `RELATED=END`, after-event offsets — are never rewritten or deleted; they
+  show as dimmed read-only rows.
+- Recurring events honour the existing scope chooser: "all" replaces the
+  master's alarms (overrides keep their own), "this" snapshots the set onto the
+  detached override, "this + future" carries the master's alarms to the new
+  split series before applying the edit. Fixed a latent fallback leak where an
+  override's properties could bleed into sibling occurrences via the master
+  metadata map.
+- All reminder times honour the user's `time_format` and `date_format`
+  settings: the all-day row's time-of-day editor is the app's own hh:mm
+  (+ AM/PM) fields rather than a locale-driven native `<input type="time">`,
+  committed row text renders "9:00 PM" in 12h mode, and read-only
+  absolute-trigger alarms ship the ISO instant (`at`) so the client formats
+  them per settings instead of showing raw ISO.
+- 90 tests passing (9 new radicale round-trip tests covering unit
+  normalization, replace/clear/untouched semantics, all-day decomposition, and
+  per-scope persistence, plus API validation and absolute-trigger tests).
+
 ### Added — agenda view, global "+" button, default-view setting (2026-06-11)
 - New **Agenda** toolbar view: a flat chronological list of upcoming events from
   the start of today onward, one row per recurring occurrence, grouped under

@@ -452,6 +452,237 @@
     if (repeats) { updateRecurUI(); scheduleRecurPreview(); }
   }
 
+  // ── Reminders editor ─────────────────────────────────────────────────────────
+  //
+  // Editable reminders live in _reminders as {value, unit, time?, isNew}. Timed
+  // events use value+unit ("15 minutes before"); all-day events use days/weeks
+  // plus a time of day ("2 weeks before at 09:00"). Alarms the server can't
+  // express in that model (email, absolute-time, after-event) arrive as
+  // {text, readonly} and are shown dimmed without a delete button. Committed
+  // rows can only be deleted, not edited — delete and re-add to change one.
+  let _reminders = [];
+  let _remindersReadonly = [];
+  let _remindersEditable = false;
+
+  const REMINDER_UNIT_MIN = { minutes: 1, hours: 60, days: 1440, weeks: 10080 };
+
+  function reminderIsAllDay() {
+    return document.getElementById('ev-allday').checked;
+  }
+
+  // Minutes before the event start, for soonest-first sorting.
+  function reminderMinutes(r) {
+    if (r.time != null) {
+      const [h, m] = String(r.time).split(':').map(Number);
+      return r.value * (r.unit === 'weeks' ? 10080 : 1440) - ((h || 0) * 60 + (m || 0));
+    }
+    return r.value * (REMINDER_UNIT_MIN[r.unit] || 1);
+  }
+
+  // Render a canonical "HH:MM" per the 12h/24h time_format setting.
+  function reminderTimeText(hhmm) {
+    const [h, m] = String(hhmm).split(':').map(Number);
+    if (!timeIs12h()) return hhmm;
+    let h12 = h % 12;
+    if (h12 === 0) h12 = 12;
+    return `${h12}:${pad2(m || 0)} ${h >= 12 ? 'PM' : 'AM'}`;
+  }
+
+  function reminderText(r) {
+    if (r.time != null) {
+      const at = reminderTimeText(r.time);
+      if (r.value === 0) return `On the day at ${at}`;
+      const unit = r.value === 1 ? r.unit.slice(0, -1) : r.unit;
+      return `${r.value} ${unit} before at ${at}`;
+    }
+    if (r.value === 0) return 'At time of event';
+    const unit = r.value === 1 ? r.unit.slice(0, -1) : r.unit;
+    return `${r.value} ${unit} before`;
+  }
+
+  // hh:mm (+ AM/PM) inputs for an all-day reminder row, honoring time_format —
+  // a native <input type="time"> would follow the browser locale instead.
+  // The canonical value kept in r.time is always 24h "HH:MM".
+  function reminderTimeHtml(idx, hhmm) {
+    const [h24, m] = String(hhmm || '09:00').split(':').map(Number);
+    const h12mode = timeIs12h();
+    let hVal = h24;
+    if (h12mode) {
+      hVal = h24 % 12;
+      if (hVal === 0) hVal = 12;
+    }
+    return (
+      `<span class="ev-reminder-word">at</span>` +
+      `<input type="text" class="ev-hh ev-rem-hh" data-idx="${idx}" inputmode="numeric" maxlength="2" value="${pad2(hVal)}">` +
+      `<span class="ev-colon">:</span>` +
+      `<input type="text" class="ev-mm ev-rem-mm" data-idx="${idx}" inputmode="numeric" maxlength="2" value="${pad2(m || 0)}">` +
+      (h12mode
+        ? `<button type="button" class="ev-ampm ev-rem-ampm" data-idx="${idx}" tabindex="-1">${h24 >= 12 ? 'PM' : 'AM'}</button>`
+        : '')
+    );
+  }
+
+  // Absolute-trigger alarms arrive with an ISO instant; render it per the
+  // user's date/time-format settings instead of the server's raw ISO text.
+  function readonlyReminderAtText(iso) {
+    const dt = luxon.DateTime.fromISO(iso, { setZone: true }).setZone(effectiveTz());
+    if (!dt.isValid) return `At ${iso}`;
+    const timeFmt = timeFormatKey() === '12h' ? 'h:mm a' : 'HH:mm';
+    return `At ${dt.toFormat(`${luxonDateFmt(dateFormatKey())} ${timeFmt}`)}`;
+  }
+
+  // Split the server's extendedProps.reminders into editable and read-only rows.
+  function resetReminders(list) {
+    _reminders = [];
+    _remindersReadonly = [];
+    (list || []).forEach((r) => {
+      if (!r || typeof r !== 'object') return;
+      if (r.readonly) {
+        _remindersReadonly.push(r.at ? readonlyReminderAtText(r.at) : (r.text || 'Reminder'));
+      } else if (r.unit) {
+        _reminders.push({ value: r.value, unit: r.unit, time: r.time });
+      }
+    });
+  }
+
+  function renderReminders() {
+    const box = document.getElementById('ev-reminders');
+    const addBtn = document.getElementById('ev-reminder-add');
+    addBtn.style.display = _remindersEditable ? '' : 'none';
+    const allDay = reminderIsAllDay();
+
+    // Committed rows sort soonest-first; rows still being typed stay last so
+    // they don't jump around under the cursor.
+    const committed = _reminders.filter((r) => !r.isNew)
+      .sort((a, b) => reminderMinutes(a) - reminderMinutes(b));
+    const fresh = _reminders.filter((r) => r.isNew);
+    _reminders = committed.concat(fresh);
+
+    const rows = [];
+    committed.forEach((r, i) => {
+      const del = _remindersEditable
+        ? `<button type="button" class="btn-icon ev-reminder-del" data-idx="${i}" aria-label="Delete reminder">×</button>`
+        : '';
+      rows.push(
+        `<div class="ev-reminder-row"><span class="ev-reminder">${escHtml(reminderText(r))}</span>${del}</div>`
+      );
+    });
+    fresh.forEach((r, i) => {
+      const idx = committed.length + i;
+      const units = allDay ? ['days', 'weeks'] : ['minutes', 'hours', 'days', 'weeks'];
+      const opts = units
+        .map((u) => `<option value="${u}"${u === r.unit ? ' selected' : ''}>${u}</option>`)
+        .join('');
+      const time = allDay ? reminderTimeHtml(idx, r.time) : '';
+      rows.push(
+        `<div class="ev-reminder-row">` +
+          `<input type="number" class="ev-reminder-value" data-idx="${idx}" min="0" max="10000" value="${escHtml(r.value)}">` +
+          `<select class="ev-reminder-unit" data-idx="${idx}">${opts}</select>` +
+          `<span class="ev-reminder-word">before</span>${time}` +
+          `<button type="button" class="btn-icon ev-reminder-del" data-idx="${idx}" aria-label="Delete reminder">×</button>` +
+        `</div>`
+      );
+    });
+    _remindersReadonly.forEach((text) => {
+      rows.push(
+        `<div class="ev-reminder-row"><span class="ev-reminder ev-reminder-locked">${escHtml(text)}</span></div>`
+      );
+    });
+    box.innerHTML = rows.length
+      ? rows.join('')
+      : '<div class="ev-reminder empty-note">None</div>';
+
+    box.querySelectorAll('.ev-reminder-del').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _reminders.splice(parseInt(btn.dataset.idx, 10), 1);
+        renderReminders();
+      });
+    });
+    box.querySelectorAll('.ev-reminder-value').forEach((inp) => {
+      inp.addEventListener('input', () => {
+        const r = _reminders[parseInt(inp.dataset.idx, 10)];
+        if (r) r.value = parseInt(inp.value, 10);
+      });
+    });
+    box.querySelectorAll('.ev-reminder-unit').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const r = _reminders[parseInt(sel.dataset.idx, 10)];
+        if (r) r.unit = sel.value;
+      });
+    });
+    // Read a row's hh/mm (+ AM/PM) back into canonical 24h r.time, re-padding
+    // the inputs as the start/end time fields do.
+    const syncRowTime = (idx) => {
+      const r = _reminders[idx];
+      const hEl = box.querySelector(`.ev-rem-hh[data-idx="${idx}"]`);
+      const mEl = box.querySelector(`.ev-rem-mm[data-idx="${idx}"]`);
+      const aEl = box.querySelector(`.ev-rem-ampm[data-idx="${idx}"]`);
+      if (!r || !hEl || !mEl) return;
+      const m = clampInt(mEl.value, 0, 59);
+      let h24;
+      if (aEl) {
+        const h12 = clampInt(hEl.value, 1, 12);
+        h24 = (h12 % 12) + (aEl.textContent === 'PM' ? 12 : 0);
+        hEl.value = pad2(h12);
+      } else {
+        h24 = clampInt(hEl.value, 0, 23);
+        hEl.value = pad2(h24);
+      }
+      mEl.value = pad2(m);
+      r.time = `${pad2(h24)}:${pad2(m)}`;
+    };
+    box.querySelectorAll('.ev-rem-hh, .ev-rem-mm').forEach((inp) => {
+      inp.addEventListener('change', () => syncRowTime(parseInt(inp.dataset.idx, 10)));
+    });
+    box.querySelectorAll('.ev-rem-ampm').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        btn.textContent = btn.textContent === 'AM' ? 'PM' : 'AM';
+        syncRowTime(parseInt(btn.dataset.idx, 10));
+      });
+    });
+  }
+
+  // The reminder rows the save request should carry (invalid rows dropped).
+  function collectReminders() {
+    const allDay = reminderIsAllDay();
+    const out = [];
+    _reminders.forEach((r) => {
+      const value = parseInt(r.value, 10);
+      if (!Number.isFinite(value) || value < 0 || value > 10000) return;
+      if (allDay) {
+        if (r.unit !== 'days' && r.unit !== 'weeks') return;
+        if (!r.time) return;
+        out.push({ value, unit: r.unit, time: r.time });
+      } else {
+        out.push({ value, unit: r.unit });
+      }
+    });
+    return out;
+  }
+
+  // Switching all-day changes the reminder model; rows that can't be expressed
+  // in the new mode are dropped (re-add them in the new format).
+  function remindersOnAllDayToggle() {
+    if (reminderIsAllDay()) {
+      _reminders = _reminders.filter((r) => r.unit === 'days' || r.unit === 'weeks');
+      _reminders.forEach((r) => { if (!r.time) r.time = '09:00'; });
+    } else {
+      _reminders = _reminders.filter((r) => r.time == null);
+    }
+    renderReminders();
+  }
+
+  function addReminderRow() {
+    if (!_remindersEditable) return;
+    if (reminderIsAllDay()) {
+      _reminders.push({ value: 1, unit: 'days', time: '09:00', isNew: true });
+    } else {
+      _reminders.push({ value: 15, unit: 'minutes', isNew: true });
+    }
+    renderReminders();
+  }
+
   // ── Recurrence editor ────────────────────────────────────────────────────────
   const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th'];
 
@@ -1058,6 +1289,8 @@
       el.disabled = !on;
     });
     document.getElementById('btn-event-save').style.display = on ? '' : 'none';
+    _remindersEditable = on;
+    renderReminders();
   }
 
   async function openEventModal(event) {
@@ -1110,15 +1343,7 @@
     document.getElementById('ev-location').value = props.location || '';
     document.getElementById('ev-notes').value = props.description || '';
 
-    const remEl = document.getElementById('ev-reminders');
-    const reminders = props.reminders || [];
-    if (reminders.length) {
-      remEl.innerHTML = reminders
-        .map((r) => `<div class="ev-reminder">${escHtml(r)}</div>`)
-        .join('');
-    } else {
-      remEl.innerHTML = '<div class="ev-reminder empty-note">None</div>';
-    }
+    resetReminders(props.reminders);
 
     // Demo events have no calendar and stay read-only. Recurring events are
     // editable, but saving asks which occurrences to change.
@@ -1219,8 +1444,7 @@
     document.getElementById('ev-repeats').disabled = false;
     document.getElementById('ev-recur-summary').style.display = 'none';
     resetRecurEditorDefaults();
-    document.getElementById('ev-reminders').innerHTML =
-      '<div class="ev-reminder empty-note">None</div>';
+    resetReminders([]);
 
     // Populate the calendar picker (create-only).
     const calField = document.getElementById('ev-calendar-field');
@@ -1304,6 +1528,8 @@
       location: document.getElementById('ev-location').value,
       description: document.getElementById('ev-notes').value,
       timezone: effectiveTz(),
+      // Always the full replacement set; [] clears all editable alarms.
+      reminders: collectReminders(),
     };
     const recurrence = getRecurrence();
     if (recurrence) body.recurrence = recurrence;
@@ -1391,8 +1617,10 @@
       applyAllDayToggle();
       refreshPrevBoundaries();
       recurOnStartChange();
+      remindersOnAllDayToggle();
     });
     document.getElementById('ev-repeats').addEventListener('change', applyRepeatsToggle);
+    document.getElementById('ev-reminder-add').addEventListener('click', addReminderRow);
     initRecurEditor();
     // Date-field and time-field listeners/steppers are bound per-open inside
     // renderDateFields / renderTimeFields.
@@ -1909,8 +2137,7 @@
     document.getElementById('ev-repeats').disabled = false;
     document.getElementById('ev-recur-summary').style.display = 'none';
     resetRecurEditorDefaults();
-    document.getElementById('ev-reminders').innerHTML =
-      '<div class="ev-reminder empty-note">None</div>';
+    resetReminders([]);
 
     const calField = document.getElementById('ev-calendar-field');
     const calSel = document.getElementById('ev-calendar');

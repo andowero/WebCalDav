@@ -67,10 +67,21 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 - An event modal opens on event click for viewing/editing, populated from the
   event's `extendedProps` (`description`, `location`, `recurrence`,
   `recurrenceRule`, `reminders`, `rawStart`/`rawEnd`); dates are formatted
-  client-side per the timezone + time format settings. Reminders remain
-  read-only; recurrence is fully editable via a recurrence editor (frequency,
-  interval, monthly by day-of-month or Nth/last weekday, end-by-date /
-  end-after-N) with a live last-occurrence preview.
+  client-side per the timezone + time format settings. Recurrence is fully
+  editable via a recurrence editor (frequency, interval, monthly by
+  day-of-month or Nth/last weekday, end-by-date / end-after-N) with a live
+  last-occurrence preview.
+- Reminders are editable rows in the modal ("+" to add, × to delete; no
+  in-place edit). Timed events use value + minutes/hours/days/weeks before;
+  all-day events use days/weeks before at a time of day (entered via the app's
+  own hh:mm + AM/PM fields so the 12h/24h `time_format` setting applies, and
+  rendered per that setting in row text). The save request
+  carries `reminders: [{value, unit, time?}]` (absent = don't touch alarms,
+  `[]` = clear); the server maps each row to one `ACTION:DISPLAY` VALARM
+  duration trigger and returns the same structured shape in
+  `extendedProps.reminders`. Alarms outside that model (EMAIL, absolute
+  triggers, `RELATED=END`, after-event) are preserved untouched and rendered
+  read-only.
 - Deleting or editing a recurring event opens a scope chooser
   (`this` / `this+future` / `all` — the three industry-standard options); the
   chosen scope and the occurrence's pivot are sent to the API. Dragging or resizing a

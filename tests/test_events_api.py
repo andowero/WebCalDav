@@ -66,3 +66,35 @@ async def test_put_invalid_scope_rejected(client: AsyncClient, db_engine):
                   "end": "2026-06-22T10:00:00+00:00", "scope": scope},
         )
         assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_reminders_validation(client: AsyncClient, db_engine):
+    await _unrestricted(client, "rem1@example.com")
+    base = {
+        "calendar_id": 1,
+        "title": "x",
+        "start": "2026-06-22T09:00:00+00:00",
+        "end": "2026-06-22T10:00:00+00:00",
+    }
+    bad_bodies = [
+        # negative value
+        {**base, "reminders": [{"value": -5, "unit": "minutes"}]},
+        # unknown unit (months is not an RFC 5545 duration)
+        {**base, "reminders": [{"value": 1, "unit": "months"}]},
+        # more than 10 reminders
+        {**base, "reminders": [{"value": i, "unit": "minutes"} for i in range(11)]},
+        # timed event must not carry a time of day
+        {**base, "reminders": [{"value": 15, "unit": "minutes", "time": "09:00"}]},
+        # all-day reminders need days/weeks...
+        {**base, "all_day": True, "start": "2026-06-22", "end": "2026-06-22",
+         "reminders": [{"value": 15, "unit": "minutes", "time": "09:00"}]},
+        # ...and a valid HH:MM time
+        {**base, "all_day": True, "start": "2026-06-22", "end": "2026-06-22",
+         "reminders": [{"value": 1, "unit": "days"}]},
+        {**base, "all_day": True, "start": "2026-06-22", "end": "2026-06-22",
+         "reminders": [{"value": 1, "unit": "days", "time": "25:00"}]},
+    ]
+    for body in bad_bodies:
+        r = await client.post("/events", json=body)
+        assert r.status_code == 422, body

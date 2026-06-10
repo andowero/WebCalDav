@@ -7,7 +7,7 @@
 | MVP       | Secure user login, read-only view of calendar events      | Complete |
 | v1        | Basic editing of calendar events -> without repetition    | Complete |
 | v2        | Editing of calendar events -> repetition                  | Complete |
-| v3        | Reminders and browser notifications                       | Not started |
+| v3        | Reminders and browser notifications                       | In progress — reminder editing done, notifications pending |
 
 ## Known issues
 
@@ -211,6 +211,33 @@ A fourth way to browse events plus quicker event creation.
   view loaded at sign-in; validated server-side (422 on unknown values).
 - 79 tests passing (added `default_view` API tests).
 
+### Editable reminders / VALARM (2026-06-11)
+
+First half of v3: reminders can now be created and deleted per event.
+
+- Event modal grows a reminder editor: "+" adds a row, rows sort soonest-first,
+  committed rows are delete-only (delete + re-add to change). Saving the event
+  persists the set as `ACTION:DISPLAY` VALARMs; absent `reminders` in a PUT
+  (drag/resize) leaves alarms untouched, `[]` clears.
+- Timed events: N minutes/hours/days/weeks before (no "months" — not an
+  RFC 5545 duration). All-day events: N days/weeks before **at HH:MM**, encoded
+  as one duration trigger off the DATE start (e.g. 2 weeks at 09:00 →
+  `-P13DT15H`; on-day 09:00 → `PT9H`).
+- Non-conforming alarms (EMAIL, absolute datetime triggers, `RELATED=END`,
+  after-event) are preserved verbatim and shown read-only.
+- Scope-aware for recurring events: "all" → master, "this" → override snapshot,
+  "this+future" → new split series inherits then replaces. Override reminders
+  are recovered from unexpanded components and no longer leak to siblings.
+- Reminder times follow the `time_format`/`date_format` settings everywhere:
+  custom hh:mm (+ AM/PM) inputs for the all-day time-of-day (not the
+  locale-driven native time input), formatted committed-row text, and
+  client-side formatting of absolute-trigger read-only alarms (server sends
+  the ISO instant as `at`).
+- 90 tests passing (radicale round-trips incl. unit normalization, all-day
+  decomposition, per-scope persistence; API validation; absolute-trigger
+  extraction).
+
 ## What is next
 
-- v3: reminders and browser notifications.
+- v3 remainder: browser notifications for reminders (Service Worker; see the
+  logged-out reminder question in architecture.md).

@@ -1,12 +1,14 @@
 import asyncio
+import re
 import uuid
 from datetime import date, timedelta, timezone
 from datetime import datetime as dt_type
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,6 +169,15 @@ class RecurrenceRule(BaseModel):
     count: int | None = None
 
 
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class Reminder(BaseModel):
+    value: int = Field(ge=0, le=10000)
+    unit: Literal["minutes", "hours", "days", "weeks"]
+    time: str | None = None  # "HH:MM"; required for all-day events
+
+
 class EventUpdate(BaseModel):
     calendar_id: int
     # Set on edit when the user moves the event to a different calendar; the
@@ -185,6 +196,46 @@ class EventUpdate(BaseModel):
     scope: str = "all"
     recurrence_id: str | None = None
     recurrence: RecurrenceRule | None = None
+    # None/absent = leave the event's alarms untouched (drag/resize updates);
+    # [] = remove all editable alarms; otherwise the full replacement set.
+    reminders: list[Reminder] | None = Field(default=None, max_length=10)
+
+    @model_validator(mode="after")
+    def _check_reminders(self) -> "EventUpdate":
+        for r in self.reminders or []:
+            if self.all_day:
+                if r.unit not in ("days", "weeks"):
+                    raise ValueError("all-day reminders must use days or weeks")
+                if r.time is None or not _TIME_RE.match(r.time):
+                    raise ValueError("all-day reminders need a time (HH:MM)")
+            elif r.time is not None:
+                raise ValueError("timed-event reminders must not set a time")
+        return self
+
+
+_UNIT_MINUTES = {"minutes": 1, "hours": 60, "days": 1440, "weeks": 10080}
+
+
+def _reminder_deltas(body: EventUpdate) -> list[timedelta] | None:
+    """Reminder rows -> VALARM trigger offsets (deduped, order preserved).
+
+    Timed events: a plain negative offset. All-day events: DTSTART is the date
+    (midnight), so "N days before at HH:MM" collapses to one duration trigger
+    of HH:MM minus N days (positive when N is 0, i.e. on the event day).
+    """
+    if body.reminders is None:
+        return None
+    deltas: list[timedelta] = []
+    for r in body.reminders:
+        if body.all_day:
+            hours, minutes = (int(p) for p in r.time.split(":"))  # type: ignore[union-attr]
+            days = r.value * (7 if r.unit == "weeks" else 1)
+            delta = timedelta(hours=hours, minutes=minutes) - timedelta(days=days)
+        else:
+            delta = -timedelta(minutes=r.value * _UNIT_MINUTES[r.unit])
+        if delta not in deltas:
+            deltas.append(delta)
+    return deltas
 
 
 async def _calendar_for(
@@ -261,6 +312,7 @@ async def post_event(
             location=body.location,
             description=body.description,
             rrule=rrule,
+            reminders=_reminder_deltas(body),
         )
     except Exception as e:
         logger.warning("event_create_failed", error=repr(e))
@@ -353,6 +405,7 @@ async def put_event(
                 end=end,
                 location=body.location,
                 description=body.description,
+                reminders=_reminder_deltas(body),
             )
             await delete_event(
                 account_url=src_account.url,
@@ -377,6 +430,7 @@ async def put_event(
                 scope=body.scope,
                 recurrence_id=body.recurrence_id,
                 rrule=rrule,
+                reminders=_reminder_deltas(body),
             )
     except EventNotFoundError:
         raise HTTPException(status_code=404, detail="Event not found")

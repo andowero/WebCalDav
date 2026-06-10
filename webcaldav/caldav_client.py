@@ -7,6 +7,7 @@ from typing import NamedTuple
 import caldav
 from caldav.elements.ical import CalendarColor
 from dateutil.rrule import rrulestr
+from icalendar import Alarm as IAlarm
 from icalendar import Calendar as ICalendar
 from icalendar import Event as IEvent
 from icalendar.prop import vRecur
@@ -208,17 +209,121 @@ def _reminder_to_text(trigger) -> str:
     return f"{span} {'before' if before else 'after'}"
 
 
-def _extract_reminders(vevent) -> list[str]:
-    reminders: list[str] = []
+def _classify_alarm(alarm, all_day: bool) -> timedelta | None:
+    """The trigger offset if this VALARM fits the editable reminder model.
+
+    Editable: a duration TRIGGER relative to DTSTART, non-EMAIL action, firing
+    at/before the event start (timed events) or no later than the event day
+    (all-day events). Everything else — absolute datetime triggers, RELATED=END,
+    email alarms, after-event offsets — is preserved untouched and surfaced
+    read-only, since rewriting it as a DISPLAY reminder would lose data.
+    """
+    if "trigger" not in alarm:
+        return None
+    try:
+        trigger = alarm.decoded("trigger")
+    except Exception:
+        return None
+    if not isinstance(trigger, timedelta):
+        return None
+    try:
+        prop = alarm["trigger"]
+        if isinstance(prop, list):
+            prop = prop[0]
+        if str(prop.params.get("RELATED", "START")).upper() == "END":
+            return None
+    except Exception:
+        return None
+    if str(alarm.get("action", "DISPLAY")).upper() == "EMAIL":
+        return None
+    if all_day:
+        # On-day reminders are positive offsets from the DATE start (midnight);
+        # anything a full day or more after no longer maps to "N days before".
+        return trigger if trigger < timedelta(days=1) else None
+    return trigger if trigger.total_seconds() <= 0 else None
+
+
+def _timedelta_to_value_unit(td: timedelta) -> dict:
+    """Negative/zero trigger offset -> {value, unit}, largest unit that fits."""
+    minutes = round(abs(td.total_seconds()) / 60)
+    if minutes and minutes % 10080 == 0:
+        return {"value": minutes // 10080, "unit": "weeks"}
+    if minutes and minutes % 1440 == 0:
+        return {"value": minutes // 1440, "unit": "days"}
+    if minutes and minutes % 60 == 0:
+        return {"value": minutes // 60, "unit": "hours"}
+    return {"value": minutes, "unit": "minutes"}
+
+
+def _timedelta_to_allday_parts(td: timedelta) -> dict:
+    """All-day trigger offset -> {value, unit, time}.
+
+    The DATE start is midnight, so the offset splits into whole days back plus
+    a time of day: -P13DT15H -> 14 days before at 09:00, +PT9H -> on the day
+    at 09:00, -PT15M -> 1 day before at 23:45.
+    """
+    trigger_min = round(td.total_seconds() / 60)
+    days_back, time_min = divmod(trigger_min, 1440)
+    days = -days_back
+    hhmm = f"{time_min // 60:02d}:{time_min % 60:02d}"
+    if days > 0 and days % 7 == 0:
+        return {"value": days // 7, "unit": "weeks", "time": hhmm}
+    return {"value": days, "unit": "days", "time": hhmm}
+
+
+def _extract_reminders(vevent) -> list[dict]:
+    try:
+        dtstart = vevent.decoded("dtstart")
+    except Exception:
+        dtstart = None
+    all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
+    reminders: list[dict] = []
     for alarm in vevent.walk("VALARM"):
         if "trigger" not in alarm:
+            continue
+        editable = _classify_alarm(alarm, all_day)
+        if editable is not None:
+            if all_day:
+                reminders.append(_timedelta_to_allday_parts(editable))
+            else:
+                reminders.append(_timedelta_to_value_unit(editable))
             continue
         try:
             trigger = alarm.decoded("trigger")
         except Exception:
             continue
-        reminders.append(_reminder_to_text(trigger))
+        entry: dict = {"text": _reminder_to_text(trigger), "readonly": True}
+        # Absolute datetime triggers also carry the ISO instant so the client
+        # can format it per the user's date/time-format settings.
+        if isinstance(trigger, datetime):
+            entry["at"] = _dt_to_iso(trigger)
+        reminders.append(entry)
     return reminders
+
+
+def _apply_alarms(vevent, triggers: list[timedelta] | None) -> None:
+    """Replace the VEVENT's editable VALARMs with one DISPLAY alarm per trigger.
+
+    ``None`` means "leave alarms alone" (drag/resize updates never touch them);
+    an empty list deletes all editable alarms. Alarms outside the editable model
+    (see ``_classify_alarm``) always survive.
+    """
+    if triggers is None:
+        return
+    try:
+        dtstart = vevent.decoded("dtstart")
+    except Exception:
+        dtstart = None
+    all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
+    for comp in list(vevent.subcomponents):
+        if comp.name == "VALARM" and _classify_alarm(comp, all_day) is not None:
+            vevent.subcomponents.remove(comp)
+    for trig in triggers:
+        alarm = IAlarm()
+        alarm.add("action", "DISPLAY")
+        alarm.add("description", "Reminder")
+        alarm.add("trigger", trig)
+        vevent.add_component(alarm)
 
 
 def _extract_props(vevent) -> dict:
@@ -243,30 +348,41 @@ def _extract_props(vevent) -> dict:
     return out
 
 
-def _master_meta(cal, from_dt: datetime, to_dt: datetime) -> dict[str, dict]:
-    """Map UID -> props from unexpanded masters.
+def _master_meta(
+    cal, from_dt: datetime, to_dt: datetime
+) -> tuple[dict[str, dict], dict[tuple[str, str], list]]:
+    """(UID -> master props, (UID, recurrence id) -> override reminders).
 
     The expanded search drops RRULE (and often VALARM) from each occurrence,
-    so recurrence/reminders are recovered from the master components here.
+    so recurrence/reminders are recovered from the unexpanded components here.
+    Override props stay out of the master map — an override's own alarms must
+    not leak to sibling occurrences via the fallback.
     """
     meta: dict[str, dict] = {}
+    override_reminders: dict[tuple[str, str], list] = {}
     try:
         masters = cal.search(start=from_dt, end=to_dt, event=True, expand=False)
     except Exception as e:
         logger.warning("master search failed url=%s: %s", cal.url, e)
-        return meta
+        return meta, override_reminders
     for event in masters:
         try:
             for vevent in event.icalendar_instance.walk("VEVENT"):
                 uid = str(vevent.get("uid")) if vevent.get("uid") else None
                 if not uid:
                     continue
+                if "recurrence-id" in vevent:
+                    rid = _dt_to_iso(vevent.decoded("recurrence-id"))
+                    reminders = _extract_reminders(vevent)
+                    if reminders:
+                        override_reminders[(uid, rid)] = reminders
+                    continue
                 props = _extract_props(vevent)
                 if props:
                     meta.setdefault(uid, {}).update(props)
         except Exception as e:
             logger.warning("Failed to parse master event: %s", e)
-    return meta
+    return meta, override_reminders
 
 
 class EventNotFoundError(Exception):
@@ -519,6 +635,7 @@ def _upsert_override(
     end: date | datetime,
     location: str | None,
     description: str | None,
+    reminders: list[timedelta] | None = None,
 ) -> None:
     """Add/replace a detached single-occurrence override (RECURRENCE-ID = pivot)."""
     for comp in list(ical.subcomponents):
@@ -540,6 +657,7 @@ def _upsert_override(
         ov.add("location", location)
     if description:
         ov.add("description", description)
+    _apply_alarms(ov, reminders)
     ical.add_component(ov)
 
 
@@ -598,6 +716,8 @@ def _series_ical(
     rule_parts: dict | None,
     overrides: list | None = None,
     exdates: list | None = None,
+    reminders: list[timedelta] | None = None,
+    alarms: list | None = None,
 ) -> str:
     ical = ICalendar()
     ical.add("prodid", "-//WebCalDav//EN")
@@ -617,6 +737,9 @@ def _series_ical(
         ve.add("rrule", rule_parts)
     for d in exdates or []:
         ve.add("exdate", d)
+    for a in alarms or []:
+        ve.add_component(a)
+    _apply_alarms(ve, reminders)
     ical.add_component(ve)
     for ov in overrides or []:
         ical.add_component(ov)
@@ -640,7 +763,7 @@ def _sync_fetch_events(
             "caldav_search done url=%s from=%s to=%s raw_count=%d",
             calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(events),
         )
-        meta = _master_meta(cal, from_dt, to_dt)
+        meta, override_reminders = _master_meta(cal, from_dt, to_dt)
 
         # Slots covered by a detached override (keyed by uid + its RECURRENCE-ID).
         # Some servers' expand still emits the master-generated occurrence at that
@@ -697,7 +820,12 @@ def _sync_fetch_events(
                     # change when the occurrence is moved; it is the pivot the
                     # server keys overrides on, so expose it for scoped edits.
                     if "recurrence-id" in vevent:
-                        extended["recurrenceId"] = _dt_to_iso(vevent.decoded("recurrence-id"))
+                        rid = _dt_to_iso(vevent.decoded("recurrence-id"))
+                        extended["recurrenceId"] = rid
+                        # Expansion may strip the override's VALARMs as well;
+                        # recover them from the unexpanded override component.
+                        if "reminders" not in inst and (uid, rid) in override_reminders:
+                            inst["reminders"] = override_reminders[(uid, rid)]
                     for key in (
                         "description", "location", "recurrence", "recurrenceRule", "reminders",
                     ):
@@ -755,6 +883,7 @@ def _sync_update_event(
     scope: str = "all",
     recurrence_id: str | None = None,
     rrule: dict | None = None,
+    reminders: list[timedelta] | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -793,6 +922,7 @@ def _sync_update_event(
                     _shift_override(ov, delta)
                 _shift_exdate(master, delta)
             _apply_fields(master, title, anchor_start, anchor_end, location, description)
+            _apply_alarms(master, reminders)
             if rrule is not None:
                 _set_rrule(master, _build_rrule(rrule, anchor_start))
             elif is_recurring and recurrence_id:
@@ -807,7 +937,10 @@ def _sync_update_event(
 
         if scope == "this":
             # Detach just this occurrence as a RECURRENCE-ID override.
-            _upsert_override(ical, master, pivot, title, start, end, location, description)
+            _upsert_override(
+                ical, master, pivot, title, start, end, location, description,
+                reminders=reminders,
+            )
             event.data = ical.to_ical().decode("utf-8")
             event.save()
             return
@@ -822,6 +955,7 @@ def _sync_update_event(
                     _shift_override(ov, start - base)
                 _shift_exdate(master, start - base)
                 _apply_fields(master, title, start, end, location, description)
+                _apply_alarms(master, reminders)
                 _set_rrule(master, new_rule)
                 event.data = ical.to_ical().decode("utf-8")
                 event.save()
@@ -840,9 +974,14 @@ def _sync_update_event(
             _truncate_until(master, pivot)
             event.data = ical.to_ical().decode("utf-8")
             event.save()
+            # The new series inherits the master's alarms; _apply_alarms then
+            # swaps the editable ones for the requested set (or keeps them all
+            # when reminders is None, e.g. a drag).
+            carried = [c for c in master.subcomponents if c.name == "VALARM"]
             cal.save_event(_series_ical(
                 new_uid, title, start, end, location, description, new_rule,
-                overrides=migrated, exdates=migrated_ex,
+                overrides=migrated, exdates=migrated_ex, reminders=reminders,
+                alarms=carried,
             ))
             return
 
@@ -865,6 +1004,7 @@ async def update_event(
     scope: str = "all",
     recurrence_id: str | None = None,
     rrule: dict | None = None,
+    reminders: list[timedelta] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="update_event").time():
         try:
@@ -884,6 +1024,7 @@ async def update_event(
                 scope,
                 recurrence_id,
                 rrule,
+                reminders,
             )
         except EventNotFoundError:
             raise
@@ -905,11 +1046,15 @@ def _sync_create_event(
     location: str | None,
     description: str | None,
     rrule: dict | None = None,
+    reminders: list[timedelta] | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         rule_parts = _build_rrule(rrule, start) if rrule else None
-        cal.save_event(_series_ical(uid, title, start, end, location, description, rule_parts))
+        cal.save_event(_series_ical(
+            uid, title, start, end, location, description, rule_parts,
+            reminders=reminders,
+        ))
 
 
 async def create_event(
@@ -925,6 +1070,7 @@ async def create_event(
     location: str | None,
     description: str | None,
     rrule: dict | None = None,
+    reminders: list[timedelta] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="create_event").time():
         try:
@@ -942,6 +1088,7 @@ async def create_event(
                 location,
                 description,
                 rrule,
+                reminders,
             )
         except Exception:
             caldav_request_errors_total.labels(operation="create_event").inc()
