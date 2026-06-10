@@ -980,14 +980,37 @@
     _prevEnd = readBoundary('end', allDay, tz);
   }
 
+  // Blank-create flow: hh/mm inputs start empty and only get a visible value
+  // once the user commits a date for that boundary.
+  function timeFieldsBlank(prefix) {
+    const hEl = document.getElementById(`ev-${prefix}-hh`);
+    const mEl = document.getElementById(`ev-${prefix}-mm`);
+    return !!hEl && !!mEl && hEl.value === '' && mEl.value === '';
+  }
+
+  // Blank-create flow: once one boundary is set, copy it into the other side's
+  // still-empty fields. Returns true if the date was filled.
+  function fillBlankBoundary(prefix, dt, allDay) {
+    if (getDateFieldValue(prefix)) return false;
+    setDateFieldValue(prefix, dt.toFormat('yyyy-MM-dd'));
+    if (!allDay && timeFieldsBlank(prefix)) setTimeParts(prefix, dt.hour, dt.minute);
+    return true;
+  }
+
   // From changed: keep the same duration by shifting To along with it.
   function onFromChange() {
     if (!_currentEvent || !_currentEvent.editable) return;
     const allDay = document.getElementById('ev-allday').checked;
     const tz = effectiveTz();
+    // A date typed into a blank row gets a visible midnight time.
+    if (!allDay && getDateFieldValue('start') && timeFieldsBlank('start')) {
+      setTimeParts('start', 0, 0);
+    }
     const newStart = readBoundary('start', allDay, tz);
     if (!newStart || !newStart.isValid) return;
-    if (_prevStart && _prevStart.isValid && _prevEnd && _prevEnd.isValid) {
+    if (fillBlankBoundary('end', newStart, allDay)) {
+      _prevEnd = readBoundary('end', allDay, tz);
+    } else if (_prevStart && _prevStart.isValid && _prevEnd && _prevEnd.isValid) {
       let newEnd;
       if (allDay) {
         const days = Math.round(_prevEnd.diff(_prevStart, 'days').days);
@@ -1007,9 +1030,14 @@
     if (!_currentEvent || !_currentEvent.editable) return;
     const allDay = document.getElementById('ev-allday').checked;
     const tz = effectiveTz();
-    const start = readBoundary('start', allDay, tz);
+    // A date typed into a blank row gets a visible midnight time.
+    if (!allDay && getDateFieldValue('end') && timeFieldsBlank('end')) {
+      setTimeParts('end', 0, 0);
+    }
     let newEnd = readBoundary('end', allDay, tz);
     if (!newEnd || !newEnd.isValid) return;
+    fillBlankBoundary('start', newEnd, allDay);
+    const start = readBoundary('start', allDay, tz);
     if (start && start.isValid && newEnd < start) {
       newEnd = start;
       writeBoundary('end', newEnd, allDay);
