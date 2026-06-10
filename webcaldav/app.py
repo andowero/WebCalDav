@@ -86,6 +86,7 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_fdow = 1
     user_settings_timefmt = "24h"
     user_settings_datefmt = "YYYY-MM-DD"
+    user_settings_default_view = "dayGridMonth"
     user_settings_auto_logout_enabled = True
     user_settings_auto_logout_timeout = 3600
 
@@ -111,6 +112,7 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_fdow = s.first_day_of_week
                         user_settings_timefmt = s.time_format
                         user_settings_datefmt = s.date_format
+                        user_settings_default_view = s.default_view
                         user_settings_auto_logout_enabled = s.auto_logout_enabled
                         user_settings_auto_logout_timeout = s.auto_logout_timeout_seconds
         except Exception:
@@ -126,6 +128,7 @@ async def root(request: Request) -> HTMLResponse:
             "fdow": user_settings_fdow,
             "timefmt": user_settings_timefmt,
             "datefmt": user_settings_datefmt,
+            "default_view": user_settings_default_view,
             "auto_logout_enabled": user_settings_auto_logout_enabled,
             "auto_logout_timeout": user_settings_auto_logout_timeout,
             "static_v": STATIC_VERSION,

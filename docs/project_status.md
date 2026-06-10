@@ -195,6 +195,22 @@ UX improvements to the custom mini date picker; frontend only.
   chosen date. The picker was generalised (`openCalPicker`) to drive a form
   field or `_fcCalendar.gotoDate`.
 
+### Agenda view, "+" FAB, default-view setting (2026-06-11)
+
+A fourth way to browse events plus quicker event creation.
+
+- **Agenda**: a custom infinitely-scrolling DOM panel (not a FullCalendar view)
+  listing upcoming events from the start of today, sorted by start, one row per
+  recurring occurrence, grouped under sticky day headers. Loads `GET /events`
+  in tiled 30-day windows on scroll; open-ended recurrence scrolls forever,
+  finite calendars stop after 6 empty windows. Rows open the standard edit
+  modal. The FC toolbar stays visible (title shows "Agenda"); any toolbar
+  button leaves the agenda.
+- **"+" FAB** in all views opens the create modal with no start/end preselected.
+- **`default_view` setting** (month/week/day/agenda) in Preferences picks the
+  view loaded at sign-in; validated server-side (422 on unknown values).
+- 79 tests passing (added `default_view` API tests).
+
 ## What is next
 
 - v3: reminders and browser notifications.

@@ -67,6 +67,7 @@ class UserSettings(Base):
     first_day_of_week: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     time_format: Mapped[str] = mapped_column(String, default="24h", nullable=False)
     date_format: Mapped[str] = mapped_column(String, default="YYYY-MM-DD", nullable=False)
+    default_view: Mapped[str] = mapped_column(String, default="dayGridMonth", nullable=False)
     auto_logout_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auto_logout_timeout_seconds: Mapped[int] = mapped_column(Integer, default=3600, nullable=False)
 

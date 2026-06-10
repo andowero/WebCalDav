@@ -12,12 +12,17 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 # Reject absurdly short timeouts (would log users out mid-action).
 MIN_AUTO_LOGOUT_SECONDS = 60
 
+# Allowed initial calendar views (three FullCalendar views + the custom agenda).
+VALID_DEFAULT_VIEWS = {"dayGridMonth", "timeGridWeek", "timeGridDay", "agenda"}
+DEFAULT_VIEW = "dayGridMonth"
+
 
 class SettingsOut(BaseModel):
     timezone: str
     first_day_of_week: int
     time_format: str
     date_format: str
+    default_view: str
     auto_logout_enabled: bool
     auto_logout_timeout_seconds: int
 
@@ -27,6 +32,7 @@ class SettingsIn(BaseModel):
     first_day_of_week: int | None = None
     time_format: str | None = None
     date_format: str | None = None
+    default_view: str | None = None
     auto_logout_enabled: bool | None = None
     auto_logout_timeout_seconds: int | None = None
 
@@ -37,6 +43,7 @@ def _to_out(s: UserSettings) -> SettingsOut:
         first_day_of_week=s.first_day_of_week,
         time_format=s.time_format,
         date_format=s.date_format,
+        default_view=s.default_view,
         auto_logout_enabled=s.auto_logout_enabled,
         auto_logout_timeout_seconds=s.auto_logout_timeout_seconds,
     )
@@ -57,6 +64,7 @@ async def get_settings(
             first_day_of_week=1,
             time_format="24h",
             date_format="YYYY-MM-DD",
+            default_view=DEFAULT_VIEW,
             auto_logout_enabled=True,
             auto_logout_timeout_seconds=3600,
         )
@@ -78,6 +86,12 @@ async def put_settings(
         raise HTTPException(
             status_code=422,
             detail=f"auto_logout_timeout_seconds must be >= {MIN_AUTO_LOGOUT_SECONDS}",
+        )
+
+    if body.default_view is not None and body.default_view not in VALID_DEFAULT_VIEWS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"default_view must be one of {sorted(VALID_DEFAULT_VIEWS)}",
         )
 
     result = await db.execute(
@@ -102,6 +116,8 @@ async def put_settings(
         s.time_format = body.time_format
     if body.date_format is not None:
         s.date_format = body.date_format
+    if body.default_view is not None:
+        s.default_view = body.default_view
     if body.auto_logout_enabled is not None:
         s.auto_logout_enabled = body.auto_logout_enabled
     if body.auto_logout_timeout_seconds is not None:

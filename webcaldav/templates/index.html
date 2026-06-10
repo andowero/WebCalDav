@@ -16,7 +16,7 @@
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }} };
 </script>
 
 <!-- ── Login ── -->
@@ -63,6 +63,14 @@
   </header>
   <div class="calendar-body">
     <div id="calendar"></div>
+    <div id="agenda" class="agenda" style="display:none">
+      <div id="agenda-scroll" class="agenda-scroll">
+        <div id="agenda-list"></div>
+        <div id="agenda-sentinel" class="agenda-sentinel"></div>
+        <div id="agenda-status" class="agenda-status" style="display:none"></div>
+      </div>
+    </div>
+    <button id="btn-create-fab" class="fab" type="button" aria-label="New event" title="New event">+</button>
   </div>
 </div>
 
@@ -252,6 +260,13 @@
         <option value="YYYY-MM-DD">YYYY-MM-DD</option>
         <option value="MM/DD/YYYY">MM/DD/YYYY</option>
         <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+      </select>
+      <label>Default view</label>
+      <select id="pref-default-view">
+        <option value="dayGridMonth">Month</option>
+        <option value="timeGridWeek">Week</option>
+        <option value="timeGridDay">Day</option>
+        <option value="agenda">Agenda</option>
       </select>
       <label class="ev-check">
         <input type="checkbox" id="pref-auto-logout-enabled">

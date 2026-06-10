@@ -2,6 +2,30 @@
 
 ## Unreleased — MVP
 
+### Added — agenda view, global "+" button, default-view setting (2026-06-11)
+- New **Agenda** toolbar view: a flat chronological list of upcoming events from
+  the start of today onward, one row per recurring occurrence, grouped under
+  sticky day headers (today highlighted). Rows honour the time/date-format and
+  timezone settings; clicking a row opens the normal edit modal (scope chooser
+  included) via a minimal FullCalendar-event shim.
+- The agenda is a custom DOM panel, not a FullCalendar view: it fetches
+  `GET /events` in tiled forward 30-day windows and appends on scroll
+  (IntersectionObserver sentinel + a post-load top-up loop that keeps fetching
+  until the sentinel sits ~300px below the fold). An open-ended recurring series
+  scrolls forever; a finite calendar stops after 6 consecutive empty windows
+  ("No more events." / "No upcoming events."). Fetch errors show an inline Retry.
+- While the agenda is open the FullCalendar header toolbar stays visible (only
+  the view area collapses), the header title reads **Agenda**, and any toolbar
+  button (views, prev/next/today) leaves the agenda; the title's date picker is
+  disabled there.
+- New **"+" floating action button** (bottom-right, all views) opens the create
+  modal with no start/end preselected (saving still requires a start date).
+- New `UserSettings.default_view` setting (`dayGridMonth` / `timeGridWeek` /
+  `timeGridDay` / `agenda`, default month) with a Preferences select; invalid
+  values are rejected with 422. The chosen view loads on sign-in. No DB
+  migration — schema recreated.
+- 79 tests passing (added `default_view` default/roundtrip/validation API tests).
+
 ### Added — faster date-picker navigation (2026-06-07)
 - The mini date picker's title is now clickable: it switches to a **month grid**
   (title shows just the year) and the ‹ › arrows step whole **years**; clicking a

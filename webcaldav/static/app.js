@@ -184,6 +184,8 @@
       _fcCalendar.setOption('views', fcViewFormats(datefmt));
       _fcCalendar.refetchEvents();
     });
+    // The agenda renders dates/times itself, so re-run it on a prefs change.
+    if (_agendaActive) { agendaReset(); agendaLoadMore(); }
   }
 
   function openSettings() {
@@ -197,7 +199,7 @@
     hide('settings-panel');
     // Calendars may have changed; drop the create-modal picker cache.
     _calendarsCache = null;
-    if (_fcCalendar) _fcCalendar.refetchEvents();
+    refreshViews();
   }
 
   async function loadSettings() {
@@ -302,6 +304,7 @@
       timefmt = s.time_format || '24h';
       datefmt = s.date_format || 'YYYY-MM-DD';
       document.getElementById('pref-fdow').value = String(s.first_day_of_week ?? 1);
+      document.getElementById('pref-default-view').value = s.default_view || 'dayGridMonth';
       const enabled = s.auto_logout_enabled ?? true;
       const mins = Math.max(1, Math.round((s.auto_logout_timeout_seconds ?? 3600) / 60));
       const enEl = document.getElementById('pref-auto-logout-enabled');
@@ -362,6 +365,7 @@
         const fdow = parseInt(document.getElementById('pref-fdow').value, 10);
         const timefmt = document.getElementById('pref-timefmt').value;
         const datefmt = document.getElementById('pref-datefmt').value;
+        const defaultView = document.getElementById('pref-default-view').value;
         const autoEnabled = document.getElementById('pref-auto-logout-enabled').checked;
         const autoMin = parseInt(document.getElementById('pref-auto-logout-min').value, 10);
         if (autoEnabled && (!Number.isFinite(autoMin) || autoMin < 1)) {
@@ -373,6 +377,7 @@
           first_day_of_week: fdow,
           time_format: timefmt,
           date_format: datefmt,
+          default_view: defaultView,
           auto_logout_enabled: autoEnabled,
           auto_logout_timeout_seconds: autoSecs,
         });
@@ -381,6 +386,7 @@
         window.__SETTINGS__.first_day_of_week = fdow;
         window.__SETTINGS__.time_format = timefmt;
         window.__SETTINGS__.date_format = datefmt;
+        window.__SETTINGS__.default_view = defaultView;
         window.__SETTINGS__.auto_logout_enabled = autoEnabled;
         window.__SETTINGS__.auto_logout_timeout_seconds = autoSecs;
         applyCalendarPrefs(tz, fdow, timefmt, datefmt);
@@ -1307,7 +1313,7 @@
         await apiPut(`/events/${encodeURIComponent(_currentEvent.id)}`, body);
       }
       closeEventModal();
-      if (_fcCalendar) _fcCalendar.refetchEvents();
+      refreshViews();
     } catch (err) {
       showError('ev-error', err.message);
     } finally {
@@ -1336,7 +1342,7 @@
     try {
       await apiDelete(`/events/${encodeURIComponent(_currentEvent.id)}?${qs}`);
       closeEventModal();
-      if (_fcCalendar) _fcCalendar.refetchEvents();
+      refreshViews();
     } catch (err) {
       showError('ev-error', err.message);
     } finally {
@@ -1418,7 +1424,7 @@
       }
       try {
         await apiDelete(`/events/${encodeURIComponent(ev.id)}?${qs}`);
-        if (_fcCalendar) _fcCalendar.refetchEvents();
+        refreshViews();
       } catch (err) {
         alert(err.message);
       }
@@ -1538,7 +1544,7 @@
     try {
       await apiPut(`/events/${encodeURIComponent(info.event.id)}`, body);
       // Reload so scope splits / overrides (new resources) render correctly.
-      if (_fcCalendar) _fcCalendar.refetchEvents();
+      refreshViews();
     } catch (err) {
       alert(err.message);
       info.revert();
@@ -1618,6 +1624,308 @@
     _logoutPoll = setInterval(refreshLogoutCountdown, 10000);
   }
 
+  // ── Agenda view ─────────────────────────────────────────────────────────────
+
+  // The agenda is a custom DOM panel (not a FullCalendar view) so it can grow
+  // forever: it fetches /events in tiled forward windows and appends rows on
+  // scroll. Open-ended recurrence keeps yielding rows so scroll never ends; a
+  // finite calendar stops after AGENDA_MAX_EMPTY consecutive empty windows.
+  const AGENDA_CHUNK_DAYS = 30;
+  const AGENDA_MAX_EMPTY = 6; // ~6 months of nothing → assume no more events
+  let _agendaActive = false;
+  let _agendaCursor = null; // luxon DateTime, start of the next window (user tz)
+  let _agendaEmptyRuns = 0;
+  let _agendaLoading = false;
+  let _agendaDone = false;
+  let _agendaSeen = null; // Set of `${id}|${rawStart}` for boundary dedup
+  let _agendaLastDayKey = null; // last rendered day header (yyyy-MM-dd)
+  let _agendaObserver = null;
+
+  function agendaBtnEl() {
+    return document.querySelector('.fc-agenda-button');
+  }
+
+  function showAgenda() {
+    if (_agendaActive) return;
+    _agendaActive = true;
+    // Keep #calendar (and its header toolbar with the view buttons) visible;
+    // .agenda-mode collapses just the FC view area below the toolbar.
+    document.querySelector('.calendar-body').classList.add('agenda-mode');
+    show('agenda');
+    const titleEl = document.querySelector('.fc-toolbar-title');
+    if (titleEl) titleEl.textContent = 'Agenda';
+    const btn = agendaBtnEl();
+    if (btn) btn.classList.add('fc-button-active');
+    document
+      .querySelectorAll(
+        '.fc-dayGridMonth-button,.fc-timeGridWeek-button,.fc-timeGridDay-button',
+      )
+      .forEach((b) => b.classList.remove('fc-button-active'));
+    agendaReset();
+    agendaLoadMore();
+  }
+
+  function hideAgenda() {
+    if (!_agendaActive) return;
+    _agendaActive = false;
+    hide('agenda');
+    document.querySelector('.calendar-body').classList.remove('agenda-mode');
+    // Restore the date title we replaced with "Agenda". FC only rewrites it on
+    // navigation/view change, which may not happen on the way out.
+    const titleEl = document.querySelector('.fc-toolbar-title');
+    if (titleEl && _fcCalendar) titleEl.textContent = _fcCalendar.view.title;
+    const btn = agendaBtnEl();
+    if (btn) btn.classList.remove('fc-button-active');
+    // FC didn't change views while the agenda was up, so it won't re-mark the
+    // current view's button as active — restore it ourselves.
+    if (_fcCalendar) {
+      const cur = document.querySelector('.fc-' + _fcCalendar.view.type + '-button');
+      if (cur) cur.classList.add('fc-button-active');
+    }
+    if (_agendaObserver) _agendaObserver.disconnect();
+    // Correct layout drift from the view harness having been display:none.
+    if (_fcCalendar) _fcCalendar.updateSize();
+  }
+
+  function agendaReset() {
+    const tz = effectiveTz();
+    _agendaCursor = luxon.DateTime.now().setZone(tz).startOf('day');
+    _agendaEmptyRuns = 0;
+    _agendaLoading = false;
+    _agendaDone = false;
+    _agendaSeen = new Set();
+    _agendaLastDayKey = null;
+    document.getElementById('agenda-list').innerHTML = '';
+    agendaSetStatus('');
+    agendaObserve();
+  }
+
+  function agendaObserve() {
+    if (_agendaObserver) _agendaObserver.disconnect();
+    const root = document.getElementById('agenda-scroll');
+    const sentinel = document.getElementById('agenda-sentinel');
+    _agendaObserver = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) agendaLoadMore();
+      },
+      { root, rootMargin: '300px' },
+    );
+    _agendaObserver.observe(sentinel);
+  }
+
+  function agendaCompare(a, b) {
+    if (a.__sortKey !== b.__sortKey) return a.__sortKey - b.__sortKey;
+    // Same instant: all-day first, then alphabetical.
+    if (!!a.allDay !== !!b.allDay) return a.allDay ? -1 : 1;
+    return String(a.title || '').localeCompare(String(b.title || ''));
+  }
+
+  async function agendaLoadMore() {
+    if (_agendaLoading || _agendaDone || !_agendaActive) return;
+    _agendaLoading = true;
+    agendaSetStatus('loading');
+    const from = _agendaCursor;
+    const to = from.plus({ days: AGENDA_CHUNK_DAYS });
+    try {
+      const params = new URLSearchParams({ from: from.toISO(), to: to.toISO() });
+      const r = await fetch('/events?' + params.toString());
+      if (!r.ok) throw new Error('Failed to fetch events');
+      const data = await r.json();
+
+      const fresh = [];
+      for (const e of data) {
+        const p = e.extendedProps || {};
+        const sISO = p.rawStart || e.start;
+        const s = luxon.DateTime.fromISO(sISO, { setZone: true });
+        if (s < from || s >= to) continue; // half-open window guard
+        const key = (e.id || '') + '|' + sISO;
+        if (_agendaSeen.has(key)) continue;
+        _agendaSeen.add(key);
+        e.__sortKey = s.toMillis();
+        fresh.push(e);
+      }
+
+      if (fresh.length === 0) {
+        _agendaEmptyRuns += 1;
+        if (_agendaEmptyRuns >= AGENDA_MAX_EMPTY) {
+          _agendaDone = true;
+          agendaSetStatus('end');
+        } else {
+          agendaSetStatus('');
+        }
+      } else {
+        _agendaEmptyRuns = 0;
+        fresh.sort(agendaCompare);
+        agendaAppendRows(fresh);
+        agendaSetStatus('');
+      }
+      _agendaCursor = to; // windows tile forward regardless
+    } catch (err) {
+      agendaSetStatus('error', err.message);
+      _agendaDone = true;
+    } finally {
+      _agendaLoading = false;
+      if (!_agendaDone && _agendaActive) maybeContinue();
+    }
+  }
+
+  // The observer only fires when the sentinel *crosses* the margin boundary; a
+  // load that appends rows but leaves the sentinel inside the margin produces no
+  // new callback and the scroll stalls. Keep loading until the sentinel sits
+  // clearly below the fold (same 300px margin the observer uses).
+  function maybeContinue() {
+    const root = document.getElementById('agenda-scroll');
+    const sentinel = document.getElementById('agenda-sentinel');
+    const near =
+      sentinel.getBoundingClientRect().top <=
+      root.getBoundingClientRect().bottom + 300;
+    if (near) agendaLoadMore();
+  }
+
+  function agendaAppendRows(events) {
+    const tz = effectiveTz();
+    const list = document.getElementById('agenda-list');
+    const todayKey = luxon.DateTime.now().setZone(tz).toFormat('yyyy-MM-dd');
+    const timeFmt = timeFormatKey() === '12h' ? 'h:mm a' : 'HH:mm';
+    const headerFmt = 'cccc, ' + luxonDateFmt(dateFormatKey());
+    const frag = document.createDocumentFragment();
+
+    for (const e of events) {
+      const p = e.extendedProps || {};
+      const sISO = p.rawStart || e.start;
+      const start = luxon.DateTime.fromISO(sISO, { setZone: true }).setZone(tz);
+      const dayKey = start.toFormat('yyyy-MM-dd');
+
+      if (dayKey !== _agendaLastDayKey) {
+        _agendaLastDayKey = dayKey;
+        const h = document.createElement('div');
+        h.className = 'agenda-day-header' + (dayKey === todayKey ? ' is-today' : '');
+        h.textContent = start.toFormat(headerFmt);
+        frag.appendChild(h);
+      }
+
+      const row = document.createElement('div');
+      row.className = 'agenda-row';
+      const timeTxt = e.allDay ? 'All day' : start.toFormat(timeFmt);
+      const loc = p.location
+        ? `<div class="agenda-loc">${escHtml(p.location)}</div>`
+        : '';
+      row.innerHTML =
+        `<span class="agenda-time">${escHtml(timeTxt)}</span>` +
+        `<span class="agenda-dot" style="background:${escHtml(e.color || '#3788d8')}"></span>` +
+        `<span class="agenda-main"><div class="agenda-title">${escHtml(e.title || '(no title)')}</div>${loc}</span>`;
+      row.addEventListener('click', () => openEventModal(agendaToFcShim(e)));
+      frag.appendChild(row);
+    }
+    list.appendChild(frag);
+  }
+
+  // Build the minimal FullCalendar-event shape openEventModal() consumes from a
+  // plain /events JSON object, so editing/deleting works unchanged.
+  function agendaToFcShim(e) {
+    const toDate = (v) => (v ? new Date(v) : null);
+    return {
+      id: e.id,
+      title: e.title || '',
+      allDay: !!e.allDay,
+      start: toDate(e.start),
+      end: toDate(e.end),
+      extendedProps: e.extendedProps || {},
+    };
+  }
+
+  function agendaSetStatus(kind, msg) {
+    const el = document.getElementById('agenda-status');
+    if (kind === 'loading') {
+      el.style.display = '';
+      el.innerHTML = '<span class="agenda-spinner"></span>';
+    } else if (kind === 'end') {
+      el.style.display = '';
+      el.textContent = document.getElementById('agenda-list').children.length
+        ? 'No more events.'
+        : 'No upcoming events.';
+    } else if (kind === 'error') {
+      el.style.display = '';
+      el.innerHTML =
+        `Couldn’t load events. <button type="button" id="agenda-retry" class="btn-outline">Retry</button>`;
+      el.querySelector('#agenda-retry').addEventListener('click', () => {
+        _agendaDone = false;
+        agendaSetStatus('');
+        agendaLoadMore();
+      });
+    } else {
+      el.style.display = 'none';
+      el.textContent = '';
+    }
+  }
+
+  // Reload whichever view(s) are live after a create/edit/delete.
+  function refreshViews() {
+    if (_fcCalendar) _fcCalendar.refetchEvents();
+    if (_agendaActive) agendaReset();
+    if (_agendaActive) agendaLoadMore();
+  }
+
+  // Create modal with no start/end preselected (the "+" FAB). A blank start
+  // date is fine: saveEvent() already reports "Start date is required."
+  async function openCreateModalBlank() {
+    hideError('ev-error');
+    const cals = await getEnabledCalendars();
+
+    document.getElementById('ev-title-text').textContent = 'New event';
+    document.getElementById('ev-name').value = '';
+    document.getElementById('ev-allday').checked = false;
+    document.getElementById('ev-location').value = '';
+    document.getElementById('ev-notes').value = '';
+    document.getElementById('ev-repeats').checked = false;
+    document.getElementById('ev-repeats').disabled = false;
+    document.getElementById('ev-recur-summary').style.display = 'none';
+    resetRecurEditorDefaults();
+    document.getElementById('ev-reminders').innerHTML =
+      '<div class="ev-reminder empty-note">None</div>';
+
+    const calField = document.getElementById('ev-calendar-field');
+    const calSel = document.getElementById('ev-calendar');
+    calSel.innerHTML = cals
+      .map((c) => `<option value="${c.id}">${escHtml(c.display_name)}</option>`)
+      .join('');
+    const dflt = cals.find((c) => c.is_default);
+    if (dflt) calSel.value = String(dflt.id);
+    calField.style.display = '';
+    document.getElementById('btn-event-delete').style.display = 'none';
+
+    // Render the field widgets but leave them blank (no setDateFieldValue /
+    // setTimeParts) — that is the whole point of the blank-create flow.
+    renderDateFields('start', onFromChange);
+    renderDateFields('end', onToChange);
+    renderTimeFields('start', onFromChange);
+    renderTimeFields('end', onToChange);
+
+    const noteEl = document.getElementById('ev-edit-note');
+    const hasCal = cals.length > 0;
+    if (!hasCal) {
+      noteEl.textContent = 'Connect a CalDAV account to create events.';
+      noteEl.style.display = '';
+    } else {
+      noteEl.style.display = 'none';
+    }
+    setEditable(hasCal);
+
+    _currentEvent = {
+      id: null,
+      calendarId: hasCal ? parseInt(calSel.value, 10) : null,
+      editable: hasCal,
+      isNew: true,
+    };
+
+    refreshPrevBoundaries();
+    applyAllDayToggle();
+    applyRepeatsToggle();
+
+    show('event-overlay');
+    show('event-modal');
+  }
+
   // ── Calendar page ───────────────────────────────────────────────────────────
 
   function initCalendar() {
@@ -1642,10 +1950,17 @@
     const tf = fcTimeFormats(timeFormatKey());
     _fcCalendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'dayGridMonth',
+      customButtons: {
+        agenda: { text: 'agenda', click: showAgenda },
+      },
       headerToolbar: {
         left: 'prev,next today',
         center: 'title',
-        right: 'dayGridMonth,timeGridWeek,timeGridDay',
+        right: 'agenda dayGridMonth,timeGridWeek,timeGridDay',
+      },
+      // Clicking any built-in view button (or navigating) leaves the agenda.
+      datesSet: function () {
+        if (_agendaActive) hideAgenda();
       },
       firstDay: s.first_day_of_week != null ? s.first_day_of_week : 1,
       timeZone: s.timezone || 'local',
@@ -1742,10 +2057,33 @@
     });
     _fcCalendar.render();
 
+    document.getElementById('btn-create-fab').addEventListener('click', openCreateModalBlank);
+
+    // datesSet only fires when the view/range actually changes, so clicking the
+    // button of the view FC is already on (e.g. "month" while month sits under
+    // the agenda) wouldn't leave the agenda. Catch every toolbar button click.
+    const toolbarEl = calendarEl.querySelector('.fc-header-toolbar');
+    if (toolbarEl) {
+      toolbarEl.addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (!b || b.classList.contains('fc-agenda-button')) return;
+        hideAgenda();
+      });
+    }
+
+    // Apply the user's default view (month is already the FC initialView).
+    const dv = (window.__SETTINGS__ || {}).default_view;
+    if (dv === 'agenda') {
+      showAgenda();
+    } else if (dv === 'timeGridWeek' || dv === 'timeGridDay') {
+      _fcCalendar.changeView(dv);
+    }
+
     // The title node is re-rendered on navigation, so delegate from the calendar.
     calendarEl.addEventListener('click', (e) => {
       const t = e.target.closest('.fc-toolbar-title');
       if (!t) return;
+      if (_agendaActive) return; // title reads "Agenda" — no date to drill
       if (_calPop && !_calPop.hidden) { closeDatePicker(); return; } // toggle
       openCalTitlePicker(t);
     });

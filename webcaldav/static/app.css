@@ -149,6 +149,7 @@ body {
   flex: 1;
   display: flex;
   overflow: hidden;
+  position: relative; /* anchor for the absolute "+" FAB */
 }
 
 #calendar {
@@ -156,6 +157,146 @@ body {
   padding: 1rem;
   overflow: auto;
   background: #fff;
+}
+
+/* ── Agenda view ── */
+/* Agenda mode keeps #calendar mounted for its header toolbar (view buttons)
+   but collapses the FC view area; the agenda list fills the rest below. */
+.calendar-body.agenda-mode {
+  flex-direction: column;
+}
+
+.calendar-body.agenda-mode #calendar {
+  flex: 0 0 auto;
+  /* FC's height:'100%' option puts an inline height on #calendar; without this
+     override it keeps the full body height and squeezes the agenda to 0px. */
+  height: auto !important;
+  overflow: visible;
+  padding-bottom: 0;
+}
+
+.calendar-body.agenda-mode #calendar .fc-view-harness {
+  display: none;
+}
+
+.agenda {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+
+.agenda-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.25rem 4rem;
+}
+
+.agenda-day {
+  margin-top: 1.25rem;
+}
+
+.agenda-day-header {
+  position: sticky;
+  top: -1px;
+  background: #fff;
+  z-index: 1;
+  font-weight: 600;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.agenda-day-header.is-today {
+  color: #1a73e8;
+}
+
+.agenda-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.5rem 0.25rem;
+  border-bottom: 1px solid #f3f3f3;
+  cursor: pointer;
+}
+
+.agenda-row:hover {
+  background: #f7f9fc;
+}
+
+.agenda-time {
+  flex: 0 0 7rem;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+}
+
+.agenda-dot {
+  flex: 0 0 0.6rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  align-self: center;
+}
+
+.agenda-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.agenda-title {
+  font-weight: 500;
+}
+
+.agenda-loc {
+  color: #777;
+  font-size: 0.85em;
+}
+
+.agenda-status {
+  text-align: center;
+  color: #888;
+  padding: 1rem;
+}
+
+.agenda-spinner {
+  display: inline-block;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid #ccc;
+  border-top-color: #1a73e8;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.agenda-sentinel {
+  height: 1px;
+}
+
+/* ── Floating "new event" button (all views) ── */
+.fab {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  z-index: 50;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 50%;
+  border: none;
+  background: #1a73e8;
+  color: #fff;
+  font-size: 1.9rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.fab:hover {
+  background: #1666cf;
 }
 
 /* ── Settings panel ── */

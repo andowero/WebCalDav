@@ -83,6 +83,13 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   so an event can be moved between calendars.
 - Deleting events: a Delete button in the modal, plus a right-click context menu
   (Edit / Delete) with a yes/no confirm before removal.
+- Besides the three FullCalendar views (month/week/day) there is an **agenda**
+  view: a custom infinitely-scrolling panel that fetches `/events` in tiled
+  forward 30-day windows (IntersectionObserver sentinel) and lists upcoming
+  occurrences chronologically; rows reuse the event modal via a small
+  FC-event shim. A "+" floating button (all views) opens the create modal with
+  no dates preselected. A per-user `default_view` setting picks the view shown
+  at sign-in.
 - No build step beyond bundling FullCalendar's CSS/JS.
 
 ### Observability
