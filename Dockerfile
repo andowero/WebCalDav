@@ -1,12 +1,17 @@
 FROM python:3.12-slim AS builder
 WORKDIR /app
 
-RUN pip install --no-cache-dir uv
+# official uv binary, pinnable, no pip download step
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uvx /bin/
+
+# cache and site-packages are on different mounts, so copy instead of hardlink
+ENV UV_LINK_MODE=copy
 
 COPY pyproject.toml ./
 COPY webcaldav/ webcaldav/
 
-RUN uv pip install --system --no-cache .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system .
 
 # ── Runtime ──
 FROM python:3.12-slim
