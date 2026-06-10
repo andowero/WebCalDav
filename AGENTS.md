@@ -32,7 +32,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 # Repository etiquette
 
 - Update files in `./docs` after major milestones or major additions to the project.
-- Use the `/update-docs-and-commit` slash command when making git commits.
+- When commiting changes, always update files in `./docs` (if necessary)
 
 # Often used commands
 
