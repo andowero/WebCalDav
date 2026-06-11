@@ -13,6 +13,11 @@ services:
       # Reject CalDAV servers on private/LAN/loopback addresses (SSRF guard).
       # Set to "false" if your CalDAV server runs on a private/LAN IP.
       BLOCK_PRIVATE_CALDAV_URLS: "true"
+      # Per-IP login throttle: at most ATTEMPTS per WINDOW seconds (0 disables).
+      LOGIN_RATE_LIMIT_ATTEMPTS: 5
+      LOGIN_RATE_LIMIT_WINDOW_SECONDS: 300
+      # Minimum length for passwords set on first login / password change.
+      MIN_PASSWORD_LENGTH: 12
     restart: unless-stopped
 
 volumes:

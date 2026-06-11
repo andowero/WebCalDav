@@ -14,6 +14,12 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     kdf_salt: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
+    # Argon2id params the user's KEK was derived with. Stored per user so the
+    # global defaults can be hardened without locking out existing users;
+    # users pick up new params on their next password change/reset.
+    kdf_time_cost: Mapped[int] = mapped_column(Integer, nullable=False)
+    kdf_memory_cost: Mapped[int] = mapped_column(Integer, nullable=False)
+    kdf_parallelism: Mapped[int] = mapped_column(Integer, nullable=False)
     wrapped_dek: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     dek_nonce: Mapped[bytes] = mapped_column(LargeBinary(12), nullable=False)
     password_verifier: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)

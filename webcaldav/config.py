@@ -11,8 +11,21 @@ class Settings(BaseSettings):
     # (SSRF hardening). Off by default for backward compatibility.
     block_private_caldav_urls: bool = False
 
+    # Secure flag on the session cookie. Leave true behind a TLS-terminating
+    # proxy (the intended deployment); set false only for plain-HTTP access
+    # from non-localhost addresses (browsers exempt localhost).
+    cookie_secure: bool = True
+
+    # Per-IP throttle on POST /auth/login: at most `attempts` requests per
+    # sliding `window` seconds. attempts=0 disables the limiter.
+    login_rate_limit_attempts: int = 5
+    login_rate_limit_window_seconds: int = 300
+
+    # Minimum length for passwords set via /auth/change-password.
+    min_password_length: int = 12
+
     argon2_time_cost: int = 3
-    argon2_memory_cost: int = 65536
+    argon2_memory_cost: int = 131072
     argon2_parallelism: int = 1
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

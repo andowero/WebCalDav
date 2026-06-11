@@ -64,6 +64,9 @@ services:
       LOG_LEVEL: INFO
       SESSION_IDLE_TIMEOUT: 3600
       BLOCK_PRIVATE_CALDAV_URLS: "true"
+      LOGIN_RATE_LIMIT_ATTEMPTS: 5
+      LOGIN_RATE_LIMIT_WINDOW_SECONDS: 300
+      MIN_PASSWORD_LENGTH: 12
     restart: unless-stopped
 
 volumes:
@@ -95,12 +98,24 @@ By default the SQLite database lives at `/data/webcaldav.db` inside a named Dock
 | `DATABASE_URL` | `sqlite+aiosqlite:////data/webcaldav.db` | Location of the SQLite database. |
 | `LOG_LEVEL` | `INFO` | Log verbosity for structured JSON logs: `DEBUG`, `INFO`, `WARNING`, or `ERROR`. |
 | `SESSION_IDLE_TIMEOUT` | `3600` | Seconds of inactivity before a login session expires. |
+| `COOKIE_SECURE` | `true` | Set the `Secure` flag on the session cookie so browsers only send it over HTTPS. See below. |
+| `LOGIN_RATE_LIMIT_ATTEMPTS` | `5` | Max login attempts per IP within the rate-limit window. `0` disables login rate limiting. |
+| `LOGIN_RATE_LIMIT_WINDOW_SECONDS` | `300` | Length of the sliding rate-limit window, in seconds. |
+| `MIN_PASSWORD_LENGTH` | `12` | Minimum length for passwords users set on first login or when changing their password. |
 | `ARGON2_TIME_COST` | `3` | Argon2id time cost for password key derivation. |
-| `ARGON2_MEMORY_COST` | `65536` | Argon2id memory cost (KiB). |
+| `ARGON2_MEMORY_COST` | `131072` | Argon2id memory cost (KiB; default 128 MiB). |
 | `ARGON2_PARALLELISM` | `1` | Argon2id parallelism factor. |
 | `BLOCK_PRIVATE_CALDAV_URLS` | `false` | Reject CalDAV server URLs that resolve to private/loopback/link-local/metadata addresses, and hide raw connection errors. Shipped as `true` in the compose file. |
 
-The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast).
+The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast). Each user's password record stores the parameters it was created with, so raising the values later is safe: existing users keep logging in with their old parameters and pick up the stronger ones the next time they change their password.
+
+### Login rate limiting
+
+Each IP address gets at most `LOGIN_RATE_LIMIT_ATTEMPTS` login attempts per `LOGIN_RATE_LIMIT_WINDOW_SECONDS` sliding window; further attempts get HTTP 429 with a `Retry-After` header, and a successful login clears the counter. This blunts both password guessing and CPU-exhaustion attacks (every login attempt costs a full Argon2id hash). The client IP is taken from the rightmost `X-Forwarded-For` entry when the header is present — the one appended by your reverse proxy — so it works correctly behind the intended single-proxy setup. Counters are in memory and reset when the container restarts.
+
+### Session cookie `Secure` flag
+
+With `COOKIE_SECURE=true` (the default) browsers refuse to send the session cookie over plain HTTP, so it can't leak on a downgraded or stray `http://` request. Keep it on behind your TLS-terminating proxy. Browsers exempt `localhost`, so local development still works; set `COOKIE_SECURE=false` only if you access the app over plain HTTP on a non-localhost address (e.g. a LAN IP without TLS) — otherwise login will appear to succeed but the session won't stick.
 
 ### Blocking private CalDAV URLs (SSRF hardening)
 

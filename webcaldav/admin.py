@@ -37,6 +37,9 @@ async def _provision_user(email: str, password: str, db: AsyncSession) -> User:
     user = User(
         email=email,
         kdf_salt=kdf_salt,
+        kdf_time_cost=settings.argon2_time_cost,
+        kdf_memory_cost=settings.argon2_memory_cost,
+        kdf_parallelism=settings.argon2_parallelism,
         wrapped_dek=wrapped_dek,
         dek_nonce=dek_nonce,
         password_verifier=verifier,
@@ -131,6 +134,9 @@ def reset_password(email: str = typer.Option(..., help="User email address")) ->
             verifier = make_verifier(kek)
 
             user.kdf_salt = kdf_salt
+            user.kdf_time_cost = settings.argon2_time_cost
+            user.kdf_memory_cost = settings.argon2_memory_cost
+            user.kdf_parallelism = settings.argon2_parallelism
             user.wrapped_dek = wrapped_dek
             user.dek_nonce = dek_nonce
             user.password_verifier = verifier

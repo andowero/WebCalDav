@@ -19,7 +19,7 @@
   async function apiPost(path, body) {
     const r = await fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
@@ -30,7 +30,7 @@
   async function apiPatch(path, body) {
     const r = await fetch(path, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
@@ -39,7 +39,7 @@
   }
 
   async function apiDelete(path) {
-    const r = await fetch(path, { method: 'DELETE' });
+    const r = await fetch(path, { method: 'DELETE', headers: { 'X-Requested-With': 'fetch' } });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
       throw new Error(data.detail || `HTTP ${r.status}`);
@@ -56,7 +56,7 @@
   async function apiPut(path, body) {
     const r = await fetch(path, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
@@ -1848,7 +1848,7 @@
     _loggingOut = true;
     if (_logoutTick) clearInterval(_logoutTick);
     if (_logoutPoll) clearInterval(_logoutPoll);
-    try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
+    try { await fetch('/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'fetch' } }); } catch (_) {}
     window.location.href = '/';
   }
 
@@ -2192,7 +2192,7 @@
     document.getElementById('btn-logout').addEventListener('click', async () => {
       if (_logoutTick) clearInterval(_logoutTick);
       if (_logoutPoll) clearInterval(_logoutPoll);
-      await fetch('/auth/logout', { method: 'POST' });
+      await fetch('/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'fetch' } });
       window.location.href = '/';
     });
 

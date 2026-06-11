@@ -5,14 +5,14 @@ from pathlib import Path
 
 import structlog
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 
 from .config import settings
 from .db import create_tables, init_engine, get_session_factory
-from .deps import init_session_store, get_session_store
+from .deps import init_login_rate_limiter, init_session_store, get_session_store
 from .metrics import active_sessions, http_requests_total
 from .models import User, UserSettings
 from .routers import auth, caldav_accounts, calendars, events, ops, settings as settings_router
@@ -50,6 +50,10 @@ structlog.configure(
 async def lifespan(app: FastAPI):
     init_engine(settings.database_url)
     init_session_store(settings.session_idle_timeout)
+    init_login_rate_limiter(
+        settings.login_rate_limit_attempts,
+        settings.login_rate_limit_window_seconds,
+    )
     await create_tables()
     yield
 
@@ -65,6 +69,21 @@ app.include_router(calendars.router)
 app.include_router(events.router)
 app.include_router(settings_router.router)
 app.include_router(ops.router)
+
+
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.middleware("http")
+async def csrf_header_check(request: Request, call_next):
+    # CSRF defense-in-depth on top of SameSite=Lax: cross-site HTML forms
+    # cannot set custom headers, so requiring one blocks forged requests.
+    if (
+        request.method in _MUTATING_METHODS
+        and request.headers.get("x-requested-with") != "fetch"
+    ):
+        return JSONResponse({"detail": "Missing CSRF header"}, status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")

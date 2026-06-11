@@ -23,8 +23,11 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 - Endpoints: `POST /auth/login`, `POST /auth/logout`, `POST /auth/change-password`. No signup endpoint.
 - Flow: argon2id(password, kdf_salt) → KEK → verify `password_verifier` → unwrap DEK (AES-GCM).
 - Session store: in-memory `dict[session_id] = {user_id, dek, last_seen, restricted}`.
-- Session lifecycle: opaque session-ID cookie, idle timeout (`SESSION_IDLE_TIMEOUT`), wiped on process restart.
+- Session lifecycle: opaque session-ID cookie (`HttpOnly`, `SameSite=Lax`, `Secure` per `COOKIE_SECURE`, default on), idle timeout (`SESSION_IDLE_TIMEOUT`), wiped on process restart.
 - First-login guard: `restricted` sessions (when `users.must_change_password` is true) may only call `/auth/change-password` and `/auth/logout`; everything else returns 403.
+- Login rate limiting: in-memory per-IP sliding window (`LOGIN_RATE_LIMIT_ATTEMPTS` per `LOGIN_RATE_LIMIT_WINDOW_SECONDS`, 0 disables), checked before the argon2 derivation; 429 + `Retry-After` when exceeded, counter cleared on successful login. Client IP = rightmost `X-Forwarded-For` entry (appended by the trusted proxy) or the socket peer.
+- CSRF defense-in-depth: middleware rejects mutating requests (POST/PUT/PATCH/DELETE) without `X-Requested-With: fetch` (403), on top of `SameSite=Lax`.
+- Password policy: `change-password` enforces `MIN_PASSWORD_LENGTH` (default 12).
 
 ### Admin CLI
 
@@ -35,7 +38,7 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 ### Crypto module
 
 - Thin wrapper around argon2id (via `argon2-cffi`) and AES-GCM (via `cryptography`).
-- Fixed argon2id parameters chosen once and committed.
+- argon2id parameters come from config (`ARGON2_*`, default `time_cost=3, memory_cost=131072, parallelism=1`) and are stored per user (`users.kdf_*`) at provision/password-change time, so hardening the defaults never locks out existing users; a startup migration backfills the columns with the legacy values (3/65536/1).
 - Responsible for generating `kdf_salt` and all nonces.
 - Zeroes DEK buffers on session teardown where the language permits.
 

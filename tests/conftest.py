@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from webcaldav.app import app
 from webcaldav.db import create_tables, get_engine, get_session_factory, init_engine
-from webcaldav.deps import get_session_store, init_session_store
+from webcaldav.deps import get_session_store, init_login_rate_limiter, init_session_store
 from webcaldav.models import Base
 
 
@@ -38,6 +38,17 @@ def store(db_engine):
 
 
 @pytest.fixture(scope="function")
-async def client(db_engine, store) -> AsyncClient:
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+def rate_limiter(db_engine):
+    # Fresh limiter per test so failed logins don't leak across tests.
+    return init_login_rate_limiter(max_attempts=5, window_seconds=300)
+
+
+@pytest.fixture(scope="function")
+async def client(db_engine, store, rate_limiter) -> AsyncClient:
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        # https so httpx sends the session cookie, which is Secure by default
+        base_url="https://test",
+        headers={"X-Requested-With": "fetch"},
+    ) as c:
         yield c

@@ -1,4 +1,4 @@
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from .models import Base
@@ -31,7 +31,27 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
+# Per-user KDF param columns added after initial release. Defaults are the
+# argon2 params every pre-migration user was provisioned with.
+_USERS_KDF_MIGRATION = {
+    "kdf_time_cost": 3,
+    "kdf_memory_cost": 65536,
+    "kdf_parallelism": 1,
+}
+
+
 async def create_tables() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        existing = {
+            row[1] for row in (await conn.execute(text("PRAGMA table_info(users)"))).fetchall()
+        }
+        for column, legacy_default in _USERS_KDF_MIGRATION.items():
+            if column not in existing:
+                await conn.execute(
+                    text(
+                        f"ALTER TABLE users ADD COLUMN {column} INTEGER "
+                        f"NOT NULL DEFAULT {legacy_default}"
+                    )
+                )

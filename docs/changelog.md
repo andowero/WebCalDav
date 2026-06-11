@@ -2,6 +2,28 @@
 
 ## Unreleased — MVP
 
+### Security — auth hardening: fixes audit findings M1, M2, M4 (2026-06-11)
+- **Secure session cookie + CSRF header (M1):** session cookie now sets
+  `Secure` per new `COOKIE_SECURE` setting (default `true`); new middleware
+  rejects mutating requests (POST/PUT/PATCH/DELETE) lacking
+  `X-Requested-With: fetch` with 403, as defense-in-depth on top of
+  `SameSite=Lax`. Frontend `api*` helpers and direct logout fetches send the
+  header.
+- **Login rate limiting (M2):** new in-memory per-IP sliding-window limiter
+  (`webcaldav/ratelimit.py`) on `POST /auth/login`, checked *before* the
+  argon2 derivation to close the CPU-amplification vector. Configurable via
+  `LOGIN_RATE_LIMIT_ATTEMPTS` (default 5; 0 disables) and
+  `LOGIN_RATE_LIMIT_WINDOW_SECONDS` (default 300); 429 + `Retry-After` when
+  exceeded; successful login resets the counter. Client IP from the rightmost
+  `X-Forwarded-For` entry (proxy-appended) or the socket peer.
+- **argon2 hardening + password policy (M4):** default `ARGON2_MEMORY_COST`
+  raised 65536 → 131072 (128 MiB). KDF parameters are now stored per user
+  (`users.kdf_time_cost/kdf_memory_cost/kdf_parallelism`, backfilled by a
+  startup column migration with the legacy 3/65536/1), so existing users keep
+  logging in and upgrade to the new parameters on their next password change.
+  `change-password` enforces `MIN_PASSWORD_LENGTH` (default 12).
+- `docs/known_vulnerabilities.md`: M1, M2, M4 removed as fixed.
+
 ### Added — SSRF guard for CalDAV URLs (2026-06-11)
 - New `BLOCK_PRIVATE_CALDAV_URLS` setting (default `false`; shipped `true` in
   `docker-compose.yml`). When enabled, `POST /caldav-accounts` rejects CalDAV
