@@ -2,6 +2,18 @@
 
 ## Unreleased — MVP
 
+### Added — SSRF guard for CalDAV URLs (2026-06-11)
+- New `BLOCK_PRIVATE_CALDAV_URLS` setting (default `false`; shipped `true` in
+  `docker-compose.yml`). When enabled, `POST /caldav-accounts` rejects CalDAV
+  server URLs whose hostname resolves to a private/loopback/link-local
+  (incl. the `169.254.169.254` metadata IP)/reserved/multicast/unspecified
+  address with a generic 400, and connection failures return a generic 502
+  with no raw exception text (closing the internal-service probe oracle).
+- New `validate_caldav_url()` / `UnsafeURLError` in `caldav_client.py`; resolves
+  via `getaddrinfo` and checks every returned address (unwrapping IPv4-mapped
+  IPv6). Disabled by default preserves prior behaviour for LAN CalDAV servers.
+- Known residual: DNS-rebind/TOCTOU on later fetches (validation is on write).
+
 ### Added — MIT license (2026-06-11)
 - `LICENSE` file (MIT, Zdeněk Novák), `license = "MIT"` in `pyproject.toml`,
   License section in `README.md`.

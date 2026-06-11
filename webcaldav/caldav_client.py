@@ -1,8 +1,11 @@
 import asyncio
+import ipaddress
 import logging
+import socket
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
+from urllib.parse import urlsplit
 
 import caldav
 from caldav.elements.ical import CalendarColor
@@ -21,6 +24,53 @@ class CalendarInfo(NamedTuple):
     caldav_id: str
     display_name: str
     color: str
+
+
+class UnsafeURLError(ValueError):
+    """Raised when a CalDAV URL targets a disallowed (private/internal) address."""
+
+
+def _ip_is_unsafe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    # Unwrap IPv4-mapped IPv6 (::ffff:127.0.0.1) so the v4 checks apply.
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local  # 169.254.0.0/16 — covers the cloud metadata IP
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def validate_caldav_url(url: str) -> None:
+    """Reject CalDAV URLs that target non-public addresses (SSRF guard).
+
+    Resolves the hostname and rejects if any resolved address is private,
+    loopback, link-local (incl. 169.254.169.254), reserved, multicast, or
+    unspecified. Raises UnsafeURLError on any violation.
+    """
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        raise UnsafeURLError(f"unsupported scheme: {parts.scheme!r}")
+    host = parts.hostname
+    if not host:
+        raise UnsafeURLError("missing host")
+    try:
+        infos = socket.getaddrinfo(host, parts.port or None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as exc:
+        raise UnsafeURLError(f"could not resolve host: {host}") from exc
+    addresses = {info[4][0] for info in infos}
+    if not addresses:
+        raise UnsafeURLError(f"could not resolve host: {host}")
+    for addr in addresses:
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            raise UnsafeURLError(f"unparseable address: {addr}")
+        if _ip_is_unsafe(ip):
+            raise UnsafeURLError(f"address not allowed: {addr}")
 
 
 def _normalize_color(val: str | None) -> str | None:

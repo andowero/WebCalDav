@@ -10,6 +10,9 @@ services:
       DATABASE_URL: sqlite+aiosqlite:////data/webcaldav.db
       LOG_LEVEL: INFO
       SESSION_IDLE_TIMEOUT: 3600
+      # Reject CalDAV servers on private/LAN/loopback addresses (SSRF guard).
+      # Set to "false" if your CalDAV server runs on a private/LAN IP.
+      BLOCK_PRIVATE_CALDAV_URLS: "true"
     restart: unless-stopped
 
 volumes:

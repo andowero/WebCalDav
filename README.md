@@ -63,6 +63,7 @@ services:
       DATABASE_URL: sqlite+aiosqlite:////data/webcaldav.db
       LOG_LEVEL: INFO
       SESSION_IDLE_TIMEOUT: 3600
+      BLOCK_PRIVATE_CALDAV_URLS: "true"
     restart: unless-stopped
 
 volumes:
@@ -97,8 +98,17 @@ By default the SQLite database lives at `/data/webcaldav.db` inside a named Dock
 | `ARGON2_TIME_COST` | `3` | Argon2id time cost for password key derivation. |
 | `ARGON2_MEMORY_COST` | `65536` | Argon2id memory cost (KiB). |
 | `ARGON2_PARALLELISM` | `1` | Argon2id parallelism factor. |
+| `BLOCK_PRIVATE_CALDAV_URLS` | `false` | Reject CalDAV server URLs that resolve to private/loopback/link-local/metadata addresses, and hide raw connection errors. Shipped as `true` in the compose file. |
 
 The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast).
+
+### Blocking private CalDAV URLs (SSRF hardening)
+
+By default (`false`) the server connects to whatever CalDAV URL a user enters. Because the request originates from the server, a user could point it at internal hosts the server can reach — `http://localhost`, a LAN IP, or a cloud metadata endpoint such as `169.254.169.254` — and connection-error messages get echoed back, which leaks whether those internal services exist.
+
+Set `BLOCK_PRIVATE_CALDAV_URLS=true` to reject any CalDAV URL whose hostname resolves to a private, loopback, link-local, reserved, multicast, or unspecified address, and to replace detailed connection errors with a generic message. The shipped `docker-compose.yml` enables it.
+
+**Caveat for self-hosters:** if your CalDAV server (e.g. Radicale) runs on a private/LAN address — a very common setup — enabling this will block adding it. In that case set `BLOCK_PRIVATE_CALDAV_URLS: "false"` in your compose file. The protection only matters when users you don't fully trust can add accounts and the server sits on a network with sensitive internal services.
 
 ## User management (admin CLI)
 

@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..caldav_client import CalendarInfo, discover_calendars
+from ..caldav_client import CalendarInfo, UnsafeURLError, discover_calendars, validate_caldav_url
+from ..config import settings
 from ..crypto import decrypt_bytes, encrypt_bytes
 from ..deps import get_db, get_unrestricted_session
 from ..models import CalDAVAccount, Calendar
@@ -56,10 +57,20 @@ async def create_account(
 ) -> CalDAVAccountOut:
     url = body.url.rstrip("/")
 
+    block = settings.block_private_caldav_urls
+    if block:
+        try:
+            validate_caldav_url(url)
+        except UnsafeURLError as exc:
+            logger.warning("caldav_url_rejected", url=url, reason=str(exc))
+            raise HTTPException(status_code=400, detail="Invalid CalDAV server URL")
+
     try:
         calendars: list[CalendarInfo] = await discover_calendars(url, body.username, body.password)
     except Exception as exc:
         logger.warning("caldav_discovery_failed", url=url, error=str(exc))
+        if block:
+            raise HTTPException(status_code=502, detail="Could not connect to CalDAV server")
         raise HTTPException(
             status_code=502,
             detail=f"Could not connect to CalDAV server: {exc}",

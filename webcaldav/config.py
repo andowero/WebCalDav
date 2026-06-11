@@ -6,6 +6,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     session_idle_timeout: int = 3600
 
+    # When true, reject CalDAV server URLs that resolve to private/loopback/
+    # link-local/metadata addresses and suppress raw connection-error detail
+    # (SSRF hardening). Off by default for backward compatibility.
+    block_private_caldav_urls: bool = False
+
     argon2_time_cost: int = 3
     argon2_memory_cost: int = 65536
     argon2_parallelism: int = 1
