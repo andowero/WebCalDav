@@ -144,3 +144,7 @@ This issues a new one-off password, rotates the user's DEK, and deletes the now-
 - [Project spec](project_spec.md) — full requirements, API surface, technical details.
 - [Architecture](docs/architecture.md) — system design and data flows.
 - [Changelog](docs/changelog.md) — version history.
+
+## License
+
+[MIT](LICENSE)

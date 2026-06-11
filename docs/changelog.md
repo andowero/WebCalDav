@@ -2,6 +2,10 @@
 
 ## Unreleased — MVP
 
+### Added — MIT license (2026-06-11)
+- `LICENSE` file (MIT, Zdeněk Novák), `license = "MIT"` in `pyproject.toml`,
+  License section in `README.md`.
+
 ### Added — editable reminders / VALARM support (2026-06-11)
 - Reminders are now fully editable in the event modal: a "+" button adds a row
   (number + unit + delete button), committed rows sort soonest-first and can
