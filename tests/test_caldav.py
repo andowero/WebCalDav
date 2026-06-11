@@ -72,7 +72,7 @@ class _QuietHandler(WSGIRequestHandler):
 @pytest.fixture(scope="module")
 def radicale_server():
     """Run radicale on an ephemeral port; yield (base_url, calendars dict)."""
-    radicale = pytest.importorskip("radicale")
+    pytest.importorskip("radicale")
     from radicale import Application
     from radicale.config import load
 
@@ -853,14 +853,14 @@ async def test_update_recurring_this_no_duplicate(edit_calendar):
 # ── Reminders (VALARM) ───────────────────────────────────────────────────────
 
 
-async def _fetch_one(base_url, url, uid) -> dict:
+async def _fetch_one(base_url, url, uid):
     frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
     to = datetime(2026, 7, 1, tzinfo=timezone.utc)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     return {e["id"]: e for e in events}[uid]
 
 
-def _raw_ical(base_url, url, uid) -> str:
+def _raw_ical(base_url, url, uid):
     import caldav
 
     with caldav.DAVClient(url=base_url, username=USER, password=PASSWORD) as client:
@@ -868,7 +868,7 @@ def _raw_ical(base_url, url, uid) -> str:
         return cal.event_by_uid(uid).data
 
 
-def _editable(reminders) -> list[dict]:
+def _editable(reminders):
     return [r for r in reminders if not r.get("readonly")]
 
 

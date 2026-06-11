@@ -3,8 +3,9 @@ import ipaddress
 import logging
 import socket
 import uuid
+from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
-from typing import NamedTuple
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 import caldav
@@ -152,7 +153,7 @@ _DAY_WORDS = {
 }
 
 
-def _rrule_to_text(rrule) -> str:
+def _rrule_to_text(rrule: Any) -> str:
     """Render an icalendar vRecur into a short human-readable summary."""
     try:
         parts: dict[str, list[str]] = {}
@@ -189,10 +190,10 @@ def _rrule_to_text(rrule) -> str:
     return text
 
 
-def _rrule_to_struct(rrule, dtstart: date | datetime) -> dict:
+def _rrule_to_struct(rrule: Any, dtstart: date | datetime) -> dict[str, Any]:
     """Render an icalendar vRecur into the editor's structured recurrence model."""
     parts = {str(k).upper(): (v if isinstance(v, list) else [v]) for k, v in rrule.items()}
-    out: dict = {"freq": str((parts.get("FREQ") or ["DAILY"])[0]).lower(), "interval": 1}
+    out: dict[str, Any] = {"freq": str((parts.get("FREQ") or ["DAILY"])[0]).lower(), "interval": 1}
     try:
         out["interval"] = int((parts.get("INTERVAL") or ["1"])[0])
     except (ValueError, TypeError):
@@ -221,7 +222,7 @@ def _rrule_to_struct(rrule, dtstart: date | datetime) -> dict:
     return out
 
 
-def preview_recurrence(start: date | datetime, rule: dict) -> tuple[str | None, int | None]:
+def preview_recurrence(start: date | datetime, rule: dict[str, Any]) -> tuple[str | None, int | None]:
     """Last occurrence ISO + total count for a rule, or (None, None) if infinite."""
     parts = _build_rrule(rule, start)
     robj = rrulestr(vRecur(parts).to_ical().decode("utf-8"), dtstart=_as_dt(start))
@@ -234,7 +235,7 @@ def preview_recurrence(start: date | datetime, rule: dict) -> tuple[str | None, 
     return (last.date().isoformat() if _is_all_day(start) else last.isoformat()), len(occs)
 
 
-def _reminder_to_text(trigger) -> str:
+def _reminder_to_text(trigger: Any) -> str:
     """Render a VALARM trigger (timedelta or datetime) into friendly text."""
     if isinstance(trigger, datetime):
         return f"At {trigger.isoformat()}"
@@ -259,7 +260,7 @@ def _reminder_to_text(trigger) -> str:
     return f"{span} {'before' if before else 'after'}"
 
 
-def _classify_alarm(alarm, all_day: bool) -> timedelta | None:
+def _classify_alarm(alarm: Any, all_day: bool) -> timedelta | None:
     """The trigger offset if this VALARM fits the editable reminder model.
 
     Editable: a duration TRIGGER relative to DTSTART, non-EMAIL action, firing
@@ -293,7 +294,7 @@ def _classify_alarm(alarm, all_day: bool) -> timedelta | None:
     return trigger if trigger.total_seconds() <= 0 else None
 
 
-def _timedelta_to_value_unit(td: timedelta) -> dict:
+def _timedelta_to_value_unit(td: timedelta) -> dict[str, Any]:
     """Negative/zero trigger offset -> {value, unit}, largest unit that fits."""
     minutes = round(abs(td.total_seconds()) / 60)
     if minutes and minutes % 10080 == 0:
@@ -305,7 +306,7 @@ def _timedelta_to_value_unit(td: timedelta) -> dict:
     return {"value": minutes, "unit": "minutes"}
 
 
-def _timedelta_to_allday_parts(td: timedelta) -> dict:
+def _timedelta_to_allday_parts(td: timedelta) -> dict[str, Any]:
     """All-day trigger offset -> {value, unit, time}.
 
     The DATE start is midnight, so the offset splits into whole days back plus
@@ -321,13 +322,13 @@ def _timedelta_to_allday_parts(td: timedelta) -> dict:
     return {"value": days, "unit": "days", "time": hhmm}
 
 
-def _extract_reminders(vevent) -> list[dict]:
+def _extract_reminders(vevent: Any) -> list[dict[str, Any]]:
     try:
         dtstart = vevent.decoded("dtstart")
     except Exception:
         dtstart = None
     all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
-    reminders: list[dict] = []
+    reminders: list[dict[str, Any]] = []
     for alarm in vevent.walk("VALARM"):
         if "trigger" not in alarm:
             continue
@@ -342,7 +343,7 @@ def _extract_reminders(vevent) -> list[dict]:
             trigger = alarm.decoded("trigger")
         except Exception:
             continue
-        entry: dict = {"text": _reminder_to_text(trigger), "readonly": True}
+        entry: dict[str, Any] = {"text": _reminder_to_text(trigger), "readonly": True}
         # Absolute datetime triggers also carry the ISO instant so the client
         # can format it per the user's date/time-format settings.
         if isinstance(trigger, datetime):
@@ -351,7 +352,7 @@ def _extract_reminders(vevent) -> list[dict]:
     return reminders
 
 
-def _apply_alarms(vevent, triggers: list[timedelta] | None) -> None:
+def _apply_alarms(vevent: Any, triggers: list[timedelta] | None) -> None:
     """Replace the VEVENT's editable VALARMs with one DISPLAY alarm per trigger.
 
     ``None`` means "leave alarms alone" (drag/resize updates never touch them);
@@ -376,9 +377,9 @@ def _apply_alarms(vevent, triggers: list[timedelta] | None) -> None:
         vevent.add_component(alarm)
 
 
-def _extract_props(vevent) -> dict:
+def _extract_props(vevent: Any) -> dict[str, Any]:
     """Pull description/location/recurrence/reminders from a VEVENT."""
-    out: dict = {}
+    out: dict[str, Any] = {}
     desc = vevent.get("description")
     if desc:
         out["description"] = str(desc)
@@ -399,8 +400,8 @@ def _extract_props(vevent) -> dict:
 
 
 def _master_meta(
-    cal, from_dt: datetime, to_dt: datetime
-) -> tuple[dict[str, dict], dict[tuple[str, str], list]]:
+    cal: Any, from_dt: datetime, to_dt: datetime
+) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], list[Any]]]:
     """(UID -> master props, (UID, recurrence id) -> override reminders).
 
     The expanded search drops RRULE (and often VALARM) from each occurrence,
@@ -408,8 +409,8 @@ def _master_meta(
     Override props stay out of the master map — an override's own alarms must
     not leak to sibling occurrences via the fallback.
     """
-    meta: dict[str, dict] = {}
-    override_reminders: dict[tuple[str, str], list] = {}
+    meta: dict[str, dict[str, Any]] = {}
+    override_reminders: dict[tuple[str, str], list[Any]] = {}
     try:
         masters = cal.search(start=from_dt, end=to_dt, event=True, expand=False)
     except Exception as e:
@@ -447,7 +448,7 @@ class EventNotFoundError(Exception):
 # the master's RRULE/DTSTART in place for truncate/shift operations.
 
 
-def _master_vevent(ical):
+def _master_vevent(ical: Any) -> Any:
     """The series master VEVENT (the one without a RECURRENCE-ID)."""
     vevents = list(ical.walk("VEVENT"))
     for v in vevents:
@@ -479,25 +480,25 @@ def _occurrence_dt(recurrence_id: str, dtstart: date | datetime) -> date | datet
     return date.fromisoformat(recurrence_id[:10])
 
 
-def _rrule_text(vevent) -> str | None:
+def _rrule_text(vevent: Any) -> str | None:
     rr = vevent.get("rrule")
     if not rr:
         return None
-    return rr.to_ical().decode("utf-8")
+    return str(rr.to_ical().decode("utf-8"))
 
 
-def _rrule_parts(vevent) -> dict:
+def _rrule_parts(vevent: Any) -> dict[str, Any]:
     """RRULE as a plain {NAME: [values]} dict that can be re-added via vevent.add."""
     rr = vevent.get("rrule")
     return {str(k): (list(v) if isinstance(v, list) else [v]) for k, v in rr.items()}
 
 
-def _set_rrule(vevent, parts: dict) -> None:
+def _set_rrule(vevent: Any, parts: dict[str, Any]) -> None:
     vevent.pop("rrule", None)
     vevent.add("rrule", parts)
 
 
-def _shift_until(vevent, delta: timedelta) -> None:
+def _shift_until(vevent: Any, delta: timedelta) -> None:
     """Shift an RRULE UNTIL bound by ``delta`` (no-op for COUNT/infinite rules).
 
     Moving a whole series by dragging one occurrence shifts DTSTART; an UNTIL
@@ -516,13 +517,13 @@ def _shift_until(vevent, delta: timedelta) -> None:
     _set_rrule(vevent, parts)
 
 
-def _count_through(vevent, pivot: date | datetime, inc: bool = True) -> int:
+def _count_through(vevent: Any, pivot: date | datetime, inc: bool = True) -> int:
     """Number of occurrences from the series start through the pivot."""
     base = _as_dt(vevent.decoded("dtstart"))
     return len(rrulestr(_rrule_text(vevent), dtstart=base).between(base, _as_dt(pivot), inc=inc))
 
 
-def _truncate_until(vevent, pivot: date | datetime) -> None:
+def _truncate_until(vevent: Any, pivot: date | datetime) -> None:
     """Cap the series so the pivot and every later occurrence are dropped.
 
     UNTIL is set to the *last actual occurrence strictly before the pivot*, not
@@ -550,11 +551,11 @@ def _truncate_until(vevent, pivot: date | datetime) -> None:
     _set_rrule(vevent, parts)
 
 
-def _add_exdate(vevent, pivot: date | datetime) -> None:
+def _add_exdate(vevent: Any, pivot: date | datetime) -> None:
     vevent.add("exdate", pivot)
 
 
-def _exdates(vevent) -> list:
+def _exdates(vevent: Any) -> list[Any]:
     """All EXDATE exclusion points as a flat list of date/datetime values."""
     prop = vevent.get("exdate")
     if not prop:
@@ -563,13 +564,13 @@ def _exdates(vevent) -> list:
     return [d.dt for p in props for d in p.dts]
 
 
-def _set_exdates(vevent, dts) -> None:
+def _set_exdates(vevent: Any, dts: Any) -> None:
     vevent.pop("exdate", None)
     for d in dts:
         vevent.add("exdate", d)
 
 
-def _shift_exdate(vevent, delta: timedelta) -> None:
+def _shift_exdate(vevent: Any, delta: timedelta) -> None:
     """Shift EXDATE exclusion points by ``delta`` to track a whole-series move.
 
     A deleted occurrence is recorded as an EXDATE at its original time. When the
@@ -590,7 +591,7 @@ _FREQ_MAP = {
 _WEEKDAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
 
 
-def _build_rrule(rule: dict, dtstart: date | datetime) -> dict:
+def _build_rrule(rule: dict[str, Any], dtstart: date | datetime) -> dict[str, Any]:
     """Translate the editor's recurrence model into an icalendar RRULE dict.
 
     Monthly has two modes: ``monthday`` keeps the day of month (falling back to
@@ -601,7 +602,7 @@ def _build_rrule(rule: dict, dtstart: date | datetime) -> dict:
     freq = _FREQ_MAP.get(str(rule.get("freq", "")).lower())
     if not freq:
         raise ValueError(f"unsupported recurrence frequency: {rule.get('freq')!r}")
-    parts: dict = {"FREQ": freq}
+    parts: dict[str, Any] = {"FREQ": freq}
     interval = int(rule.get("interval") or 1)
     if interval > 1:
         parts["INTERVAL"] = interval
@@ -632,7 +633,7 @@ def _build_rrule(rule: dict, dtstart: date | datetime) -> dict:
     return parts
 
 
-def _remaining_rule_parts(vevent, pivot: date | datetime) -> dict:
+def _remaining_rule_parts(vevent: Any, pivot: date | datetime) -> dict[str, Any]:
     """Original rule, with COUNT reduced by the occurrences before the pivot."""
     parts = _rrule_parts(vevent)
     if "COUNT" in parts:
@@ -646,7 +647,7 @@ def _remaining_rule_parts(vevent, pivot: date | datetime) -> dict:
 
 
 def _apply_fields(
-    vevent,
+    vevent: Any,
     title: str,
     start: date | datetime,
     end: date | datetime,
@@ -654,7 +655,7 @@ def _apply_fields(
     description: str | None,
 ) -> None:
     """Overwrite a VEVENT's editable fields + time span, bumping SEQUENCE."""
-    def _replace(key: str, value) -> None:
+    def _replace(key: str, value: Any) -> None:
         vevent.pop(key, None)
         if value is not None and value != "":
             vevent.add(key, value)
@@ -677,8 +678,8 @@ def _apply_fields(
 
 
 def _upsert_override(
-    ical,
-    master,
+    ical: Any,
+    master: Any,
     pivot: date | datetime,
     title: str,
     start: date | datetime,
@@ -711,7 +712,7 @@ def _upsert_override(
     ical.add_component(ov)
 
 
-def _overrides(ical) -> list:
+def _overrides(ical: Any) -> list[Any]:
     """Detached single-occurrence override VEVENTs (those with a RECURRENCE-ID)."""
     return [
         c for c in ical.subcomponents
@@ -719,7 +720,7 @@ def _overrides(ical) -> list:
     ]
 
 
-def _shift_override(ve, delta: timedelta, new_uid: str | None = None) -> None:
+def _shift_override(ve: Any, delta: timedelta, new_uid: str | None = None) -> None:
     """Relocate a detached override by ``delta`` (and optionally re-key its UID).
 
     Only the recurrence id and time span move; the override's own customized
@@ -738,7 +739,7 @@ def _shift_override(ve, delta: timedelta, new_uid: str | None = None) -> None:
             ve.add(key, val + delta)
 
 
-def _pop_overrides(ical, keep) -> list:
+def _pop_overrides(ical: Any, keep: Callable[[Any], bool]) -> list[Any]:
     """Remove overrides whose recurrence id fails ``keep(rid)``; return the removed.
 
     ``keep`` receives the decoded RECURRENCE-ID; overrides it rejects are
@@ -763,11 +764,11 @@ def _series_ical(
     end: date | datetime,
     location: str | None,
     description: str | None,
-    rule_parts: dict | None,
-    overrides: list | None = None,
-    exdates: list | None = None,
+    rule_parts: dict[str, Any] | None,
+    overrides: list[Any] | None = None,
+    exdates: list[Any] | None = None,
     reminders: list[timedelta] | None = None,
-    alarms: list | None = None,
+    alarms: list[Any] | None = None,
 ) -> str:
     ical = ICalendar()
     ical.add("prodid", "-//WebCalDav//EN")
@@ -793,7 +794,7 @@ def _series_ical(
     ical.add_component(ve)
     for ov in overrides or []:
         ical.add_component(ov)
-    return ical.to_ical().decode("utf-8")
+    return str(ical.to_ical().decode("utf-8"))
 
 
 def _sync_fetch_events(
@@ -805,7 +806,7 @@ def _sync_fetch_events(
     to_dt: datetime,
     color: str,
     calendar_id: int,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         events = cal.search(start=from_dt, end=to_dt, event=True, expand=True)
@@ -830,7 +831,7 @@ def _sync_fetch_events(
             except Exception as e:
                 logger.warning("Failed to scan event for overrides: %s", e)
 
-        result: list[dict] = []
+        result: list[dict[str, Any]] = []
         for event in events:
             try:
                 ical = event.icalendar_instance
@@ -845,7 +846,7 @@ def _sync_fetch_events(
                     title = str(summary) if summary else "(No title)"
                     dtstart = vevent.decoded("dtstart")
                     all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
-                    ev: dict = {
+                    ev: dict[str, Any] = {
                         "id": uid,
                         "title": title,
                         "start": _dt_to_iso(dtstart),
@@ -857,13 +858,13 @@ def _sync_fetch_events(
                     elif "duration" in vevent:
                         dur = vevent.decoded("duration")
                         if isinstance(dur, timedelta):
-                            ev["end"] = _dt_to_iso(dtstart + dur)  # type: ignore[arg-type]
+                            ev["end"] = _dt_to_iso(dtstart + dur)
 
                     # Instance props take priority; recurrence/reminders fall
                     # back to the master since expansion strips them.
                     inst = _extract_props(vevent)
                     master = meta.get(uid, {})
-                    extended: dict = {"rawStart": ev["start"], "calendarId": calendar_id}
+                    extended: dict[str, Any] = {"rawStart": ev["start"], "calendarId": calendar_id}
                     if "end" in ev:
                         extended["rawEnd"] = ev["end"]
                     # Detached overrides carry a stable RECURRENCE-ID that does not
@@ -899,7 +900,7 @@ async def fetch_events(
     to_dt: datetime,
     color: str,
     calendar_id: int,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     with caldav_request_duration_seconds.labels(operation="fetch_events").time():
         try:
             return await asyncio.to_thread(
@@ -932,7 +933,7 @@ def _sync_update_event(
     description: str | None,
     scope: str = "all",
     recurrence_id: str | None = None,
-    rrule: dict | None = None,
+    rrule: dict[str, Any] | None = None,
     reminders: list[timedelta] | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
@@ -961,10 +962,10 @@ def _sync_update_event(
             anchor_end = end
             if is_recurring and recurrence_id:
                 pivot = _occurrence_dt(recurrence_id, master.decoded("dtstart"))
-                delta = start - pivot
+                delta = _as_dt(start) - _as_dt(pivot)
                 old_start = master.decoded("dtstart")
                 anchor_start = old_start + delta
-                anchor_end = anchor_start + (end - start)
+                anchor_end = anchor_start + (_as_dt(end) - _as_dt(start))
                 # A whole-series time shift moves every generated slot; carry the
                 # detached overrides along (times only) so they stay bound and
                 # keep their own customized fields rather than orphaning.
@@ -983,6 +984,7 @@ def _sync_update_event(
             event.save()
             return
 
+        assert recurrence_id is not None  # scope != "all" implies a pivot (see above)
         pivot = _occurrence_dt(recurrence_id, master.decoded("dtstart"))
 
         if scope == "this":
@@ -1017,10 +1019,10 @@ def _sync_update_event(
             new_uid = f"{uuid.uuid4()}@webcaldav"
             migrated = _pop_overrides(ical, keep=lambda rid: _as_dt(rid) < _as_dt(pivot))
             for ov in migrated:
-                _shift_override(ov, start - pivot, new_uid=new_uid)
+                _shift_override(ov, _as_dt(start) - _as_dt(pivot), new_uid=new_uid)
             old_ex = _exdates(master)
             _set_exdates(master, [d for d in old_ex if _as_dt(d) < _as_dt(pivot)])
-            migrated_ex = [d + (start - pivot) for d in old_ex if _as_dt(d) >= _as_dt(pivot)]
+            migrated_ex = [d + (_as_dt(start) - _as_dt(pivot)) for d in old_ex if _as_dt(d) >= _as_dt(pivot)]
             _truncate_until(master, pivot)
             event.data = ical.to_ical().decode("utf-8")
             event.save()
@@ -1053,7 +1055,7 @@ async def update_event(
     description: str | None,
     scope: str = "all",
     recurrence_id: str | None = None,
-    rrule: dict | None = None,
+    rrule: dict[str, Any] | None = None,
     reminders: list[timedelta] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="update_event").time():
@@ -1095,7 +1097,7 @@ def _sync_create_event(
     end: date | datetime,
     location: str | None,
     description: str | None,
-    rrule: dict | None = None,
+    rrule: dict[str, Any] | None = None,
     reminders: list[timedelta] | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
@@ -1119,7 +1121,7 @@ async def create_event(
     end: date | datetime,
     location: str | None,
     description: str | None,
-    rrule: dict | None = None,
+    rrule: dict[str, Any] | None = None,
     reminders: list[timedelta] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="create_event").time():

@@ -1,19 +1,20 @@
 import logging
-import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
+from starlette.middleware.base import RequestResponseEndpoint
 
 from .config import settings
 from .db import create_tables, init_engine, get_session_factory
 from .deps import init_login_rate_limiter, init_session_store, get_session_store
-from .metrics import active_sessions, http_requests_total
+from .metrics import http_requests_total
 from .models import User, UserSettings
 from .routers import auth, caldav_accounts, calendars, events, ops, settings as settings_router
 
@@ -50,7 +51,7 @@ logger = structlog.get_logger()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_engine(settings.database_url)
     init_session_store(settings.session_idle_timeout)
     init_login_rate_limiter(
@@ -78,7 +79,7 @@ _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 @app.middleware("http")
-async def csrf_header_check(request: Request, call_next):
+async def csrf_header_check(request: Request, call_next: RequestResponseEndpoint) -> Response:
     # CSRF defense-in-depth on top of SameSite=Lax: cross-site HTML forms
     # cannot set custom headers, so requiring one blocks forged requests.
     if (
@@ -90,10 +91,8 @@ async def csrf_header_check(request: Request, call_next):
 
 
 @app.middleware("http")
-async def metrics_middleware(request: Request, call_next):
-    start = time.perf_counter()
+async def metrics_middleware(request: Request, call_next: RequestResponseEndpoint) -> Response:
     response = await call_next(request)
-    duration = time.perf_counter() - start
     route = request.url.path
     http_requests_total.labels(route=route, method=request.method, status=str(response.status_code)).inc()
     return response

@@ -1,6 +1,6 @@
 import hmac
-import logging
 import os
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..crypto import derive_kek, generate_dek, make_verifier, unwrap_dek, verify_kek, wrap_dek
+from ..crypto import derive_kek, make_verifier, unwrap_dek, verify_kek, wrap_dek
 from ..deps import get_current_session, get_db, get_login_rate_limiter, get_session_store
 from ..metrics import active_sessions
 from ..models import User, UserSettings
@@ -51,7 +51,7 @@ async def login(
     db: AsyncSession = Depends(get_db),
     store: SessionStore = Depends(get_session_store),
     limiter: LoginRateLimiter = Depends(get_login_rate_limiter),
-) -> dict:
+) -> dict[str, Any]:
     # Throttle before the argon2 derivation — each unauthenticated request
     # otherwise costs a full memory-hard hash (CPU/RAM amplification).
     ip = _client_ip(request)
@@ -119,7 +119,7 @@ async def logout(
     response: Response,
     session_id: str | None = Cookie(default=None),
     store: SessionStore = Depends(get_session_store),
-) -> dict:
+) -> dict[str, Any]:
     if session_id:
         store.delete(session_id)
         active_sessions.set(store.active_count)
@@ -131,7 +131,7 @@ async def logout(
 async def session_status(
     session_id: str | None = Cookie(default=None),
     store: SessionStore = Depends(get_session_store),
-) -> dict:
+) -> dict[str, Any]:
     """Idle-logout countdown state. Non-refreshing: does NOT reset the timer."""
     if not session_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -153,7 +153,7 @@ async def change_password(
     entry: SessionEntry = Depends(get_current_session),
     db: AsyncSession = Depends(get_db),
     store: SessionStore = Depends(get_session_store),
-) -> dict:
+) -> dict[str, Any]:
     if len(req.new_password) < settings.min_password_length:
         raise HTTPException(
             status_code=400,

@@ -1,4 +1,3 @@
-import asyncio
 import os
 
 # Weak argon2 params so tests run fast
@@ -10,12 +9,10 @@ os.environ.setdefault("SESSION_IDLE_TIMEOUT", "3600")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from webcaldav.app import app
-from webcaldav.db import create_tables, get_engine, get_session_factory, init_engine
-from webcaldav.deps import get_session_store, init_login_rate_limiter, init_session_store
-from webcaldav.models import Base
+from webcaldav.db import create_tables, get_session_factory, init_engine
+from webcaldav.deps import init_login_rate_limiter, init_session_store
 
 
 @pytest.fixture(scope="function")
@@ -27,7 +24,7 @@ async def db_engine():
 
 
 @pytest.fixture(scope="function")
-async def db_session(db_engine) -> AsyncSession:
+async def db_session(db_engine):
     async with get_session_factory()() as session:
         yield session
 
@@ -44,7 +41,7 @@ def rate_limiter(db_engine):
 
 
 @pytest.fixture(scope="function")
-async def client(db_engine, store, rate_limiter) -> AsyncClient:
+async def client(db_engine, store, rate_limiter):
     async with AsyncClient(
         transport=ASGITransport(app=app),
         # https so httpx sends the session cookie, which is Secure by default

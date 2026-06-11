@@ -3,7 +3,7 @@ import re
 import uuid
 from datetime import date, timedelta, timezone
 from datetime import datetime as dt_type
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 _today = date.today
 
 
-def _dummy_events() -> list[dict]:
+def _dummy_events() -> list[dict[str, Any]]:
     today = _today()
     return [
         {
@@ -87,7 +87,7 @@ async def get_events(
     from_: str | None = Query(None, alias="from"),
     to: str | None = None,
     calendar_ids: str | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     result = await db.execute(
         select(Calendar, CalDAVAccount)
         .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
@@ -133,10 +133,10 @@ async def get_events(
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    events: list[dict] = []
+    events: list[dict[str, Any]] = []
     for i, res in enumerate(results):
         cal, account = rows[i]
-        if isinstance(res, Exception):
+        if isinstance(res, BaseException):
             logger.warning(
                 "caldav_fetch_failed",
                 account_id=account.id,
@@ -249,7 +249,7 @@ async def _calendar_for(
     row = result.first()
     if row is None:
         raise HTTPException(status_code=404, detail="Calendar not found")
-    return row
+    return row.tuple()
 
 
 def _resolve_span(body: EventUpdate) -> tuple[date | dt_type, date | dt_type]:
@@ -291,7 +291,7 @@ async def post_event(
     body: EventUpdate,
     entry: SessionEntry = Depends(get_unrestricted_session),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     cal, account = await _calendar_for(body.calendar_id, entry, db)
     start, end = _resolve_span(body)
     uid = f"{uuid.uuid4()}@webcaldav"
@@ -333,7 +333,7 @@ class RecurrencePreview(BaseModel):
 async def recurrence_preview(
     body: RecurrencePreview,
     entry: SessionEntry = Depends(get_unrestricted_session),
-) -> dict:
+) -> dict[str, Any]:
     """Compute the last occurrence + total count for a recurrence rule."""
     try:
         if body.all_day:
@@ -361,7 +361,7 @@ async def put_event(
     body: EventUpdate,
     entry: SessionEntry = Depends(get_unrestricted_session),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     if body.scope not in _RECUR_SCOPES:
         raise HTTPException(status_code=400, detail="Invalid scope")
     cal, account = await _calendar_for(body.calendar_id, entry, db)
@@ -389,6 +389,7 @@ async def put_event(
         if moved:
             # Move across calendars: recreate on the target (same UID) then drop
             # the original. Create first so a failure leaves the source intact.
+            assert body.original_calendar_id is not None  # implied by `moved`
             src_cal, src_account = await _calendar_for(body.original_calendar_id, entry, db)
             src_password = decrypt_bytes(
                 src_account.encrypted_password, src_account.nonce, entry.dek
@@ -450,7 +451,7 @@ async def delete_event_route(
     recurrence_id: str | None = Query(None),
     entry: SessionEntry = Depends(get_unrestricted_session),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, Any]:
     if scope not in _RECUR_SCOPES:
         raise HTTPException(status_code=400, detail="Invalid scope")
     cal, account = await _calendar_for(calendar_id, entry, db)

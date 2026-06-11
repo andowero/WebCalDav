@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..caldav_client import CalendarInfo, UnsafeURLError, discover_calendars, validate_caldav_url
 from ..config import settings
-from ..crypto import decrypt_bytes, encrypt_bytes
+from ..crypto import encrypt_bytes
 from ..deps import get_db, get_unrestricted_session
 from ..models import CalDAVAccount, Calendar
 from ..session import SessionEntry

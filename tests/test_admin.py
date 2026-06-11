@@ -1,10 +1,8 @@
 import pytest
-from sqlalchemy import select
 
 from webcaldav.admin import _provision_user, _rand_password
 from webcaldav.crypto import derive_kek, unwrap_dek, verify_kek
 from webcaldav.db import get_session_factory
-from webcaldav.models import User
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,5 @@
+from typing import Any
+
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
@@ -12,7 +14,7 @@ def init_engine(url: str) -> AsyncEngine:
     _engine = create_async_engine(url, echo=False)
 
     @event.listens_for(_engine.sync_engine, "connect")
-    def set_wal_mode(dbapi_conn, _record):
+    def set_wal_mode(dbapi_conn: Any, _record: Any) -> None:
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.close()

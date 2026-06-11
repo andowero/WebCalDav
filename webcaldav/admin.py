@@ -3,7 +3,6 @@ import asyncio
 import os
 import secrets
 import string
-import sys
 
 import typer
 from sqlalchemy import select

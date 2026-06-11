@@ -53,3 +53,19 @@ target-version = "py312"
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+
+# Tests use pytest fixtures and fake clients that don't warrant full strict
+# annotations; relax the untyped-def rules and skip checking their bodies.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+
+# caldav and icalendar ship py.typed markers but with incomplete/incorrect
+# annotations (e.g. DAVClient/Calendar exported as `object`). Treat them as
+# untyped instead of casting every call site.
+[[tool.mypy.overrides]]
+module = ["caldav", "caldav.*", "icalendar", "icalendar.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
