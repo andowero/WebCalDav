@@ -66,7 +66,9 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 - Single Jinja2-rendered host page.
 - Static assets: FullCalendar.js bundle (+ luxon and the `@fullcalendar/luxon3`
   plugin for named-IANA-timezone rendering) plus a small vanilla-JS glue layer
-  that calls the API via `fetch`.
+  that calls the API via `fetch`. Third-party libs are vendored under
+  `static/vendor/` and served from `/static` (no CDN); the FullCalendar v6
+  global bundle injects its own CSS, so there is no separate stylesheet.
 - An event modal opens on event click for viewing/editing, populated from the
   event's `extendedProps` (`description`, `location`, `recurrence`,
   `recurrenceRule`, `reminders`, `rawStart`/`rawEnd`); dates are formatted

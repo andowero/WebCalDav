@@ -2,6 +2,23 @@
 
 ## Unreleased — MVP
 
+### Fixed — audit findings L1–L4 (2026-06-11)
+- **L2 — vendored frontend assets (no CDN):** FullCalendar, luxon, and the
+  luxon3 plugin are now committed under `webcaldav/static/vendor/` and served
+  from `/static`, replacing the jsDelivr `<script>` tags. Removes CDN-compromise
+  risk (script in the authenticated origin holding the session cookie + DEK) and
+  drops the browser-needs-internet requirement. Bumped to current latest:
+  FullCalendar 6.1.20, luxon 3.7.2. The dead FullCalendar CSS `<link>` (the v6
+  global bundle injects its own styles; the separate file 404s on jsDelivr now)
+  was removed. Vendor files fold into the `?v=` cache-bust hash.
+- **L1 — root handler:** `except Exception: pass` in the `/` session/DB lookup
+  now logs at WARNING (`root_session_lookup_failed`) instead of silently
+  rendering the anonymous page on a real failure.
+- **L3 — event field caps:** `title` / `location` / `description` in
+  `EventUpdate` now have `max_length=8000`.
+- **L4 — cleanup:** removed the dead duplicate `select(CalDAVAccount)` in
+  `admin.reset_password`.
+
 ### Security — auth hardening: fixes audit findings M1, M2, M4 (2026-06-11)
 - **Secure session cookie + CSRF header (M1):** session cookie now sets
   `Secure` per new `COOKIE_SECURE` setting (default `true`); new middleware

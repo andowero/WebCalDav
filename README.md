@@ -12,7 +12,7 @@ A lightweight, self-hosted web UI for viewing and editing calendar events on you
 - Per-user settings: timezone, first day of week, time and date format, default view, auto-logout.
 - No event caching — every read and write goes straight to your CalDAV server.
 
-> **Note:** the frontend loads FullCalendar and luxon from the jsDelivr CDN, so the *browser* needs internet access. The server itself only talks to your CalDAV server.
+> **Note:** FullCalendar and luxon are vendored into the container (`webcaldav/static/vendor/`) and served from the app itself — no third-party CDN, and the browser needs no internet access beyond your own server.
 
 ## Who is this for
 
@@ -124,6 +124,30 @@ By default (`false`) the server connects to whatever CalDAV URL a user enters. B
 Set `BLOCK_PRIVATE_CALDAV_URLS=true` to reject any CalDAV URL whose hostname resolves to a private, loopback, link-local, reserved, multicast, or unspecified address, and to replace detailed connection errors with a generic message. The shipped `docker-compose.yml` enables it.
 
 **Caveat for self-hosters:** if your CalDAV server (e.g. Radicale) runs on a private/LAN address — a very common setup — enabling this will block adding it. In that case set `BLOCK_PRIVATE_CALDAV_URLS: "false"` in your compose file. The protection only matters when users you don't fully trust can add accounts and the server sits on a network with sensitive internal services.
+
+## Updating the vendored frontend libraries
+
+FullCalendar and luxon are not loaded from a CDN — they are committed under `webcaldav/static/vendor/` and served from the app itself. To move to newer versions, re-download the three files and rebuild the container. Find the latest versions on npm (FullCalendar and its luxon3 plugin share the same version number; luxon is versioned separately):
+
+```sh
+curl -s https://registry.npmjs.org/fullcalendar/latest | grep -o '"version":"[^"]*"'
+curl -s https://registry.npmjs.org/luxon/latest | grep -o '"version":"[^"]*"'
+```
+
+Then overwrite the vendored files, substituting the versions (here `6.1.20` for FullCalendar / its plugin and `3.7.2` for luxon):
+
+```sh
+cd webcaldav/static/vendor
+curl -fSL -o fullcalendar.min.js          https://cdn.jsdelivr.net/npm/fullcalendar@6.1.20/index.global.min.js
+curl -fSL -o luxon.min.js                  https://cdn.jsdelivr.net/npm/luxon@3.7.2/build/global/luxon.min.js
+curl -fSL -o fullcalendar-luxon3.min.js    https://cdn.jsdelivr.net/npm/@fullcalendar/luxon3@6.1.20/index.global.min.js
+```
+
+Notes:
+
+- The FullCalendar v6 global bundle injects its own CSS — there is **no** separate stylesheet to download.
+- Filenames are fixed; `index.html` references them by path, and the cache-busting `?v=` token is recomputed from the file contents on the next start, so browsers pick up the new bytes automatically.
+- Commit the updated files and rebuild: `sudo docker compose up --build -d`. Then hard-reload the page once and confirm the calendar renders.
 
 ## User management (admin CLI)
 

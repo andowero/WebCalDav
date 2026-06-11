@@ -183,12 +183,12 @@ class EventUpdate(BaseModel):
     # Set on edit when the user moves the event to a different calendar; the
     # event is recreated on calendar_id and deleted from original_calendar_id.
     original_calendar_id: int | None = None
-    title: str = ""
+    title: str = Field(default="", max_length=8000)
     all_day: bool = False
     start: str
     end: str | None = None
-    location: str | None = None
-    description: str | None = None
+    location: str | None = Field(default=None, max_length=8000)
+    description: str | None = Field(default=None, max_length=8000)
     timezone: str | None = None
     # Recurring-event controls. scope selects which occurrences a write touches;
     # recurrence_id is the pivot occurrence's original start (the client's

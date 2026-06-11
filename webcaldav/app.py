@@ -26,8 +26,9 @@ def _static_version() -> str:
 
     h = hashlib.sha256()
     static_dir = _PKG / "static"
-    for name in ("app.js", "app.css"):
-        p = static_dir / name
+    paths = [static_dir / "app.js", static_dir / "app.css"]
+    paths += sorted((static_dir / "vendor").glob("*.js"))
+    for p in paths:
         if p.exists():
             h.update(p.read_bytes())
     return h.hexdigest()[:12]
@@ -44,6 +45,8 @@ structlog.configure(
         structlog.processors.JSONRenderer(),
     ],
 )
+
+logger = structlog.get_logger()
 
 
 @asynccontextmanager
@@ -135,7 +138,7 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_auto_logout_enabled = s.auto_logout_enabled
                         user_settings_auto_logout_timeout = s.auto_logout_timeout_seconds
         except Exception:
-            pass
+            logger.warning("root_session_lookup_failed", exc_info=True)
 
     return templates.TemplateResponse(
         request,

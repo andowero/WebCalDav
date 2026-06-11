@@ -111,9 +111,6 @@ def reset_password(email: str = typer.Option(..., help="User email address")) ->
                 raise typer.Exit(1)
 
             # Wipe CalDAV credentials (DEK rotation makes them unrecoverable)
-            await db.execute(
-                select(CalDAVAccount).where(CalDAVAccount.user_id == user.id)
-            )
             result = await db.execute(
                 select(CalDAVAccount).where(CalDAVAccount.user_id == user.id)
             )
