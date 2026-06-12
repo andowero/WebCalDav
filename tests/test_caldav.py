@@ -21,6 +21,7 @@ from webcaldav.caldav_client import (
     delete_event,
     discover_calendars,
     fetch_events,
+    fetch_sync_token,
     update_event,
 )
 
@@ -643,6 +644,26 @@ async def test_update_recurring_two_this_overrides_isolated(edit_calendar):
     assert by_day["2026-06-19"] == "Other"
     assert by_day["2026-06-12"] == "Weekly sync"
     assert by_day["2026-07-03"] == "Weekly sync"
+
+
+async def test_fetch_sync_token_changes_on_write(edit_calendar):
+    """The notification scheduler's change channel: the token must be stable
+    across reads but change after an event is added (Radicale has no real
+    sync-collection, so the caldav lib falls back to an etag-hash token)."""
+    base_url, url = edit_calendar
+    t1 = await fetch_sync_token(base_url, USER, PASSWORD, url)
+    assert t1
+    # Unchanged calendar -> identical token.
+    assert await fetch_sync_token(base_url, USER, PASSWORD, url) == t1
+    # A write must move the token.
+    await create_event(
+        base_url, USER, PASSWORD, url, "tok-event@webcaldav",
+        title="New", all_day=False,
+        start=datetime(2026, 6, 28, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
+        location=None, description=None,
+    )
+    assert await fetch_sync_token(base_url, USER, PASSWORD, url) != t1
 
 
 async def test_update_event_not_found(edit_calendar):

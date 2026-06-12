@@ -25,6 +25,7 @@ class SettingsOut(BaseModel):
     default_view: str
     auto_logout_enabled: bool
     auto_logout_timeout_seconds: int
+    notifications_enabled: bool
 
 
 class SettingsIn(BaseModel):
@@ -35,6 +36,7 @@ class SettingsIn(BaseModel):
     default_view: str | None = None
     auto_logout_enabled: bool | None = None
     auto_logout_timeout_seconds: int | None = None
+    notifications_enabled: bool | None = None
 
 
 def _to_out(s: UserSettings) -> SettingsOut:
@@ -46,6 +48,7 @@ def _to_out(s: UserSettings) -> SettingsOut:
         default_view=s.default_view,
         auto_logout_enabled=s.auto_logout_enabled,
         auto_logout_timeout_seconds=s.auto_logout_timeout_seconds,
+        notifications_enabled=s.notifications_enabled,
     )
 
 
@@ -67,6 +70,7 @@ async def get_settings(
             default_view=DEFAULT_VIEW,
             auto_logout_enabled=True,
             auto_logout_timeout_seconds=3600,
+            notifications_enabled=False,
         )
     return _to_out(s)
 
@@ -122,6 +126,13 @@ async def put_settings(
         s.auto_logout_enabled = body.auto_logout_enabled
     if body.auto_logout_timeout_seconds is not None:
         s.auto_logout_timeout_seconds = body.auto_logout_timeout_seconds
+    if body.notifications_enabled is not None:
+        s.notifications_enabled = body.notifications_enabled
+
+    # Notifications only fire while a tab stays logged in, so the two are
+    # mutually exclusive: enabling notifications forces auto-logout off.
+    if s.notifications_enabled:
+        s.auto_logout_enabled = False
 
     await db.commit()
 

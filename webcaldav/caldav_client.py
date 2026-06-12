@@ -919,6 +919,46 @@ async def fetch_events(
             raise
 
 
+def _sync_fetch_sync_token(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+) -> str:
+    """Return a change-detection token for a calendar.
+
+    Uses the caldav lib's sync-token machinery. Radicale lacks RFC 6578
+    sync-collection, so the lib falls back to a "fake-" token hashed from all
+    object ETags — it still changes whenever any event is added/edited/removed,
+    and only ETags (not event bodies) are fetched. Used to skip event refetches
+    when nothing changed.
+    """
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        sync = cal.get_objects_by_sync_token(load_objects=False)
+        return str(sync.sync_token)
+
+
+async def fetch_sync_token(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+) -> str:
+    with caldav_request_duration_seconds.labels(operation="fetch_sync_token").time():
+        try:
+            return await asyncio.to_thread(
+                _sync_fetch_sync_token,
+                account_url,
+                username,
+                password,
+                calendar_url,
+            )
+        except Exception:
+            caldav_request_errors_total.labels(operation="fetch_sync_token").inc()
+            raise
+
+
 def _sync_update_event(
     account_url: str,
     username: str,

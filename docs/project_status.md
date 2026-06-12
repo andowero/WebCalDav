@@ -7,7 +7,7 @@
 | MVP       | Secure user login, read-only view of calendar events      | Complete |
 | v1        | Basic editing of calendar events -> without repetition    | Complete |
 | v2        | Editing of calendar events -> repetition                  | Complete |
-| v3        | Reminders and browser notifications                       | In progress — reminder editing done, notifications pending |
+| v3        | Reminders and browser notifications                       | Complete |
 
 ## Known issues
 
@@ -237,7 +237,29 @@ First half of v3: reminders can now be created and deleted per event.
   decomposition, per-scope persistence; API validation; absolute-trigger
   extraction).
 
+### Browser notifications (2026-06-12)
+
+Second half of v3, completing the milestone.
+
+- Per-user toggle (Settings → Preferences), off by default. Fires a desktop
+  notification at each reminder (VALARM) **and** at each event start. Body is
+  `WebCalDav` / event name / event datetime, datetime in the user's formats.
+- **Foreground-only by design** — answers the logged-out-reminder question
+  below. The schedule is built client-side from events loaded during the
+  session and shown through a Service Worker (`static/sw.js`) so the OS routes
+  it to the notification center. No server-side Web Push: pushing reminders
+  while the browser is closed would require plaintext reminder data on the
+  server, breaking zero-knowledge at rest. Notifications fire only while a tab
+  is open (background tab is fine). Enabling notifications forces auto-logout
+  off (server-enforced), since the tab must stay logged in to resync.
+- Scheduler loads a `NOTIFICATION_HORIZON_DAYS` (default 60) future window and
+  re-polls every 10 min, gated by `GET /calendars/ctags`. Radicale has no
+  RFC 6578 sync-collection, so the change token is the caldav lib's etag-hash
+  fallback (`fetch_sync_token`).
+- Browsers: Firefox, Chrome, Opera, Safari (macOS). Verified manually (no
+  automated browser tests, per project policy). Backend covered by new settings
+  and `fetch_sync_token` tests.
+
 ## What is next
 
-- v3 remainder: browser notifications for reminders (Service Worker; see the
-  logged-out reminder question in architecture.md).
+- v4 scoping (post-v3): TBD.

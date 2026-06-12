@@ -312,6 +312,17 @@
       enEl.checked = enabled;
       minEl.value = String(mins);
       minEl.disabled = !enabled;
+      const notifEl = document.getElementById('pref-notifications-enabled');
+      const notifOn = !!s.notifications_enabled;
+      notifEl.checked = notifOn;
+      if (!('Notification' in window)) {
+        notifEl.checked = false;
+        notifEl.disabled = true;
+      }
+      // Notifications and auto-logout are mutually exclusive (server-enforced);
+      // when notifications are on, lock the auto-logout controls off.
+      enEl.disabled = notifOn;
+      if (notifOn) minEl.disabled = true;
     } catch (_) {}
     populateTimezones(tz);
     document.getElementById('pref-timefmt').value = timefmt;
@@ -354,6 +365,36 @@
       document.getElementById('pref-auto-logout-min').disabled = !autoLogoutEnabledEl.checked;
     });
 
+    // Turning notifications on must happen in this click handler so the browser
+    // permission prompt is tied to a user gesture (required by Safari/iOS).
+    const notifEnabledEl = document.getElementById('pref-notifications-enabled');
+    notifEnabledEl.addEventListener('change', async () => {
+      if (notifEnabledEl.checked) {
+        if (!('Notification' in window)) {
+          notifEnabledEl.checked = false;
+          alert('This browser does not support notifications.');
+          return;
+        }
+        let perm = Notification.permission;
+        if (perm !== 'granted') {
+          try { perm = await Notification.requestPermission(); } catch (_) { perm = 'denied'; }
+        }
+        if (perm !== 'granted') {
+          notifEnabledEl.checked = false;
+          alert('Notifications are blocked. Allow them for this site in your browser settings, then try again.');
+          return;
+        }
+        // Enabling notifications forces auto-logout off (the tab must stay
+        // logged in to keep resyncing events); mirror the server rule in the UI.
+        autoLogoutEnabledEl.checked = false;
+        autoLogoutEnabledEl.disabled = true;
+        document.getElementById('pref-auto-logout-min').disabled = true;
+      } else {
+        autoLogoutEnabledEl.disabled = false;
+        document.getElementById('pref-auto-logout-min').disabled = !autoLogoutEnabledEl.checked;
+      }
+    });
+
     // Prefs form
     const prefsForm = document.getElementById('prefs-form');
     prefsForm.addEventListener('submit', async (e) => {
@@ -366,7 +407,9 @@
         const timefmt = document.getElementById('pref-timefmt').value;
         const datefmt = document.getElementById('pref-datefmt').value;
         const defaultView = document.getElementById('pref-default-view').value;
-        const autoEnabled = document.getElementById('pref-auto-logout-enabled').checked;
+        const notifEnabled = document.getElementById('pref-notifications-enabled').checked;
+        // Notifications force auto-logout off (server enforces the same).
+        const autoEnabled = notifEnabled ? false : document.getElementById('pref-auto-logout-enabled').checked;
         const autoMin = parseInt(document.getElementById('pref-auto-logout-min').value, 10);
         if (autoEnabled && (!Number.isFinite(autoMin) || autoMin < 1)) {
           throw new Error('Logout time must be at least 1 minute');
@@ -380,6 +423,7 @@
           default_view: defaultView,
           auto_logout_enabled: autoEnabled,
           auto_logout_timeout_seconds: autoSecs,
+          notifications_enabled: notifEnabled,
         });
         window.__SETTINGS__ = window.__SETTINGS__ || {};
         window.__SETTINGS__.timezone = tz;
@@ -389,6 +433,8 @@
         window.__SETTINGS__.default_view = defaultView;
         window.__SETTINGS__.auto_logout_enabled = autoEnabled;
         window.__SETTINGS__.auto_logout_timeout_seconds = autoSecs;
+        window.__SETTINGS__.notifications_enabled = notifEnabled;
+        if (notifEnabled) startNotifications(); else stopNotifications();
         applyCalendarPrefs(tz, fdow, timefmt, datefmt);
         // Live session timeout changed server-side; resync the countdown.
         refreshLogoutCountdown();
@@ -2120,6 +2166,9 @@
     if (_fcCalendar) _fcCalendar.refetchEvents();
     if (_agendaActive) agendaReset();
     if (_agendaActive) agendaLoadMore();
+    // A local create/edit/delete won't wait for the 10-min poll: reschedule
+    // notifications now (force a refetch — the change is already committed).
+    if ((window.__SETTINGS__ || {}).notifications_enabled) resyncNotifications(true);
   }
 
   // Create modal with no start/end preselected (the "+" FAB). A blank start
@@ -2199,6 +2248,7 @@
     startLogoutCountdown();
     initSettingsPanel();
     initEventModal();
+    if ((window.__SETTINGS__ || {}).notifications_enabled) startNotifications();
 
     const calendarEl = document.getElementById('calendar');
     const s = window.__SETTINGS__ || {};
@@ -2342,6 +2392,180 @@
       if (_calPop && !_calPop.hidden) { closeDatePicker(); return; } // toggle
       openCalTitlePicker(t);
     });
+  }
+
+  // ── Browser reminder notifications ──────────────────────────────────────────
+  // Foreground-only by design: while a WebCalDav tab is open and logged in, load
+  // a future window of events, schedule timers, and fire a notification at each
+  // event start and each reminder via the Service Worker (so the OS routes it to
+  // the notification center). No Web Push / server push — that would require
+  // plaintext reminder data on the server, breaking zero-knowledge at rest.
+
+  const NOTIF_RESYNC_MS = 10 * 60 * 1000;     // re-poll cadence
+  const NOTIF_MAX_TIMEOUT_MS = 2147483647;    // setTimeout ceiling (~24.8 days)
+  let _notifSwReg = null;
+  let _notifTimers = [];
+  let _notifResync = null;
+  let _notifEvents = null;                     // last-fetched future window
+  let _notifCtags = null;                      // last-seen per-calendar tokens
+  const _notifFired = loadFiredSet();          // tags already shown (dedupe)
+
+  function loadFiredSet() {
+    try {
+      const raw = localStorage.getItem('webcaldav_notif_fired');
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch (_) { return new Set(); }
+  }
+
+  function persistFiredSet() {
+    try {
+      // Drop entries older than the horizon margin so the set can't grow forever.
+      const cutoff = Date.now() - 2 * 24 * 60 * 60 * 1000;
+      const kept = Array.from(_notifFired).filter((t) => {
+        const ep = parseInt(t.slice(t.lastIndexOf(':') + 1), 10);
+        return Number.isFinite(ep) && ep >= cutoff;
+      });
+      _notifFired.clear();
+      kept.forEach((t) => _notifFired.add(t));
+      localStorage.setItem('webcaldav_notif_fired', JSON.stringify(kept));
+    } catch (_) {}
+  }
+
+  // Body datetime, in the user's date (+ time, for timed events) format.
+  function notifDateTime(dt, allDay) {
+    const dfmt = luxonDateFmt(dateFormatKey());
+    if (allDay) return dt.toFormat(dfmt);
+    const tfmt = timeFormatKey() === '12h' ? 'h:mm a' : 'HH:mm';
+    return dt.toFormat(dfmt + ' ' + tfmt);
+  }
+
+  // Expand events into absolute notification triggers (event start + each
+  // reminder). All triggers display the event's start datetime in the body.
+  function buildTriggers(events) {
+    const tz = effectiveTz();
+    const now = Date.now();
+    const out = [];
+    (events || []).forEach((e) => {
+      const p = e.extendedProps || {};
+      if (p.calendarId == null) return;          // skip demo/non-calendar events
+      const allDay = !!e.allDay;
+      const startStr = p.rawStart || e.start;
+      if (!startStr) return;
+      const start = allDay
+        ? luxon.DateTime.fromISO(String(startStr).slice(0, 10), { zone: tz })
+        : luxon.DateTime.fromISO(startStr, { setZone: true }).setZone(tz);
+      if (!start.isValid) return;
+      const title = e.title || '(No title)';
+      out.push({ uid: e.id, when: start, title, allDay, displayAt: start });
+      (p.reminders || []).forEach((r) => {
+        let when = null;
+        if (r.readonly) {
+          if (r.at) when = luxon.DateTime.fromISO(r.at, { setZone: true }).setZone(tz);
+        } else if (allDay && r.time) {
+          const [hh, mm] = r.time.split(':').map(Number);
+          const days = r.value * (r.unit === 'weeks' ? 7 : 1);
+          when = start.startOf('day').minus({ days }).plus({ hours: hh, minutes: mm });
+        } else if (!allDay) {
+          when = start.minus({ [r.unit]: r.value });
+        }
+        if (when && when.isValid) out.push({ uid: e.id, when, title, allDay, displayAt: start });
+      });
+    });
+    return out.filter((t) => t.when.toMillis() > now);
+  }
+
+  function scheduleTriggers(events) {
+    _notifTimers.forEach((id) => clearTimeout(id));
+    _notifTimers = [];
+    const now = Date.now();
+    buildTriggers(events).forEach((t) => {
+      const epoch = t.when.toMillis();
+      const tag = t.uid + ':' + epoch;
+      if (_notifFired.has(tag)) return;
+      const delay = epoch - now;
+      // Skip triggers beyond the setTimeout ceiling; a later resync schedules
+      // them once they fall inside the window.
+      if (delay <= 0 || delay > NOTIF_MAX_TIMEOUT_MS) return;
+      _notifTimers.push(setTimeout(() => fireNotification(t, tag), delay));
+    });
+  }
+
+  function fireNotification(t, tag) {
+    if (_notifFired.has(tag)) return;
+    _notifFired.add(tag);
+    persistFiredSet();
+    const opts = {
+      body: t.title + '\n' + notifDateTime(t.displayAt, t.allDay),
+      tag,
+      icon: '/static/icon.png',
+      badge: '/static/favicon-32x32.png',
+    };
+    try {
+      if (_notifSwReg && _notifSwReg.showNotification) _notifSwReg.showNotification('WebCalDav', opts);
+      else if ('Notification' in window) new Notification('WebCalDav', opts);
+    } catch (_) {}
+  }
+
+  async function fetchNotifWindow() {
+    const tz = effectiveTz();
+    const now = luxon.DateTime.now().setZone(tz);
+    const horizon = (window.__CONFIG__ || {}).notification_horizon_days || 60;
+    const params = new URLSearchParams({ from: now.toISO(), to: now.plus({ days: horizon }).toISO() });
+    const r = await fetch('/events?' + params.toString());
+    if (!r.ok) throw new Error('events fetch failed');
+    return await r.json();
+  }
+
+  // True if events should be refetched. Compares per-calendar change tokens;
+  // any error (or first run) → refetch.
+  async function notifCtagsChanged() {
+    try {
+      const r = await fetch('/calendars/ctags');
+      if (!r.ok) return true;
+      const tags = await r.json();
+      const prev = _notifCtags;
+      _notifCtags = tags;
+      if (prev == null) return true;
+      const keys = new Set([...Object.keys(prev), ...Object.keys(tags)]);
+      for (const k of keys) { if (prev[k] !== tags[k]) return true; }
+      return false;
+    } catch (_) { return true; }
+  }
+
+  async function resyncNotifications(force) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      // `force` (a local create/edit/delete) refetches without waiting on the
+      // change-token check, which may lag a just-committed write. Still refresh
+      // the stored token so the next polled resync compares against current.
+      const changed = await notifCtagsChanged();
+      if (force || changed || !_notifEvents) {
+        _notifEvents = await fetchNotifWindow();
+      }
+      // Always reschedule so far-future triggers get a timer once in range.
+      scheduleTriggers(_notifEvents || []);
+    } catch (_) {}
+  }
+
+  async function startNotifications() {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try {
+      if ('serviceWorker' in navigator) {
+        const v = (window.__CONFIG__ || {}).static_v || '';
+        _notifSwReg = await navigator.serviceWorker.register('/static/sw.js' + (v ? '?v=' + v : ''));
+      }
+    } catch (_) {}
+    await resyncNotifications();
+    if (_notifResync) clearInterval(_notifResync);
+    _notifResync = setInterval(resyncNotifications, NOTIF_RESYNC_MS);
+  }
+
+  function stopNotifications() {
+    if (_notifResync) { clearInterval(_notifResync); _notifResync = null; }
+    _notifTimers.forEach((id) => clearTimeout(id));
+    _notifTimers = [];
+    _notifEvents = null;
+    _notifCtags = null;
   }
 
   document.addEventListener('DOMContentLoaded', function () {

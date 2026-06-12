@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     argon2_memory_cost: int = 131072
     argon2_parallelism: int = 1
 
+    # How many days ahead the browser-notification scheduler loads events to
+    # fire reminder/start notifications for. Raise it for reminders further out
+    # (e.g. month-ahead birthdays).
+    notification_horizon_days: int = 60
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 

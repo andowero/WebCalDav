@@ -41,6 +41,12 @@ _USERS_KDF_MIGRATION = {
     "kdf_parallelism": 1,
 }
 
+# Columns added to user_settings after initial release. create_all won't alter
+# an existing table, so add missing columns explicitly for pre-migration DBs.
+_USER_SETTINGS_MIGRATION = {
+    "notifications_enabled": ("BOOLEAN", 0),
+}
+
 
 async def create_tables() -> None:
     engine = get_engine()
@@ -54,6 +60,20 @@ async def create_tables() -> None:
                 await conn.execute(
                     text(
                         f"ALTER TABLE users ADD COLUMN {column} INTEGER "
+                        f"NOT NULL DEFAULT {legacy_default}"
+                    )
+                )
+        settings_existing = {
+            row[1]
+            for row in (
+                await conn.execute(text("PRAGMA table_info(user_settings)"))
+            ).fetchall()
+        }
+        for column, (sql_type, legacy_default) in _USER_SETTINGS_MIGRATION.items():
+            if column not in settings_existing:
+                await conn.execute(
+                    text(
+                        f"ALTER TABLE user_settings ADD COLUMN {column} {sql_type} "
                         f"NOT NULL DEFAULT {legacy_default}"
                     )
                 )

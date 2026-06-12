@@ -27,7 +27,7 @@ def _static_version() -> str:
 
     h = hashlib.sha256()
     static_dir = _PKG / "static"
-    paths = [static_dir / "app.js", static_dir / "app.css"]
+    paths = [static_dir / "app.js", static_dir / "app.css", static_dir / "sw.js"]
     paths += sorted((static_dir / "vendor").glob("*.js"))
     for p in paths:
         if p.exists():
@@ -110,6 +110,7 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_default_view = "dayGridMonth"
     user_settings_auto_logout_enabled = True
     user_settings_auto_logout_timeout = 3600
+    user_settings_notifications_enabled = False
 
     if session_id:
         try:
@@ -136,6 +137,7 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_default_view = s.default_view
                         user_settings_auto_logout_enabled = s.auto_logout_enabled
                         user_settings_auto_logout_timeout = s.auto_logout_timeout_seconds
+                        user_settings_notifications_enabled = s.notifications_enabled
         except Exception:
             logger.warning("root_session_lookup_failed", exc_info=True)
 
@@ -152,6 +154,8 @@ async def root(request: Request) -> HTMLResponse:
             "default_view": user_settings_default_view,
             "auto_logout_enabled": user_settings_auto_logout_enabled,
             "auto_logout_timeout": user_settings_auto_logout_timeout,
+            "notifications_enabled": user_settings_notifications_enabled,
+            "notification_horizon_days": settings.notification_horizon_days,
             "static_v": STATIC_VERSION,
         },
     )

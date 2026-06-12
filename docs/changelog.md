@@ -2,6 +2,28 @@
 
 ## Unreleased — MVP
 
+### Added — browser notifications (2026-06-12)
+- Optional per-user desktop notifications that fire at each event's reminder
+  (VALARM) **and** at each event's start. Off by default; toggled under
+  Settings → Preferences. New `user_settings.notifications_enabled` column
+  (with a SQLite `ALTER TABLE` migration in `create_tables`) and a
+  `notifications_enabled` field on the `/settings` API. Enabling it forces
+  `auto_logout_enabled` off (server-enforced) — notifications need the tab to
+  stay logged in to keep resyncing.
+- **Foreground-only by design.** Notifications are scheduled client-side from
+  events loaded during the session and shown via a new Service Worker
+  (`webcaldav/static/sw.js`) so the OS routes them to its notification center.
+  No Web Push / server-side push: that would require storing reminder times and
+  titles server-side in the clear, breaking zero-knowledge at rest. They fire
+  only while a WebCalDav tab is open (background tab is fine).
+- Scheduler loads a future window of events (`NOTIFICATION_HORIZON_DAYS`,
+  default 60) and re-polls every 10 min, gated by a new
+  `GET /calendars/ctags` change channel. Radicale lacks RFC 6578
+  sync-collection, so `fetch_sync_token` uses the caldav lib's etag-hash
+  fallback token (changes on any add/edit/delete) to skip redundant refetches.
+- Notification body is `WebCalDav` / event name / event datetime, the datetime
+  rendered in the user's date & time format.
+
 ### Added — site icon / favicon (2026-06-12)
 - Brand icon added under `webcaldav/static/`: master `icon.png` plus generated
   `favicon.ico` (16/32/48), `favicon-16x16.png`, `favicon-32x32.png`, and

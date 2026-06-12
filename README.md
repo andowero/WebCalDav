@@ -8,7 +8,7 @@ A lightweight, self-hosted web UI for viewing and editing calendar events on you
 - Multiple CalDAV accounts per user; pick which calendars from each account to display.
 - Per-calendar colors taken from the server's `calendar-color` property, with user override.
 - All-day, multi-day, and recurring events; recurring events can be edited with "this event", "this and future", or "all events" scope.
-- Event reminders (VALARM) with browser notifications.
+- Event reminders (VALARM) with optional browser notifications, fired at each reminder and at event start (see [Browser notifications](#browser-notifications)).
 - Per-user settings: timezone, first day of week, time and date format, default view, auto-logout.
 - No event caching — every read and write goes straight to your CalDAV server.
 
@@ -106,6 +106,7 @@ By default the SQLite database lives at `/data/webcaldav.db` inside a named Dock
 | `ARGON2_MEMORY_COST` | `131072` | Argon2id memory cost (KiB; default 128 MiB). |
 | `ARGON2_PARALLELISM` | `1` | Argon2id parallelism factor. |
 | `BLOCK_PRIVATE_CALDAV_URLS` | `false` | Reject CalDAV server URLs that resolve to private/loopback/link-local/metadata addresses, and hide raw connection errors. Shipped as `true` in the compose file. |
+| `NOTIFICATION_HORIZON_DAYS` | `60` | How many days ahead the browser-notification scheduler loads events to fire reminder/start notifications for. Raise it for reminders further out (e.g. month-ahead birthdays). See [Browser notifications](#browser-notifications). |
 
 The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast). Each user's password record stores the parameters it was created with, so raising the values later is safe: existing users keep logging in with their old parameters and pick up the stronger ones the next time they change their password.
 
@@ -124,6 +125,34 @@ By default (`false`) the server connects to whatever CalDAV URL a user enters. B
 Set `BLOCK_PRIVATE_CALDAV_URLS=true` to reject any CalDAV URL whose hostname resolves to a private, loopback, link-local, reserved, multicast, or unspecified address, and to replace detailed connection errors with a generic message. The shipped `docker-compose.yml` enables it.
 
 **Caveat for self-hosters:** if your CalDAV server (e.g. Radicale) runs on a private/LAN address — a very common setup — enabling this will block adding it. In that case set `BLOCK_PRIVATE_CALDAV_URLS: "false"` in your compose file. The protection only matters when users you don't fully trust can add accounts and the server sits on a network with sensitive internal services.
+
+## Browser notifications
+
+WebCalDav can pop a desktop notification at each event's reminder (VALARM) **and** at each event's start time. They are **off by default**; turn them on per user under **Settings → Preferences → Browser notifications**. The first time you enable them the browser asks for notification permission — allow it. Each notification shows:
+
+```
+WebCalDav
+<event name>
+<event date/time in your date & time format>
+```
+
+and is handed to your operating system, so on Linux/macOS/Windows it lands in the system notification center.
+
+**Supported browsers:** Firefox, Chrome, Opera, and Safari on macOS. They work while a WebCalDav tab is open, including when the tab is in the background.
+
+### Important: notifications only fire while a tab is open
+
+Notifications are scheduled **in your browser**, from events loaded while you are logged in. They fire only while a WebCalDav tab is open (it may be backgrounded). **If you close the browser, no notifications fire** — there is no server-side push.
+
+This is a deliberate consequence of WebCalDav's [zero-knowledge design](#zero-knowledge-credential-storage): the server cannot read your calendar events without an active session, so it cannot push reminders when your browser is closed. Server-side push would require storing your reminder times and event titles on the server in the clear, which WebCalDav refuses to do. (On iOS, background web push needs an installed PWA; WebCalDav is desktop-first and does not target that.)
+
+### Enabling notifications turns auto-logout off
+
+Because the schedule has to be kept in sync with your calendar for as long as you want notifications, enabling notifications **disables automatic logout** for that user (the two settings are mutually exclusive, enforced on the server). Turn notifications back off to re-enable auto-logout.
+
+### How far ahead notifications are scheduled
+
+The scheduler loads events from now up to `NOTIFICATION_HORIZON_DAYS` (default **60**) ahead and refreshes them periodically, using a lightweight per-calendar change check so unchanged calendars aren't re-downloaded. If you keep reminders set more than ~2 months in advance (e.g. month-ahead birthday alerts that you want to be sure load early), raise `NOTIFICATION_HORIZON_DAYS` in `docker-compose.yml`.
 
 ## Updating the vendored frontend libraries
 

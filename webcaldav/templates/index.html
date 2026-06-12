@@ -21,7 +21,8 @@
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }} };
+  window.__CONFIG__ = { notification_horizon_days: {{ notification_horizon_days }}, static_v: {{ static_v | tojson }} };
 </script>
 
 <!-- ── Login ── -->
@@ -285,6 +286,13 @@
       </label>
       <label>Logout after (minutes)</label>
       <input id="pref-auto-logout-min" type="number" min="1" step="1" value="60">
+      <label class="ev-check">
+        <input type="checkbox" id="pref-notifications-enabled">
+        Browser notifications (reminders &amp; event starts)
+      </label>
+      <p id="pref-notifications-note" class="pref-note">
+        Fire only while a WebCalDav tab stays open. Enabling turns automatic logout off.
+      </p>
       <button type="submit">Save</button>
     </form>
   </section>

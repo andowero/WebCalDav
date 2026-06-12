@@ -44,3 +44,37 @@ async def test_default_view_rejects_invalid(client: AsyncClient, db_engine):
     await _login_unrestricted(client, "dv3@example.com")
     r = await client.put("/settings", json={"default_view": "bogusView"})
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_notifications_default_off(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "nt1@example.com")
+    r = await client.get("/settings")
+    assert r.status_code == 200
+    assert r.json()["notifications_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_notifications_roundtrip(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "nt2@example.com")
+    r = await client.put("/settings", json={"notifications_enabled": True})
+    assert r.status_code == 200
+    assert r.json()["notifications_enabled"] is True
+    r = await client.get("/settings")
+    assert r.json()["notifications_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_enabling_notifications_forces_auto_logout_off(client: AsyncClient, db_engine):
+    """Notifications need the tab logged in to keep resyncing, so the server
+    forces auto-logout off whenever notifications are enabled — even if the same
+    request tries to turn auto-logout on."""
+    await _login_unrestricted(client, "nt3@example.com")
+    r = await client.put(
+        "/settings",
+        json={"notifications_enabled": True, "auto_logout_enabled": True},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["notifications_enabled"] is True
+    assert body["auto_logout_enabled"] is False

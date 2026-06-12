@@ -59,6 +59,8 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 ### API layer
 
 - FastAPI routers per resource: `auth`, `caldav_accounts`, `calendars`, `events`, `settings`, `ops` (`/health`, `/metrics`).
+- `calendars` also serves `GET /calendars/ctags` — a per-calendar change token (the caldav lib's sync-token, falling back to an etag-hash on Radicale) used by the notification scheduler to skip redundant event refetches.
+- `settings` carries `notifications_enabled`; enabling it forces `auto_logout_enabled` off (the two are mutually exclusive — notifications need a live session).
 - Dependency injection resolves the current session and DEK; protected endpoints require an unrestricted session.
 
 ### Frontend
@@ -106,6 +108,18 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   FC-event shim. A "+" floating button (all views) opens the create modal with
   no dates preselected. A per-user `default_view` setting picks the view shown
   at sign-in.
+- **Browser notifications** (opt-in per user, off by default). While a tab is
+  open and `notifications_enabled` is set, a client-side scheduler loads a
+  future window of events (`NOTIFICATION_HORIZON_DAYS`, default 60), builds a
+  trigger per event start and per reminder, and `setTimeout`s a notification for
+  each. Notifications are shown via a Service Worker (`static/sw.js`,
+  `registration.showNotification`) so the OS routes them to its notification
+  center and clicks focus the tab; the SW does no caching or fetch interception.
+  The body is `WebCalDav` / event name / event datetime (datetime in the user's
+  formats). The scheduler re-polls every 10 min, gated by `GET /calendars/ctags`
+  so unchanged calendars aren't re-fetched, and dedupes fired triggers by tag
+  (persisted in `localStorage`). **Foreground-only:** no Web Push, so closing
+  the browser stops notifications — see "Reminders while logged out" below.
 - No build step beyond bundling FullCalendar's CSS/JS.
 
 ### Observability
@@ -231,5 +245,5 @@ subsequent requests require fresh login
 
 ## Open questions
 
-- **Reminders while logged out.** Reminders that require fetching fresh CalDAV state have no DEK available when the user is not logged in. A likely approach is a small DEK-encrypted reminder cache, maintained while the user is logged in, that the Service Worker reads for near-term notifications; open question what happens for reminders beyond the last session.
+- **Reminders while logged out — resolved (foreground-only).** Reminders need fresh CalDAV state, which needs the DEK, which only exists during a session. Rather than persist a DEK-encrypted reminder cache (extra at-rest surface) or push from the server (which would require plaintext reminder data on the server, breaking zero-knowledge), notifications are **foreground-only**: scheduled in the browser from events loaded during the session and fired while a WebCalDav tab stays open (background tab is fine). Closing the browser stops them. Enabling notifications disables auto-logout so the session stays alive. Server-side Web Push was deliberately rejected; on iOS background push would also need an installed PWA, which the desktop-first product doesn't target.
 - **Single-user vs. multi-user deployments.** The design supports multiple users in one container; whether typical self-hosters prefer one-container-per-user (simpler backup, simpler reset semantics) is unresolved.

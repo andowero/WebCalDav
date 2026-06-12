@@ -76,5 +76,8 @@ class UserSettings(Base):
     default_view: Mapped[str] = mapped_column(String, default="dayGridMonth", nullable=False)
     auto_logout_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auto_logout_timeout_seconds: Mapped[int] = mapped_column(Integer, default=3600, nullable=False)
+    # Browser reminder notifications. Off by default; enabling forces
+    # auto_logout off (the tab must stay logged in to keep resyncing events).
+    notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="settings")
