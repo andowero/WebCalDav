@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebCalDav</title>
+  <link rel="icon" href="/static/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png?v={{ static_v }}">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png?v={{ static_v }}">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v={{ static_v }}">
   <!-- Vendored locally (no CDN trust; browser needs no internet). FullCalendar 6
        injects its own CSS via the JS bundle, so no separate stylesheet. -->
   <script src="/static/vendor/fullcalendar.min.js?v={{ static_v }}"></script>
@@ -23,6 +27,7 @@
 <!-- ── Login ── -->
 <div id="page-login" class="auth-page" style="display:none">
   <div class="auth-card">
+    <img src="/static/icon.png?v={{ static_v }}" alt="" class="auth-logo">
     <h1>WebCalDav</h1>
     <div id="login-error" class="error-msg" style="display:none"></div>
     <form id="login-form">
@@ -38,6 +43,7 @@
 <!-- ── Change password (first login) ── -->
 <div id="page-change-pw" class="auth-page" style="display:none">
   <div class="auth-card">
+    <img src="/static/icon.png?v={{ static_v }}" alt="" class="auth-logo">
     <h1>WebCalDav</h1>
     <p class="info-msg">First login — please set a new password before continuing.</p>
     <div id="cpw-error" class="error-msg" style="display:none"></div>
@@ -56,6 +62,7 @@
 <!-- ── Main calendar ── -->
 <div id="page-calendar" style="display:none">
   <header class="top-bar">
+    <img src="/static/icon.png?v={{ static_v }}" alt="" class="app-logo">
     <span class="app-name">WebCalDav</span>
     <span class="user-email" id="header-email"></span>
     <span class="logout-countdown" id="logout-countdown" title="Time until automatic logout"></span>

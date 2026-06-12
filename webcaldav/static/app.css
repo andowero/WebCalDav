@@ -27,6 +27,14 @@ body {
   max-width: 380px;
 }
 
+.auth-logo {
+  height: 64px;
+  width: 64px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 0.75rem;
+}
+
 .auth-card h1 {
   font-size: 1.5rem;
   font-weight: 700;
@@ -108,6 +116,13 @@ body {
   background: #fff;
   border-bottom: 1px solid #e0e0e0;
   height: 44px;
+}
+
+.app-logo {
+  height: 24px;
+  width: 24px;
+  object-fit: contain;
+  margin-right: -0.5rem; /* tighten gap to .app-name (top-bar gap is 1rem) */
 }
 
 .app-name {

@@ -2,6 +2,14 @@
 
 ## Unreleased — MVP
 
+### Added — site icon / favicon (2026-06-12)
+- Brand icon added under `webcaldav/static/`: master `icon.png` plus generated
+  `favicon.ico` (16/32/48), `favicon-16x16.png`, `favicon-32x32.png`, and
+  `apple-touch-icon.png` (180). Favicon `<link>`s wired into `index.html`
+  `<head>`; inline logo shown on the login and change-password cards and beside
+  the calendar header title. CSS adds `.auth-logo` (64px, centered) and
+  `.app-logo` (24px, header).
+
 ### Fixed — event timezone drift on drag (2026-06-12)
 - Dragging a timed event in month view shifted its start by the zone's UTC
   offset on every move (e.g. +2h in `Europe/Prague`, none in UTC). The drag
