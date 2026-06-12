@@ -2,6 +2,16 @@
 
 ## Unreleased — MVP
 
+### Fixed — event timezone drift on drag (2026-06-12)
+- Dragging a timed event in month view shifted its start by the zone's UTC
+  offset on every move (e.g. +2h in `Europe/Prague`, none in UTC). The drag
+  sends a start with a numeric offset (`...+02:00`); the server kept that
+  fixed-offset tzinfo, which icalendar serialized as a bogus
+  `TZID="UTC+02:00"` with no VTIMEZONE, so the value read back as floating/UTC.
+  `_resolve_span` now normalizes tz-aware start/end onto the named request
+  timezone (`astimezone`), emitting a proper `TZID=Europe/Prague` and a stable
+  round-trip.
+
 ### Fixed — audit findings L1–L4 (2026-06-11)
 - **L2 — vendored frontend assets (no CDN):** FullCalendar, luxon, and the
   luxon3 plugin are now committed under `webcaldav/static/vendor/` and served

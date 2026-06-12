@@ -277,10 +277,20 @@ def _resolve_span(body: EventUpdate) -> tuple[date | dt_type, date | dt_type]:
         end_dt = dt_type.fromisoformat(body.end)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid datetime")
+    # Naive input: stamp the request timezone. Tz-aware input (e.g. a drag sends
+    # "...+02:00") carries only a numeric offset, which icalendar would serialize
+    # as a bogus TZID="UTC+02:00" with no VTIMEZONE — the server then reads it
+    # back as floating/UTC, shifting the event by the offset on every move. So
+    # normalize tz-aware values onto the named ZoneInfo (same instant, proper
+    # TZID) so the round-trip is stable.
     if start_dt.tzinfo is None:
         start_dt = start_dt.replace(tzinfo=tz)
+    else:
+        start_dt = start_dt.astimezone(tz)
     if end_dt.tzinfo is None:
         end_dt = end_dt.replace(tzinfo=tz)
+    else:
+        end_dt = end_dt.astimezone(tz)
     if end_dt <= start_dt:
         raise HTTPException(status_code=400, detail="End must be after start")
     return start_dt, end_dt
