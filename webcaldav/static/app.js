@@ -395,6 +395,27 @@
       }
     });
 
+    // Always-available per-browser permission grant. Permission is per-browser
+    // and not synced with the server setting, so logging in elsewhere needs a
+    // gesture-driven prompt (required by Safari) without re-toggling the box.
+    const grantBtn = document.getElementById('pref-notifications-grant');
+    grantBtn.addEventListener('click', async () => {
+      if (!('Notification' in window)) {
+        alert('This browser does not support notifications.');
+        return;
+      }
+      let perm = Notification.permission;
+      if (perm !== 'granted') {
+        try { perm = await Notification.requestPermission(); } catch (_) { perm = 'denied'; }
+      }
+      if (perm === 'granted') {
+        if ((window.__SETTINGS__ || {}).notifications_enabled) startNotifications();
+        alert('Notifications are enabled on this browser.');
+      } else {
+        alert('Notifications are blocked. Allow them for this site in your browser settings.');
+      }
+    });
+
     // Prefs form
     const prefsForm = document.getElementById('prefs-form');
     prefsForm.addEventListener('submit', async (e) => {
@@ -2548,7 +2569,11 @@
   }
 
   async function startNotifications() {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch (_) {}
+    }
+    if (Notification.permission !== 'granted') return;
     try {
       if ('serviceWorker' in navigator) {
         const v = (window.__CONFIG__ || {}).static_v || '';
