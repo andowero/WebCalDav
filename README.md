@@ -59,19 +59,23 @@ services:
       - "8000:8000"
     volumes:
       - data:/data
+    extra_hosts:
+      # Lets the container reach a CalDAV server on the host via
+      # http://host.docker.internal:<port> (e.g. a local Radicale).
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # Container DB lives on the mounted volume; override the .env default.
       DATABASE_URL: sqlite+aiosqlite:////data/webcaldav.db
-      LOG_LEVEL: INFO
-      SESSION_IDLE_TIMEOUT: 3600
-      BLOCK_PRIVATE_CALDAV_URLS: "true"
-      LOGIN_RATE_LIMIT_ATTEMPTS: 5
-      LOGIN_RATE_LIMIT_WINDOW_SECONDS: 300
-      MIN_PASSWORD_LENGTH: 12
     restart: unless-stopped
 
 volumes:
   data:
 ```
+
+App settings are read from a `.env` file beside the compose file (optional — the app runs on defaults without it). Copy `.env.example` to `.env` and uncomment the variables you want to change; see [Environment variables](#environment-variables) for the full list. `DATABASE_URL` is set in the compose file itself (pointing at the mounted volume) and overrides any value in `.env`.
 
 ### Changing the exposed port
 
@@ -91,6 +95,17 @@ By default the SQLite database lives at `/data/webcaldav.db` inside a named Dock
       - ./data:/data
 ```
 
+### Connecting to a CalDAV server on the same machine
+
+If your CalDAV server (e.g. Radicale) runs on the **host** that the container runs on, `http://localhost:5232` will **not** work from inside the container — `localhost` there means the container itself, not the host, so the connection is refused. Two ways to reach the host:
+
+- **`host.docker.internal`** — the shipped compose file maps it to the host gateway via `extra_hosts`, so enter `http://host.docker.internal:5232` as the CalDAV URL.
+- **The host's LAN IP / hostname** — e.g. `http://192.168.1.10:5232`.
+
+Either way the hostname resolves to a private/loopback address, so `BLOCK_PRIVATE_CALDAV_URLS` must be `false` (its value in the shipped `.env`); otherwise the URL is rejected. See [Blocking private CalDAV URLs](#blocking-private-caldav-urls-ssrf-hardening).
+
+If Radicale runs as **another container**, put both on the same Docker network and use its service name instead, e.g. `http://radicale:5232`.
+
 ### Environment variables
 
 | Variable | Default | What it does |
@@ -105,7 +120,7 @@ By default the SQLite database lives at `/data/webcaldav.db` inside a named Dock
 | `ARGON2_TIME_COST` | `3` | Argon2id time cost for password key derivation. |
 | `ARGON2_MEMORY_COST` | `131072` | Argon2id memory cost (KiB; default 128 MiB). |
 | `ARGON2_PARALLELISM` | `1` | Argon2id parallelism factor. |
-| `BLOCK_PRIVATE_CALDAV_URLS` | `false` | Reject CalDAV server URLs that resolve to private/loopback/link-local/metadata addresses, and hide raw connection errors. Shipped as `true` in the compose file. |
+| `BLOCK_PRIVATE_CALDAV_URLS` | `false` | Reject CalDAV server URLs that resolve to private/loopback/link-local/metadata addresses, and hide raw connection errors. The shipped `.env` sets it to `false` so a CalDAV server on a private/LAN IP can be added. |
 | `NOTIFICATION_HORIZON_DAYS` | `60` | How many days ahead the browser-notification scheduler loads events to fire reminder/start notifications for. Raise it for reminders further out (e.g. month-ahead birthdays). See [Browser notifications](#browser-notifications). |
 
 The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast). Each user's password record stores the parameters it was created with, so raising the values later is safe: existing users keep logging in with their old parameters and pick up the stronger ones the next time they change their password.
@@ -122,9 +137,9 @@ With `COOKIE_SECURE=true` (the default) browsers refuse to send the session cook
 
 By default (`false`) the server connects to whatever CalDAV URL a user enters. Because the request originates from the server, a user could point it at internal hosts the server can reach — `http://localhost`, a LAN IP, or a cloud metadata endpoint such as `169.254.169.254` — and connection-error messages get echoed back, which leaks whether those internal services exist.
 
-Set `BLOCK_PRIVATE_CALDAV_URLS=true` to reject any CalDAV URL whose hostname resolves to a private, loopback, link-local, reserved, multicast, or unspecified address, and to replace detailed connection errors with a generic message. The shipped `docker-compose.yml` enables it.
+Set `BLOCK_PRIVATE_CALDAV_URLS=true` to reject any CalDAV URL whose hostname resolves to a private, loopback, link-local, reserved, multicast, or unspecified address, and to replace detailed connection errors with a generic message.
 
-**Caveat for self-hosters:** if your CalDAV server (e.g. Radicale) runs on a private/LAN address — a very common setup — enabling this will block adding it. In that case set `BLOCK_PRIVATE_CALDAV_URLS: "false"` in your compose file. The protection only matters when users you don't fully trust can add accounts and the server sits on a network with sensitive internal services.
+**Caveat for self-hosters:** if your CalDAV server (e.g. Radicale) runs on a private/LAN address — a very common setup — enabling this will block adding it. For that reason the shipped `.env` sets `BLOCK_PRIVATE_CALDAV_URLS=false`. The protection only matters when users you don't fully trust can add accounts and the server sits on a network with sensitive internal services.
 
 ## Browser notifications
 

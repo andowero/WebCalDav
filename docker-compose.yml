@@ -6,6 +6,10 @@ services:
       - "8000:8000"
     volumes:
       - data:/data
+    extra_hosts:
+      # Lets the container reach a CalDAV server on the host via
+      # http://host.docker.internal:<port> (e.g. a local Radicale).
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: .env
         required: false
