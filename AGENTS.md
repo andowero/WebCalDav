@@ -64,4 +64,3 @@ No automated browser/E2E tests (no Playwright). FullCalendar, the Service Worker
 - [Changelog](docs/changelog.md) - Version history
 - [Project status](docs/project_status.md) - Current progress
 - Update files in the `./docs` folder after major milestones and major additions to the project.
-- Use the /update-docs-and-commit slash command when making git commits.
