@@ -260,14 +260,14 @@ def _reminder_to_text(trigger: Any) -> str:
     return f"{span} {'before' if before else 'after'}"
 
 
-def _classify_alarm(alarm: Any, all_day: bool) -> timedelta | None:
-    """The trigger offset if this VALARM fits the editable reminder model.
+def _classify_alarm(alarm: Any, all_day: bool) -> tuple[timedelta, str] | None:
+    """The (offset, RELATED) if this VALARM fits the editable reminder model.
 
-    Editable: a duration TRIGGER relative to DTSTART, non-EMAIL action, firing
-    at/before the event start (timed events) or no later than the event day
-    (all-day events). Everything else — absolute datetime triggers, RELATED=END,
-    email alarms, after-event offsets — is preserved untouched and surfaced
-    read-only, since rewriting it as a DISPLAY reminder would lose data.
+    Editable: a duration TRIGGER (relative to DTSTART or DTEND, either sign) with
+    a non-EMAIL action. The offset sign carries direction and RELATED carries the
+    anchor; both round-trip through the four-way reminder editor. Only absolute
+    datetime triggers and email alarms stay read-only — rewriting those as a
+    DISPLAY reminder would lose data.
     """
     if "trigger" not in alarm:
         return None
@@ -281,45 +281,63 @@ def _classify_alarm(alarm: Any, all_day: bool) -> timedelta | None:
         prop = alarm["trigger"]
         if isinstance(prop, list):
             prop = prop[0]
-        if str(prop.params.get("RELATED", "START")).upper() == "END":
-            return None
+        related = str(prop.params.get("RELATED", "START")).upper()
     except Exception:
         return None
+    if related not in ("START", "END"):
+        related = "START"
     if str(alarm.get("action", "DISPLAY")).upper() == "EMAIL":
         return None
-    if all_day:
-        # On-day reminders are positive offsets from the DATE start (midnight);
-        # anything a full day or more after no longer maps to "N days before".
-        return trigger if trigger < timedelta(days=1) else None
-    return trigger if trigger.total_seconds() <= 0 else None
+    return trigger, related
 
 
-def _timedelta_to_value_unit(td: timedelta) -> dict[str, Any]:
-    """Negative/zero trigger offset -> {value, unit}, largest unit that fits."""
+def _add_anchor_direction(out: dict[str, Any], td: timedelta, related: str) -> dict[str, Any]:
+    """Tag a reminder dict with anchor/direction, omitting the start/before
+    defaults so legacy "before start" payloads stay byte-for-byte unchanged."""
+    if related == "END":
+        out["anchor"] = "end"
+    if td.total_seconds() > 0:
+        out["direction"] = "after"
+    return out
+
+
+def _timedelta_to_value_unit(td: timedelta, related: str) -> dict[str, Any]:
+    """Trigger offset -> {value, unit, anchor?, direction?}, largest unit that fits."""
     minutes = round(abs(td.total_seconds()) / 60)
     if minutes and minutes % 10080 == 0:
-        return {"value": minutes // 10080, "unit": "weeks"}
-    if minutes and minutes % 1440 == 0:
-        return {"value": minutes // 1440, "unit": "days"}
-    if minutes and minutes % 60 == 0:
-        return {"value": minutes // 60, "unit": "hours"}
-    return {"value": minutes, "unit": "minutes"}
+        out = {"value": minutes // 10080, "unit": "weeks"}
+    elif minutes and minutes % 1440 == 0:
+        out = {"value": minutes // 1440, "unit": "days"}
+    elif minutes and minutes % 60 == 0:
+        out = {"value": minutes // 60, "unit": "hours"}
+    else:
+        out = {"value": minutes, "unit": "minutes"}
+    return _add_anchor_direction(out, td, related)
 
 
-def _timedelta_to_allday_parts(td: timedelta) -> dict[str, Any]:
-    """All-day trigger offset -> {value, unit, time}.
+def _timedelta_to_allday_parts(td: timedelta, related: str) -> dict[str, Any]:
+    """All-day trigger offset -> {value, unit, time, anchor, direction}.
 
-    The DATE start is midnight, so the offset splits into whole days back plus
-    a time of day: -P13DT15H -> 14 days before at 09:00, +PT9H -> on the day
-    at 09:00, -PT15M -> 1 day before at 23:45.
+    The DATE anchor is midnight, so the offset splits into whole days plus a time
+    of day. Python's modulo keeps the time non-negative, and the day index sign
+    gives the direction: -P13DT15H -> 14 days before at 09:00, +PT9H -> on the
+    day (0 days after) at 09:00, +P1DT9H -> 1 day after at 09:00.
     """
     trigger_min = round(td.total_seconds() / 60)
-    days_back, time_min = divmod(trigger_min, 1440)
-    days = -days_back
+    time_min = trigger_min % 1440
+    day_index = (trigger_min - time_min) // 1440
+    days = abs(day_index)
     hhmm = f"{time_min // 60:02d}:{time_min % 60:02d}"
     if days > 0 and days % 7 == 0:
-        return {"value": days // 7, "unit": "weeks", "time": hhmm}
-    return {"value": days, "unit": "days", "time": hhmm}
+        out = {"value": days // 7, "unit": "weeks", "time": hhmm}
+    else:
+        out = {"value": days, "unit": "days", "time": hhmm}
+    # day_index 0 is "on the day"; only a positive index is genuinely "after".
+    if related == "END":
+        out["anchor"] = "end"
+    if day_index > 0:
+        out["direction"] = "after"
+    return out
 
 
 def _extract_reminders(vevent: Any) -> list[dict[str, Any]]:
@@ -334,10 +352,11 @@ def _extract_reminders(vevent: Any) -> list[dict[str, Any]]:
             continue
         editable = _classify_alarm(alarm, all_day)
         if editable is not None:
+            offset, related = editable
             if all_day:
-                reminders.append(_timedelta_to_allday_parts(editable))
+                reminders.append(_timedelta_to_allday_parts(offset, related))
             else:
-                reminders.append(_timedelta_to_value_unit(editable))
+                reminders.append(_timedelta_to_value_unit(offset, related))
             continue
         try:
             trigger = alarm.decoded("trigger")
@@ -352,11 +371,15 @@ def _extract_reminders(vevent: Any) -> list[dict[str, Any]]:
     return reminders
 
 
-def _apply_alarms(vevent: Any, triggers: list[timedelta] | None) -> None:
+def _apply_alarms(
+    vevent: Any, triggers: list[tuple[timedelta, str]] | None
+) -> None:
     """Replace the VEVENT's editable VALARMs with one DISPLAY alarm per trigger.
 
     ``None`` means "leave alarms alone" (drag/resize updates never touch them);
-    an empty list deletes all editable alarms. Alarms outside the editable model
+    an empty list deletes all editable alarms. Each trigger is an (offset,
+    RELATED) pair; END offsets need a DTEND/DURATION, so an END trigger on an
+    event without one falls back to START. Alarms outside the editable model
     (see ``_classify_alarm``) always survive.
     """
     if triggers is None:
@@ -366,14 +389,18 @@ def _apply_alarms(vevent: Any, triggers: list[timedelta] | None) -> None:
     except Exception:
         dtstart = None
     all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
+    has_end = "dtend" in vevent or "duration" in vevent
     for comp in list(vevent.subcomponents):
         if comp.name == "VALARM" and _classify_alarm(comp, all_day) is not None:
             vevent.subcomponents.remove(comp)
-    for trig in triggers:
+    for trig, related in triggers:
         alarm = IAlarm()
         alarm.add("action", "DISPLAY")
         alarm.add("description", "Reminder")
-        alarm.add("trigger", trig)
+        if related == "END" and has_end:
+            alarm.add("trigger", trig, parameters={"RELATED": "END"})
+        else:
+            alarm.add("trigger", trig)
         vevent.add_component(alarm)
 
 
@@ -686,7 +713,7 @@ def _upsert_override(
     end: date | datetime,
     location: str | None,
     description: str | None,
-    reminders: list[timedelta] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
 ) -> None:
     """Add/replace a detached single-occurrence override (RECURRENCE-ID = pivot)."""
     for comp in list(ical.subcomponents):
@@ -767,7 +794,7 @@ def _series_ical(
     rule_parts: dict[str, Any] | None,
     overrides: list[Any] | None = None,
     exdates: list[Any] | None = None,
-    reminders: list[timedelta] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
     alarms: list[Any] | None = None,
 ) -> str:
     ical = ICalendar()
@@ -974,7 +1001,7 @@ def _sync_update_event(
     scope: str = "all",
     recurrence_id: str | None = None,
     rrule: dict[str, Any] | None = None,
-    reminders: list[timedelta] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -1096,7 +1123,7 @@ async def update_event(
     scope: str = "all",
     recurrence_id: str | None = None,
     rrule: dict[str, Any] | None = None,
-    reminders: list[timedelta] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="update_event").time():
         try:
@@ -1138,7 +1165,7 @@ def _sync_create_event(
     location: str | None,
     description: str | None,
     rrule: dict[str, Any] | None = None,
-    reminders: list[timedelta] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -1162,7 +1189,7 @@ async def create_event(
     location: str | None,
     description: str | None,
     rrule: dict[str, Any] | None = None,
-    reminders: list[timedelta] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="create_event").time():
         try:

@@ -917,7 +917,7 @@ async def test_create_event_with_reminders(edit_calendar):
         base_url, USER, PASSWORD, url, "with-rem@webcaldav",
         title="Pinged", all_day=False, start=start, end=end,
         location=None, description=None,
-        reminders=[timedelta(minutes=-10), timedelta(hours=-2)],
+        reminders=[(timedelta(minutes=-10), "START"), (timedelta(hours=-2), "START")],
     )
     ev = await _fetch_one(base_url, url, "with-rem@webcaldav")
     editable = _editable(ev["extendedProps"]["reminders"])
@@ -937,7 +937,7 @@ async def test_update_event_replaces_reminders(edit_calendar):
         base_url, USER, PASSWORD, url, "alarm-event",
         title="Alarmed", all_day=False, start=start, end=end,
         location=None, description=None,
-        reminders=[timedelta(minutes=-5)],
+        reminders=[(timedelta(minutes=-5), "START")],
     )
     ev = await _fetch_one(base_url, url, "alarm-event")
     rems = ev["extendedProps"]["reminders"]
@@ -988,8 +988,8 @@ async def test_create_allday_reminders_roundtrip(edit_calendar):
         start=date(2026, 6, 25), end=date(2026, 6, 26),
         location=None, description=None,
         reminders=[
-            timedelta(hours=9) - timedelta(weeks=2),  # 2 weeks before at 09:00
-            timedelta(hours=9),                        # on the day at 09:00
+            (timedelta(hours=9) - timedelta(weeks=2), "START"),  # 2 weeks before at 09:00
+            (timedelta(hours=9), "START"),                        # on the day at 09:00
         ],
     )
     raw = _raw_ical(base_url, url, "allday-rem@webcaldav")
@@ -1011,7 +1011,7 @@ async def test_update_recurring_all_reminders(edit_calendar):
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False, start=start, end=end,
         location=None, description=None, scope="all", recurrence_id=_PIVOT,
-        reminders=[timedelta(minutes=-30)],
+        reminders=[(timedelta(minutes=-30), "START")],
     )
     frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
     to = datetime(2026, 7, 31, tzinfo=timezone.utc)
@@ -1034,7 +1034,7 @@ async def test_update_recurring_this_reminders(edit_calendar):
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False, start=start, end=end,
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
-        reminders=[timedelta(minutes=-10)],
+        reminders=[(timedelta(minutes=-10), "START")],
     )
     frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
     to = datetime(2026, 7, 31, tzinfo=timezone.utc)
@@ -1058,7 +1058,7 @@ async def test_update_recurring_thisfuture_reminders(edit_calendar):
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False, start=start, end=end,
         location=None, description=None, scope="thisfuture", recurrence_id=_PIVOT,
-        reminders=[timedelta(minutes=-20)],
+        reminders=[(timedelta(minutes=-20), "START")],
     )
     frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
     to = datetime(2026, 7, 31, tzinfo=timezone.utc)
@@ -1099,3 +1099,56 @@ def test_extract_reminders_absolute_trigger_carries_iso():
     assert len(rems) == 1
     assert rems[0]["readonly"] is True
     assert rems[0]["at"] == "2026-06-14T09:00:00+00:00"
+
+
+async def test_create_event_anchored_reminders_roundtrip(edit_calendar):
+    """All four quadrants (before/after x start/end) emit the right TRIGGER and
+    round-trip back into the editable reminder model."""
+    from datetime import timedelta
+
+    base_url, url = edit_calendar
+    start = datetime(2026, 6, 24, 9, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 24, 10, 0, tzinfo=timezone.utc)
+    await create_event(
+        base_url, USER, PASSWORD, url, "anchored-rem@webcaldav",
+        title="Class", all_day=False, start=start, end=end,
+        location=None, description=None,
+        reminders=[
+            (timedelta(minutes=-15), "END"),    # 15 min before end (pickup case)
+            (timedelta(minutes=5), "END"),      # 5 min after end
+            (timedelta(minutes=-10), "START"),  # 10 min before start
+            (timedelta(minutes=20), "START"),   # 20 min after start
+        ],
+    )
+    raw = _raw_ical(base_url, url, "anchored-rem@webcaldav")
+    assert "TRIGGER;RELATED=END:-PT15M" in raw
+    assert "TRIGGER;RELATED=END:PT5M" in raw
+    assert "TRIGGER:-PT10M" in raw
+    assert "TRIGGER:PT20M" in raw
+    ev = await _fetch_one(base_url, url, "anchored-rem@webcaldav")
+    editable = _editable(ev["extendedProps"]["reminders"])
+    assert {"value": 15, "unit": "minutes", "anchor": "end"} in editable
+    assert {"value": 5, "unit": "minutes", "anchor": "end", "direction": "after"} in editable
+    assert {"value": 10, "unit": "minutes"} in editable
+    assert {"value": 20, "unit": "minutes", "direction": "after"} in editable
+
+
+async def test_create_allday_after_end_reminder(edit_calendar):
+    from datetime import date, timedelta
+
+    base_url, url = edit_calendar
+    await create_event(
+        base_url, USER, PASSWORD, url, "allday-end-rem@webcaldav",
+        title="Trip", all_day=True,
+        start=date(2026, 6, 25), end=date(2026, 6, 26),
+        location=None, description=None,
+        reminders=[(timedelta(days=1, hours=9), "END")],  # 1 day after end at 09:00
+    )
+    raw = _raw_ical(base_url, url, "allday-end-rem@webcaldav")
+    assert "TRIGGER;RELATED=END:P1DT9H" in raw
+    ev = await _fetch_one(base_url, url, "allday-end-rem@webcaldav")
+    editable = _editable(ev["extendedProps"]["reminders"])
+    assert {
+        "value": 1, "unit": "days", "time": "09:00",
+        "anchor": "end", "direction": "after",
+    } in editable

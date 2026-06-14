@@ -176,6 +176,10 @@ class Reminder(BaseModel):
     value: int = Field(ge=0, le=10000)
     unit: Literal["minutes", "hours", "days", "weeks"]
     time: str | None = None  # "HH:MM"; required for all-day events
+    # Where the offset is measured from and on which side. Defaults reproduce the
+    # original "N before the start" behavior, so old payloads round-trip intact.
+    anchor: Literal["start", "end"] = "start"
+    direction: Literal["before", "after"] = "before"
 
 
 class EventUpdate(BaseModel):
@@ -216,25 +220,31 @@ class EventUpdate(BaseModel):
 _UNIT_MINUTES = {"minutes": 1, "hours": 60, "days": 1440, "weeks": 10080}
 
 
-def _reminder_deltas(body: EventUpdate) -> list[timedelta] | None:
-    """Reminder rows -> VALARM trigger offsets (deduped, order preserved).
+def _reminder_deltas(body: EventUpdate) -> list[tuple[timedelta, str]] | None:
+    """Reminder rows -> (offset, RELATED) VALARM triggers (deduped, ordered).
 
-    Timed events: a plain negative offset. All-day events: DTSTART is the date
-    (midnight), so "N days before at HH:MM" collapses to one duration trigger
-    of HH:MM minus N days (positive when N is 0, i.e. on the event day).
+    The offset sign encodes direction (before = negative, after = positive) and
+    RELATED encodes the anchor (START/END). Timed events use a plain offset.
+    All-day events carry a time of day: DTSTART/DTEND are dates (midnight), so
+    "N days before at HH:MM" collapses to HH:MM minus N days (and "after" adds
+    them) measured from the anchor.
     """
     if body.reminders is None:
         return None
-    deltas: list[timedelta] = []
+    deltas: list[tuple[timedelta, str]] = []
     for r in body.reminders:
         if body.all_day:
             hours, minutes = (int(p) for p in r.time.split(":"))  # type: ignore[union-attr]
-            days = r.value * (7 if r.unit == "weeks" else 1)
-            delta = timedelta(hours=hours, minutes=minutes) - timedelta(days=days)
+            day = timedelta(days=r.value * (7 if r.unit == "weeks" else 1))
+            delta = (day if r.direction == "after" else -day) + timedelta(
+                hours=hours, minutes=minutes
+            )
         else:
-            delta = -timedelta(minutes=r.value * _UNIT_MINUTES[r.unit])
-        if delta not in deltas:
-            deltas.append(delta)
+            mag = timedelta(minutes=r.value * _UNIT_MINUTES[r.unit])
+            delta = mag if r.direction == "after" else -mag
+        related = "END" if r.anchor == "end" else "START"
+        if (delta, related) not in deltas:
+            deltas.append((delta, related))
     return deltas
 
 

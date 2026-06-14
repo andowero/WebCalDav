@@ -122,6 +122,7 @@ If Radicale runs as **another container**, put both on the same Docker network a
 | `ARGON2_PARALLELISM` | `1` | Argon2id parallelism factor. |
 | `BLOCK_PRIVATE_CALDAV_URLS` | `false` | Reject CalDAV server URLs that resolve to private/loopback/link-local/metadata addresses, and hide raw connection errors. The shipped `.env` sets it to `false` so a CalDAV server on a private/LAN IP can be added. |
 | `NOTIFICATION_HORIZON_DAYS` | `60` | How many days ahead the browser-notification scheduler loads events to fire reminder/start notifications for. Raise it for reminders further out (e.g. month-ahead birthdays). See [Browser notifications](#browser-notifications). |
+| `NOTIFICATION_LOOKBACK_DAYS` | `60` | How many days *behind* now the scheduler also loads events, so a reminder anchored *after* an event that has already ended still fires (e.g. "1 day after end"). Defaults to the horizon. Raise it for after-event reminders set further back. See [Browser notifications](#browser-notifications). |
 
 The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast). Each user's password record stores the parameters it was created with, so raising the values later is safe: existing users keep logging in with their old parameters and pick up the stronger ones the next time they change their password.
 
@@ -168,6 +169,8 @@ Because the schedule has to be kept in sync with your calendar for as long as yo
 ### How far ahead notifications are scheduled
 
 The scheduler loads events from now up to `NOTIFICATION_HORIZON_DAYS` (default **60**) ahead and refreshes them periodically, using a lightweight per-calendar change check so unchanged calendars aren't re-downloaded. If you keep reminders set more than ~2 months in advance (e.g. month-ahead birthday alerts that you want to be sure load early), raise `NOTIFICATION_HORIZON_DAYS` in `docker-compose.yml`.
+
+It also loads events from `NOTIFICATION_LOOKBACK_DAYS` (default **60**) *behind* now, so reminders anchored *after* an event — e.g. "1 day after end" — still fire even once the event itself is in the past. Raise it if you set after-event reminders further back than two months.
 
 ## Updating the vendored frontend libraries
 

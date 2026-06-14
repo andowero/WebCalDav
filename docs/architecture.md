@@ -79,16 +79,19 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   day-of-month or Nth/last weekday, end-by-date / end-after-N) with a live
   last-occurrence preview.
 - Reminders are editable rows in the modal ("+" to add, × to delete; no
-  in-place edit). Timed events use value + minutes/hours/days/weeks before;
-  all-day events use days/weeks before at a time of day (entered via the app's
-  own hh:mm + AM/PM fields so the 12h/24h `time_format` setting applies, and
-  rendered per that setting in row text). The save request
-  carries `reminders: [{value, unit, time?}]` (absent = don't touch alarms,
-  `[]` = clear); the server maps each row to one `ACTION:DISPLAY` VALARM
-  duration trigger and returns the same structured shape in
-  `extendedProps.reminders`. Alarms outside that model (EMAIL, absolute
-  triggers, `RELATED=END`, after-event) are preserved untouched and rendered
-  read-only.
+  in-place edit). Timed events use value + minutes/hours/days/weeks; all-day
+  events use days/weeks at a time of day (entered via the app's own hh:mm +
+  AM/PM fields so the 12h/24h `time_format` setting applies, and rendered per
+  that setting in row text). A per-row dropdown picks the **anchor + direction**:
+  before/after the event **start** or **end** (default before start). The save
+  request carries `reminders: [{value, unit, time?, anchor?, direction?}]`
+  (absent = don't touch alarms, `[]` = clear; `anchor`/`direction` default to
+  `start`/`before` and are omitted when default). The server maps each row to
+  one `ACTION:DISPLAY` VALARM duration trigger — the offset sign carries
+  direction and the `RELATED` parameter carries the anchor (`RELATED=END` only
+  when the event has an end, else it falls back to `START`) — and returns the
+  same structured shape in `extendedProps.reminders`. Only EMAIL and
+  absolute-time alarms stay read-only.
 - Deleting or editing a recurring event opens a scope chooser
   (`this` / `this+future` / `all` — the three industry-standard options); the
   chosen scope and the occurrence's pivot are sent to the API. Dragging or resizing a
@@ -110,9 +113,11 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   at sign-in.
 - **Browser notifications** (opt-in per user, off by default). While a tab is
   open and `notifications_enabled` is set, a client-side scheduler loads a
-  future window of events (`NOTIFICATION_HORIZON_DAYS`, default 60), builds a
-  trigger per event start and per reminder, and `setTimeout`s a notification for
-  each. Notifications are shown via a Service Worker (`static/sw.js`,
+  window of events (back `NOTIFICATION_LOOKBACK_DAYS` and ahead
+  `NOTIFICATION_HORIZON_DAYS`, both default 60), builds a trigger per event start
+  and per reminder, drops any whose time is already past, and `setTimeout`s a
+  notification for each. The look-back is what lets a reminder anchored *after*
+  an event still fire once the event itself has ended. Notifications are shown via a Service Worker (`static/sw.js`,
   `registration.showNotification`) so the OS routes them to its notification
   center and clicks focus the tab; the SW does no caching or fetch interception.
   The body is `WebCalDav` / event name / event datetime (datetime in the user's

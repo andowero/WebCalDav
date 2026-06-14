@@ -98,3 +98,19 @@ async def test_reminders_validation(client: AsyncClient, db_engine):
     for body in bad_bodies:
         r = await client.post("/events", json=body)
         assert r.status_code == 422, body
+
+
+def test_reminder_anchor_direction_defaults_and_validation():
+    from webcaldav.routers.events import Reminder
+
+    # Defaults reproduce the original "before start" behavior.
+    r = Reminder(value=15, unit="minutes")
+    assert r.anchor == "start"
+    assert r.direction == "before"
+    # Explicit quadrant accepted.
+    r = Reminder(value=15, unit="minutes", anchor="end", direction="after")
+    assert (r.anchor, r.direction) == ("end", "after")
+    # Bad enum values rejected.
+    for bad in ({"anchor": "middle"}, {"direction": "during"}):
+        with pytest.raises(ValueError):
+            Reminder(value=1, unit="minutes", **bad)

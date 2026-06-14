@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # (e.g. month-ahead birthdays).
     notification_horizon_days: int = 60
 
+    # How many days *behind* now the scheduler also loads events for, so a
+    # reminder anchored *after* an event that has already ended still fires
+    # (e.g. "1 day after end"). Defaults to the horizon. Raise for after-event
+    # reminders set further back than this.
+    notification_lookback_days: int = 60
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 

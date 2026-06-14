@@ -156,6 +156,7 @@ async def root(request: Request) -> HTMLResponse:
             "auto_logout_timeout": user_settings_auto_logout_timeout,
             "notifications_enabled": user_settings_notifications_enabled,
             "notification_horizon_days": settings.notification_horizon_days,
+            "notification_lookback_days": settings.notification_lookback_days,
             "static_v": STATIC_VERSION,
         },
     )

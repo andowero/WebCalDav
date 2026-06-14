@@ -556,15 +556,17 @@
   }
 
   function reminderText(r) {
+    const dir = r.direction === 'after' ? 'after' : 'before';
+    const anchor = r.anchor === 'end' ? 'end' : 'start';
     if (r.time != null) {
       const at = reminderTimeText(r.time);
-      if (r.value === 0) return `On the day at ${at}`;
+      if (r.value === 0) return `On the ${anchor} day at ${at}`;
       const unit = r.value === 1 ? r.unit.slice(0, -1) : r.unit;
-      return `${r.value} ${unit} before at ${at}`;
+      return `${r.value} ${unit} ${dir} ${anchor} at ${at}`;
     }
-    if (r.value === 0) return 'At time of event';
+    if (r.value === 0) return `At ${anchor} of event`;
     const unit = r.value === 1 ? r.unit.slice(0, -1) : r.unit;
-    return `${r.value} ${unit} before`;
+    return `${r.value} ${unit} ${dir} ${anchor}`;
   }
 
   // hh:mm (+ AM/PM) inputs for an all-day reminder row, honoring time_format —
@@ -607,7 +609,13 @@
       if (r.readonly) {
         _remindersReadonly.push(r.at ? readonlyReminderAtText(r.at) : (r.text || 'Reminder'));
       } else if (r.unit) {
-        _reminders.push({ value: r.value, unit: r.unit, time: r.time });
+        _reminders.push({
+          value: r.value,
+          unit: r.unit,
+          time: r.time,
+          anchor: r.anchor === 'end' ? 'end' : 'start',
+          direction: r.direction === 'after' ? 'after' : 'before',
+        });
       }
     });
   }
@@ -641,11 +649,18 @@
         .map((u) => `<option value="${u}"${u === r.unit ? ' selected' : ''}>${u}</option>`)
         .join('');
       const time = allDay ? reminderTimeHtml(idx, r.time) : '';
+      const sel = `${r.direction === 'after' ? 'after' : 'before'}|${r.anchor === 'end' ? 'end' : 'start'}`;
+      const anchorOpts = [
+        ['before|start', 'before start'],
+        ['after|start', 'after start'],
+        ['before|end', 'before end'],
+        ['after|end', 'after end'],
+      ].map(([v, t]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${t}</option>`).join('');
       rows.push(
         `<div class="ev-reminder-row">` +
           `<input type="number" class="ev-reminder-value" data-idx="${idx}" min="0" max="10000" value="${escHtml(r.value)}">` +
           `<select class="ev-reminder-unit" data-idx="${idx}">${opts}</select>` +
-          `<span class="ev-reminder-word">before</span>${time}` +
+          `<select class="ev-reminder-anchor" data-idx="${idx}">${anchorOpts}</select>${time}` +
           `<button type="button" class="btn-icon ev-reminder-del" data-idx="${idx}" aria-label="Delete reminder">×</button>` +
         `</div>`
       );
@@ -675,6 +690,15 @@
       sel.addEventListener('change', () => {
         const r = _reminders[parseInt(sel.dataset.idx, 10)];
         if (r) r.unit = sel.value;
+      });
+    });
+    box.querySelectorAll('.ev-reminder-anchor').forEach((sel) => {
+      sel.addEventListener('change', () => {
+        const r = _reminders[parseInt(sel.dataset.idx, 10)];
+        if (!r) return;
+        const [direction, anchor] = sel.value.split('|');
+        r.direction = direction;
+        r.anchor = anchor;
       });
     });
     // Read a row's hh/mm (+ AM/PM) back into canonical 24h r.time, re-padding
@@ -717,12 +741,14 @@
     _reminders.forEach((r) => {
       const value = parseInt(r.value, 10);
       if (!Number.isFinite(value) || value < 0 || value > 10000) return;
+      const anchor = r.anchor === 'end' ? 'end' : 'start';
+      const direction = r.direction === 'after' ? 'after' : 'before';
       if (allDay) {
         if (r.unit !== 'days' && r.unit !== 'weeks') return;
         if (!r.time) return;
-        out.push({ value, unit: r.unit, time: r.time });
+        out.push({ value, unit: r.unit, time: r.time, anchor, direction });
       } else {
-        out.push({ value, unit: r.unit });
+        out.push({ value, unit: r.unit, anchor, direction });
       }
     });
     return out;
@@ -743,9 +769,9 @@
   function addReminderRow() {
     if (!_remindersEditable) return;
     if (reminderIsAllDay()) {
-      _reminders.push({ value: 1, unit: 'days', time: '09:00', isNew: true });
+      _reminders.push({ value: 1, unit: 'days', time: '09:00', anchor: 'start', direction: 'before', isNew: true });
     } else {
-      _reminders.push({ value: 15, unit: 'minutes', isNew: true });
+      _reminders.push({ value: 15, unit: 'minutes', anchor: 'start', direction: 'before', isNew: true });
     }
     renderReminders();
   }
@@ -2477,17 +2503,27 @@
         : luxon.DateTime.fromISO(startStr, { setZone: true }).setZone(tz);
       if (!start.isValid) return;
       const title = e.title || '(No title)';
+      const endStr = p.rawEnd || e.end;
+      const end = endStr
+        ? (allDay
+            ? luxon.DateTime.fromISO(String(endStr).slice(0, 10), { zone: tz })
+            : luxon.DateTime.fromISO(endStr, { setZone: true }).setZone(tz))
+        : null;
       out.push({ uid: e.id, when: start, title, allDay, displayAt: start });
       (p.reminders || []).forEach((r) => {
         let when = null;
+        const base = r.anchor === 'end' ? end : start;
+        const sign = r.direction === 'after' ? 1 : -1;
         if (r.readonly) {
           if (r.at) when = luxon.DateTime.fromISO(r.at, { setZone: true }).setZone(tz);
-        } else if (allDay && r.time) {
-          const [hh, mm] = r.time.split(':').map(Number);
-          const days = r.value * (r.unit === 'weeks' ? 7 : 1);
-          when = start.startOf('day').minus({ days }).plus({ hours: hh, minutes: mm });
-        } else if (!allDay) {
-          when = start.minus({ [r.unit]: r.value });
+        } else if (base && base.isValid) {
+          if (allDay && r.time) {
+            const [hh, mm] = r.time.split(':').map(Number);
+            const days = r.value * (r.unit === 'weeks' ? 7 : 1);
+            when = base.startOf('day').plus({ days: sign * days }).plus({ hours: hh, minutes: mm });
+          } else if (!allDay) {
+            when = base.plus({ [r.unit]: sign * r.value });
+          }
         }
         if (when && when.isValid) out.push({ uid: e.id, when, title, allDay, displayAt: start });
       });
@@ -2531,7 +2567,13 @@
     const tz = effectiveTz();
     const now = luxon.DateTime.now().setZone(tz);
     const horizon = (window.__CONFIG__ || {}).notification_horizon_days || 60;
-    const params = new URLSearchParams({ from: now.toISO(), to: now.plus({ days: horizon }).toISO() });
+    // Look back as well as ahead so a reminder anchored *after* an event that
+    // has already ended still loads (buildTriggers drops anything past `now`).
+    const lookback = (window.__CONFIG__ || {}).notification_lookback_days || 60;
+    const params = new URLSearchParams({
+      from: now.minus({ days: lookback }).toISO(),
+      to: now.plus({ days: horizon }).toISO(),
+    });
     const r = await fetch('/events?' + params.toString());
     if (!r.ok) throw new Error('events fetch failed');
     return await r.json();

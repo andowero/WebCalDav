@@ -223,8 +223,9 @@ First half of v3: reminders can now be created and deleted per event.
   RFC 5545 duration). All-day events: N days/weeks before **at HH:MM**, encoded
   as one duration trigger off the DATE start (e.g. 2 weeks at 09:00 →
   `-P13DT15H`; on-day 09:00 → `PT9H`).
-- Non-conforming alarms (EMAIL, absolute datetime triggers, `RELATED=END`,
-  after-event) are preserved verbatim and shown read-only.
+- Non-conforming alarms (EMAIL, absolute datetime triggers) are preserved
+  verbatim and shown read-only. (`RELATED=END` / after-event became editable in
+  the 2026-06-14 update below.)
 - Scope-aware for recurring events: "all" → master, "this" → override snapshot,
   "this+future" → new split series inherits then replaces. Override reminders
   are recovered from unexpanded components and no longer leak to siblings.
@@ -259,6 +260,28 @@ Second half of v3, completing the milestone.
 - Browsers: Firefox, Chrome, Opera, Safari (macOS). Verified manually (no
   automated browser tests, per project policy). Backend covered by new settings
   and `fetch_sync_token` tests.
+
+### Anchored reminders — before/after × start/end (2026-06-14)
+
+Post-v3 enhancement to the reminder editor.
+
+- Reminders can fire relative to the event **start or end**, **before or after**
+  (four quadrants), picked via one per-row dropdown. Motivating case: a reminder
+  15 minutes before an event ends (e.g. picking a child up from class).
+- `Reminder` gains `anchor` (`start`|`end`) and `direction` (`before`|`after`),
+  both defaulting to the old behavior and omitted from payloads when default, so
+  existing reminders round-trip byte-for-byte. The pair maps to the VALARM
+  `TRIGGER`'s `RELATED` parameter plus the duration sign; `RELATED=END` is only
+  emitted when the event has an end, else it degrades to `START`.
+- `RELATED=END` and after-event triggers are now editable; only EMAIL and
+  absolute-time alarms remain read-only. Browser notifications compute
+  end-anchored fire times from `rawEnd`.
+- The notification scheduler loads past events too (`NOTIFICATION_LOOKBACK_DAYS`,
+  default 60 = the horizon), so an after-event reminder still pending in the
+  future fires even once the event has ended — fixing a bug where after-end
+  reminders on past events silently never fired.
+- All 120 tests pass (new round-trip coverage for each quadrant + an all-day
+  after-end case; model validation for the new fields).
 
 ## What is next
 

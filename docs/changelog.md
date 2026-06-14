@@ -2,6 +2,29 @@
 
 ## Unreleased — MVP
 
+### Added — anchored reminders (before/after × start/end) (2026-06-14)
+- Reminders can now fire relative to either the event **start** or **end**, and
+  either **before** or **after** it — four quadrants instead of the old
+  "before start" only. Use case: "15 minutes before the class ends." Each
+  reminder row gains a single dropdown (before start / after start / before end /
+  after end); the value/unit/time controls are unchanged.
+- Wire format adds optional `anchor` (`start`|`end`, default `start`) and
+  `direction` (`before`|`after`, default `before`) to each reminder; absent
+  fields preserve the legacy behavior, so old payloads round-trip unchanged.
+  The server maps the pair to the VALARM `TRIGGER`'s `RELATED` parameter and the
+  duration sign (`TRIGGER;RELATED=END:-PT15M`, `TRIGGER:PT20M`, …). `RELATED=END`
+  is only written when the event has a `DTEND`/`DURATION`, else it falls back to
+  `START`.
+- VALARMs with `RELATED=END` or after-event offsets are now **editable** (no
+  longer surfaced read-only); only absolute-time and EMAIL alarms stay read-only.
+- Browser notifications schedule end-anchored reminders off the event's end time
+  (`rawEnd`), skipping any that lack one.
+- The notification scheduler now also loads **past** events, back
+  `NOTIFICATION_LOOKBACK_DAYS` (default 60, = the horizon), so an after-event
+  reminder whose fire time is still in the future fires even once the event
+  itself has ended. `buildTriggers` already drops anything past `now`, so the
+  wider window only adds the pending after-anchored reminders.
+
 ### Added — browser notifications (2026-06-12)
 - Optional per-user desktop notifications that fire at each event's reminder
   (VALARM) **and** at each event's start. Off by default; toggled under
