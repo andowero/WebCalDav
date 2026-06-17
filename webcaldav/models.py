@@ -145,5 +145,11 @@ class UserSettings(Base):
     # UI language: "autodetect" (use the browser Accept-Language, default),
     # "english", or "czech". Resolved to a concrete code by webcaldav.i18n.
     language: Mapped[str] = mapped_column(String, default="autodetect", nullable=False)
+    # When True, a single click on empty calendar space only highlights the
+    # day/slot and a double click opens the create modal. Off by default
+    # (single click opens the create modal immediately).
+    double_click_to_create_events: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
 
     user: Mapped["User"] = relationship(back_populates="settings")

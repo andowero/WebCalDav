@@ -2,6 +2,15 @@
 
 ## Unreleased — MVP
 
+### Added — Double-click to create events (2026-06-18)
+- New per-user setting **`double_click_to_create_events`** (Settings → Preferences,
+  off by default). When off, a single click on empty calendar space opens the
+  create modal as before. When on, a single click only highlights the day/slot and
+  a double click opens the create modal. Drag-to-select keeps opening the modal in
+  both modes. New `UserSettings` column (with a migration default) plumbed through
+  `/settings`, the page render context, and `window.__SETTINGS__`; the FullCalendar
+  `dateClick` handler does manual double-click detection in `webcaldav/static/app.js`.
+
 ### Added — MCP server & API tokens (2026-06-17)
 - New optional **MCP server** at `/mcp` (Streamable HTTP, via the official `mcp`
   SDK / `FastMCP`) letting AI assistants read and write the user's calendars and

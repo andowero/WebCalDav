@@ -101,6 +101,7 @@
     "pref_undated_tasks": "Undated tasks",
     "undated_agenda": "Agenda only",
     "undated_today": "Today & agenda",
+    "pref_dblclick_create": "Double-click to create events",
     "pref_theme": "Theme",
     "theme_system": "System",
     "theme_light": "Light",

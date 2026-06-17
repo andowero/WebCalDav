@@ -21,7 +21,7 @@
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }}, completed_task_display: {{ completed_task_display | tojson }}, undated_task_display: {{ undated_task_display | tojson }}, theme: {{ theme | tojson }}, language: {{ language | tojson }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }}, completed_task_display: {{ completed_task_display | tojson }}, undated_task_display: {{ undated_task_display | tojson }}, theme: {{ theme | tojson }}, language: {{ language | tojson }}, double_click_to_create_events: {{ double_click_to_create_events | tojson }} };
   window.__CONFIG__ = { notification_horizon_days: {{ notification_horizon_days }}, notification_lookback_days: {{ notification_lookback_days }}, static_v: {{ static_v | tojson }} };
   window.__MCP_ENABLED__ = {{ mcp_enabled | tojson }};
   window.__LANG__ = {{ lang | tojson }};
@@ -360,6 +360,10 @@
         <option value="agenda" data-i18n="ui.undated_agenda">Agenda only</option>
         <option value="today" data-i18n="ui.undated_today">Today &amp; agenda</option>
       </select>
+      <label class="ev-check">
+        <input type="checkbox" id="pref-dblclick-create">
+        <span data-i18n="ui.pref_dblclick_create">Double-click to create events</span>
+      </label>
       <label data-i18n="ui.pref_theme">Theme</label>
       <select id="pref-theme">
         <option value="system" data-i18n="ui.theme_system">System</option>

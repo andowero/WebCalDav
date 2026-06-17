@@ -101,6 +101,7 @@
     "pref_undated_tasks": "Úkoly bez data",
     "undated_agenda": "Pouze v agendě",
     "undated_today": "Dnes a v agendě",
+    "pref_dblclick_create": "Vytvořit událost dvojklikem",
     "pref_theme": "Vzhled",
     "theme_system": "Systémový",
     "theme_light": "Světlý",

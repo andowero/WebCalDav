@@ -50,6 +50,7 @@ _USER_SETTINGS_MIGRATION = {
     "undated_task_display": ("TEXT", "'agenda'"),
     "theme": ("TEXT", "'system'"),
     "language": ("TEXT", "'autodetect'"),
+    "double_click_to_create_events": ("BOOLEAN", 0),
 }
 
 

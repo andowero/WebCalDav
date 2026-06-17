@@ -178,6 +178,12 @@
   // ── Settings panel ─────────────────────────────────────────────────────────
 
   let _fcCalendar = null;
+  // Double-click-to-create state: last date-cell click (for manual dblclick
+  // detection) and a guard so the highlight-only single click doesn't trip the
+  // `select` handler into opening the create modal.
+  let _lastDateClick = null;
+  let _suppressSelectModal = false;
+  const DBLCLICK_MS = 350;
 
   function timeFormatKey() {
     return (window.__SETTINGS__ || {}).time_format || '24h';
@@ -523,6 +529,7 @@
       document.getElementById('pref-undated-task').value = s.undated_task_display || 'agenda';
       document.getElementById('pref-theme').value = s.theme || 'system';
       document.getElementById('pref-language').value = s.language || 'autodetect';
+      document.getElementById('pref-dblclick-create').checked = !!s.double_click_to_create_events;
       const enabled = s.auto_logout_enabled ?? true;
       const mins = Math.max(1, Math.round((s.auto_logout_timeout_seconds ?? 3600) / 60));
       const enEl = document.getElementById('pref-auto-logout-enabled');
@@ -651,6 +658,7 @@
         const undatedTask = document.getElementById('pref-undated-task').value;
         const theme = document.getElementById('pref-theme').value;
         const language = document.getElementById('pref-language').value;
+        const dblClickCreate = document.getElementById('pref-dblclick-create').checked;
         const languageChanged = language !== (window.__SETTINGS__?.language ?? 'autodetect');
         const notifEnabled = document.getElementById('pref-notifications-enabled').checked;
         // Notifications force auto-logout off (server enforces the same).
@@ -673,6 +681,7 @@
           undated_task_display: undatedTask,
           theme: theme,
           language: language,
+          double_click_to_create_events: dblClickCreate,
         });
         // The active translation catalog is injected at page render, so a
         // language change only takes full effect after a reload.
@@ -690,6 +699,7 @@
         window.__SETTINGS__.undated_task_display = undatedTask;
         window.__SETTINGS__.theme = theme;
         window.__SETTINGS__.language = language;
+        window.__SETTINGS__.double_click_to_create_events = dblClickCreate;
         // Apply theme live; "system" tracked by CSS media query (no JS needed).
         document.documentElement.dataset.theme = theme;
         if (notifEnabled) startNotifications(); else stopNotifications();
@@ -2875,6 +2885,32 @@
 
   // ── Calendar page ───────────────────────────────────────────────────────────
 
+  // Open the create modal from a date-cell click with view-specific defaults.
+  function openCreateFromDateClick(info) {
+    const tz = effectiveTz();
+    if (info.view.type === 'dayGridMonth') {
+      // Month: clicked day as From/To date, now (rounded to 5 min) as the
+      // From time, default 1-hour duration.
+      const day = info.dateStr.slice(0, 10);
+      const t = roundToMinutes(luxon.DateTime.now().setZone(tz), 5);
+      const start = luxon.DateTime.fromObject(
+        { year: +day.slice(0, 4), month: +day.slice(5, 7), day: +day.slice(8, 10),
+          hour: t.hour, minute: t.minute },
+        { zone: tz },
+      );
+      openCreateModal(start, start.plus({ hours: 1 }), false);
+    } else if (info.allDay) {
+      // Week/Day all-day lane → one-day all-day event.
+      const start = luxon.DateTime.fromISO(info.dateStr.slice(0, 10), { zone: tz });
+      openCreateModal(start, start, true);
+    } else {
+      // Week/Day timed: snap to the nearest half-hour, 30-minute slot.
+      const start = roundToMinutes(
+        luxon.DateTime.fromISO(info.dateStr, { setZone: true }).setZone(tz), 30);
+      openCreateModal(start, start.plus({ minutes: 30 }), false);
+    }
+  }
+
   function initCalendar() {
     show('page-calendar');
 
@@ -2962,34 +2998,39 @@
         info.jsEvent.preventDefault();
         openEventModal(info.event);
       },
-      // Plain click on empty space → create modal with view-specific defaults.
+      // Click on empty space. Default: open the create modal immediately. When
+      // the "double-click to create" setting is on, a single click only
+      // highlights the day/slot and a double click opens the modal.
       dateClick: function (info) {
         hideContextMenu();
-        const tz = effectiveTz();
-        if (info.view.type === 'dayGridMonth') {
-          // Month: clicked day as From/To date, now (rounded to 5 min) as the
-          // From time, default 1-hour duration.
-          const day = info.dateStr.slice(0, 10);
-          const t = roundToMinutes(luxon.DateTime.now().setZone(tz), 5);
-          const start = luxon.DateTime.fromObject(
-            { year: +day.slice(0, 4), month: +day.slice(5, 7), day: +day.slice(8, 10),
-              hour: t.hour, minute: t.minute },
-            { zone: tz },
-          );
-          openCreateModal(start, start.plus({ hours: 1 }), false);
-        } else if (info.allDay) {
-          // Week/Day all-day lane → one-day all-day event.
-          const start = luxon.DateTime.fromISO(info.dateStr.slice(0, 10), { zone: tz });
-          openCreateModal(start, start, true);
-        } else {
-          // Week/Day timed: snap to the nearest half-hour, 30-minute slot.
-          const start = roundToMinutes(
-            luxon.DateTime.fromISO(info.dateStr, { setZone: true }).setZone(tz), 30);
-          openCreateModal(start, start.plus({ minutes: 30 }), false);
+        if (!(window.__SETTINGS__ || {}).double_click_to_create_events) {
+          openCreateFromDateClick(info);
+          return;
+        }
+        const now = Date.now();
+        if (_lastDateClick && _lastDateClick.dateStr === info.dateStr
+            && now - _lastDateClick.time < DBLCLICK_MS) {
+          _lastDateClick = null;
+          openCreateFromDateClick(info);
+          return;
+        }
+        _lastDateClick = { dateStr: info.dateStr, time: now };
+        // Single click → highlight only. Drive FullCalendar's own selection so
+        // the day/slot lights up, but suppress the modal the select handler
+        // would otherwise open.
+        const end = info.allDay
+          ? info.date
+          : new Date(info.date.getTime() + 30 * 60 * 1000);
+        _suppressSelectModal = true;
+        try {
+          info.view.calendar.select({ start: info.date, end: end, allDay: info.allDay });
+        } finally {
+          _suppressSelectModal = false;
         }
       },
       // Drag over empty space → create modal spanning the dragged range.
       select: function (info) {
+        if (_suppressSelectModal) return; // highlight-only single click
         hideContextMenu();
         const tz = effectiveTz();
         if (info.allDay) {

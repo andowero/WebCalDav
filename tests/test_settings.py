@@ -47,6 +47,24 @@ async def test_default_view_rejects_invalid(client: AsyncClient, db_engine):
 
 
 @pytest.mark.asyncio
+async def test_dblclick_create_default_off(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "dc1@example.com")
+    r = await client.get("/settings")
+    assert r.status_code == 200
+    assert r.json()["double_click_to_create_events"] is False
+
+
+@pytest.mark.asyncio
+async def test_dblclick_create_roundtrip(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "dc2@example.com")
+    r = await client.put("/settings", json={"double_click_to_create_events": True})
+    assert r.status_code == 200
+    assert r.json()["double_click_to_create_events"] is True
+    r = await client.get("/settings")
+    assert r.json()["double_click_to_create_events"] is True
+
+
+@pytest.mark.asyncio
 async def test_notifications_default_off(client: AsyncClient, db_engine):
     await _login_unrestricted(client, "nt1@example.com")
     r = await client.get("/settings")

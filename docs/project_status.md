@@ -355,6 +355,21 @@ AI-assistant access to calendars and tasks over the Model Context Protocol.
   admin reset revokes tokens). The live MCP transport was verified end-to-end
   (initialize, tools/list, RO rejection). Documented in `MCP.md`.
 
+### Double-click to create events (2026-06-18)
+
+Optional calmer click behavior on empty calendar space.
+
+- New `double_click_to_create_events` boolean user setting (off by default), added
+  to the `UserSettings` model with the usual SQLite `ALTER TABLE` migration and
+  plumbed through `/settings`, the page render context, and `window.__SETTINGS__`.
+- When off, a single click opens the create modal (unchanged). When on, a single
+  click only highlights the day/slot (via FullCalendar's own selection) and a
+  double click opens the modal; the `dateClick` handler does manual double-click
+  detection and the per-view create logic was extracted into
+  `openCreateFromDateClick`. Drag-to-select still opens the modal in both modes.
+- 170 tests pass (2 new: setting default-off and round-trip). The click/highlight
+  interaction is verified manually.
+
 ## What is next
 
 | Milestone | Scope | Status |

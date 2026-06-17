@@ -138,6 +138,7 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_undated_task_display = "agenda"
     user_settings_theme = "system"
     user_settings_language = "autodetect"
+    user_settings_double_click_to_create_events = False
 
     if session_id:
         try:
@@ -169,6 +170,9 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_undated_task_display = s.undated_task_display
                         user_settings_theme = s.theme
                         user_settings_language = s.language
+                        user_settings_double_click_to_create_events = (
+                            s.double_click_to_create_events
+                        )
         except Exception:
             logger.warning("root_session_lookup_failed", exc_info=True)
 
@@ -195,6 +199,7 @@ async def root(request: Request) -> HTMLResponse:
             "undated_task_display": user_settings_undated_task_display,
             "theme": user_settings_theme,
             "language": user_settings_language,
+            "double_click_to_create_events": user_settings_double_click_to_create_events,
             "mcp_enabled": settings.mcp_server_enabled,
             "lang": lang,
             "i18n": catalog,

@@ -35,6 +35,7 @@ class SettingsOut(BaseModel):
     undated_task_display: str
     theme: str
     language: str
+    double_click_to_create_events: bool
 
 
 class SettingsIn(BaseModel):
@@ -50,6 +51,7 @@ class SettingsIn(BaseModel):
     undated_task_display: str | None = None
     theme: str | None = None
     language: str | None = None
+    double_click_to_create_events: bool | None = None
 
 
 def _to_out(s: UserSettings) -> SettingsOut:
@@ -66,6 +68,7 @@ def _to_out(s: UserSettings) -> SettingsOut:
         undated_task_display=s.undated_task_display,
         theme=s.theme,
         language=s.language,
+        double_click_to_create_events=s.double_click_to_create_events,
     )
 
 
@@ -92,6 +95,7 @@ async def get_settings(
             undated_task_display="agenda",
             theme="system",
             language="autodetect",
+            double_click_to_create_events=False,
         )
     return _to_out(s)
 
@@ -187,6 +191,8 @@ async def put_settings(
         s.theme = body.theme
     if body.language is not None:
         s.language = body.language
+    if body.double_click_to_create_events is not None:
+        s.double_click_to_create_events = body.double_click_to_create_events
 
     # Notifications only fire while a tab stays logged in, so the two are
     # mutually exclusive: enabling notifications forces auto-logout off.
