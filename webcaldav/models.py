@@ -84,5 +84,8 @@ class UserSettings(Base):
     # Where tasks with no DTSTART/DUE appear: "agenda" (agenda list only, default)
     # or "today" (pinned to the current day in grid views as well as the agenda).
     undated_task_display: Mapped[str] = mapped_column(String, default="agenda", nullable=False)
+    # UI color theme: "system" (follow OS prefers-color-scheme, default),
+    # "light", or "dark".
+    theme: Mapped[str] = mapped_column(String, default="system", nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="settings")

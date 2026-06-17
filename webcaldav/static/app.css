@@ -1,10 +1,212 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Theme tokens ────────────────────────────────────────────────────────────
+   Colors are CSS custom properties so a single `data-theme` swap on <html>
+   re-themes the whole UI. :root holds the light palette (default); the dark
+   overrides apply for an explicit data-theme="dark" and for data-theme="system"
+   when the OS prefers dark. FullCalendar 6 reads its own --fc-* props, so we set
+   those here too instead of fighting its bundled CSS. Per-calendar event colors
+   come from the DB inline and are intentionally left untouched. */
+:root {
+  color-scheme: light;
+
+  --bg-page: #f5f5f5;
+  --bg-surface: #fff;
+  --bg-control: #fafafa;
+  --bg-control-hover: #e6e6e6;
+  --bg-disabled: #f0f0f0;
+  --bg-subtle: #f5f5f5;
+  --bg-stepper: #f3f3f3;
+  --bg-row-hover: #f7f9fc;
+  --bg-menu-hover: #f0f0f0;
+
+  --text: #111;
+  --text-strong: #222;
+  --text-body: #333;
+  --text-muted: #555;
+  --text-muted-2: #666;
+  --text-faint: #888;
+  --text-disabled: #999;
+  --text-dim: #bbb;
+  --text-account: #444;
+
+  --border: #ddd;
+  --border-panel: #e0e0e0;
+  --border-control: #ccc;
+  --border-input: #d0d0d0;
+  --border-light: #eee;
+  --border-lighter: #f0f0f0;
+  --border-faint: #f3f3f3;
+  --border-faintest: #f5f5f5;
+
+  --accent: #3788d8;
+  --accent-hover: #2670bc;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --today: #1a73e8;
+  --fab: #1a73e8;
+  --fab-hover: #1666cf;
+  --today-outline: #93c5fd;
+  --warn: #c0392b;
+
+  --error-bg: #fee2e2;
+  --error-border: #fca5a5;
+  --error-text: #b91c1c;
+  --info-bg: #eff6ff;
+  --info-border: #bfdbfe;
+  --info-text: #1d4ed8;
+  --danger-border: #dc2626;
+
+  --scrim: rgba(0,0,0,.3);
+  --shadow: rgba(0,0,0,.18);
+  --shadow-fab: rgba(0,0,0,.25);
+
+  --fc-page-bg-color: #fff;
+  --fc-border-color: #ddd;
+  --fc-neutral-bg-color: #f5f5f5;
+  --fc-neutral-text-color: #808080;
+  --fc-today-bg-color: rgba(26,115,232,.10);
+  --fc-highlight-color: rgba(26,115,232,.12);
+  --fc-list-event-hover-bg-color: #f7f9fc;
+  --fc-non-business-color: rgba(0,0,0,.04);
+}
+
+/* Dark palette, shared by explicit dark and system-prefers-dark. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-page: #121212;
+  --bg-surface: #1e1e1e;
+  --bg-control: #2a2a2a;
+  --bg-control-hover: #3a3a3a;
+  --bg-disabled: #262626;
+  --bg-subtle: #262626;
+  --bg-stepper: #2a2a2a;
+  --bg-row-hover: #2a2f3a;
+  --bg-menu-hover: #2f2f2f;
+
+  --text: #e8e8e8;
+  --text-strong: #e8e8e8;
+  --text-body: #dcdcdc;
+  --text-muted: #b0b0b0;
+  --text-muted-2: #a0a0a0;
+  --text-faint: #8a8a8a;
+  --text-disabled: #777;
+  --text-dim: #666;
+  --text-account: #c0c0c0;
+
+  --border: #3a3a3a;
+  --border-panel: #333;
+  --border-control: #444;
+  --border-input: #444;
+  --border-light: #2c2c2c;
+  --border-lighter: #2c2c2c;
+  --border-faint: #262626;
+  --border-faintest: #262626;
+
+  --accent: #5b9bd5;
+  --accent-hover: #74ade0;
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --today: #8ab4f8;
+  --fab: #3b82f6;
+  --fab-hover: #60a5fa;
+  --today-outline: #3b82f6;
+  --warn: #ff6b5e;
+
+  --error-bg: #3a1d1d;
+  --error-border: #7f3a3a;
+  --error-text: #f5a3a3;
+  --info-bg: #16263b;
+  --info-border: #2f4d73;
+  --info-text: #9bc4f5;
+  --danger-border: #e06666;
+
+  --scrim: rgba(0,0,0,.6);
+  --shadow: rgba(0,0,0,.5);
+  --shadow-fab: rgba(0,0,0,.6);
+
+  --fc-page-bg-color: #1e1e1e;
+  --fc-border-color: #3a3a3a;
+  --fc-neutral-bg-color: #262626;
+  --fc-neutral-text-color: #aaa;
+  --fc-today-bg-color: rgba(138,180,248,.10);
+  --fc-highlight-color: rgba(138,180,248,.14);
+  --fc-list-event-hover-bg-color: #2a2f3a;
+  --fc-non-business-color: rgba(0,0,0,.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    color-scheme: dark;
+
+    --bg-page: #121212;
+    --bg-surface: #1e1e1e;
+    --bg-control: #2a2a2a;
+    --bg-control-hover: #3a3a3a;
+    --bg-disabled: #262626;
+    --bg-subtle: #262626;
+    --bg-stepper: #2a2a2a;
+    --bg-row-hover: #2a2f3a;
+    --bg-menu-hover: #2f2f2f;
+
+    --text: #e8e8e8;
+    --text-strong: #e8e8e8;
+    --text-body: #dcdcdc;
+    --text-muted: #b0b0b0;
+    --text-muted-2: #a0a0a0;
+    --text-faint: #8a8a8a;
+    --text-disabled: #777;
+    --text-dim: #666;
+    --text-account: #c0c0c0;
+
+    --border: #3a3a3a;
+    --border-panel: #333;
+    --border-control: #444;
+    --border-input: #444;
+    --border-light: #2c2c2c;
+    --border-lighter: #2c2c2c;
+    --border-faint: #262626;
+    --border-faintest: #262626;
+
+    --accent: #5b9bd5;
+    --accent-hover: #74ade0;
+    --primary: #3b82f6;
+    --primary-hover: #60a5fa;
+    --today: #8ab4f8;
+    --fab: #3b82f6;
+    --fab-hover: #60a5fa;
+    --today-outline: #3b82f6;
+    --warn: #ff6b5e;
+
+    --error-bg: #3a1d1d;
+    --error-border: #7f3a3a;
+    --error-text: #f5a3a3;
+    --info-bg: #16263b;
+    --info-border: #2f4d73;
+    --info-text: #9bc4f5;
+    --danger-border: #e06666;
+
+    --scrim: rgba(0,0,0,.6);
+    --shadow: rgba(0,0,0,.5);
+    --shadow-fab: rgba(0,0,0,.6);
+
+    --fc-page-bg-color: #1e1e1e;
+    --fc-border-color: #3a3a3a;
+    --fc-neutral-bg-color: #262626;
+    --fc-neutral-text-color: #aaa;
+    --fc-today-bg-color: rgba(138,180,248,.10);
+    --fc-highlight-color: rgba(138,180,248,.14);
+    --fc-list-event-hover-bg-color: #2a2f3a;
+    --fc-non-business-color: rgba(0,0,0,.25);
+  }
+}
+
 body {
   font-family: system-ui, -apple-system, sans-serif;
   font-size: 14px;
-  background: #f5f5f5;
-  color: #111;
+  background: var(--bg-page);
+  color: var(--text);
   height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -19,8 +221,8 @@ body {
 }
 
 .auth-card {
-  background: #fff;
-  border: 1px solid #ddd;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 2.5rem 2rem;
   width: 100%;
@@ -54,13 +256,13 @@ body {
   display: block;
   width: 100%;
   padding: 0.5rem 0.75rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-control);
   border-radius: 4px;
   font-size: 14px;
 }
 
 .auth-card input:focus {
-  outline: 2px solid #3788d8;
+  outline: 2px solid var(--accent);
   border-color: transparent;
 }
 
@@ -68,7 +270,7 @@ body {
   margin-top: 1.5rem;
   width: 100%;
   padding: 0.6rem;
-  background: #3788d8;
+  background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 4px;
@@ -77,24 +279,24 @@ body {
   cursor: pointer;
 }
 
-.auth-card button[type="submit"]:hover { background: #2670bc; }
+.auth-card button[type="submit"]:hover { background: var(--accent-hover); }
 .auth-card button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .error-msg {
-  background: #fee2e2;
-  border: 1px solid #fca5a5;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
   border-radius: 4px;
-  color: #b91c1c;
+  color: var(--error-text);
   padding: 0.5rem 0.75rem;
   margin-bottom: 0.75rem;
   font-size: 13px;
 }
 
 .info-msg {
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
   border-radius: 4px;
-  color: #1d4ed8;
+  color: var(--info-text);
   padding: 0.5rem 0.75rem;
   margin-bottom: 1rem;
   font-size: 13px;
@@ -113,8 +315,8 @@ body {
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1rem;
-  background: #fff;
-  border-bottom: 1px solid #e0e0e0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-panel);
   height: 44px;
 }
 
@@ -132,33 +334,33 @@ body {
 }
 
 .user-email {
-  color: #666;
+  color: var(--text-muted-2);
   font-size: 13px;
   flex: 1;
 }
 
 .logout-countdown {
-  color: #888;
+  color: var(--text-faint);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .logout-countdown--warn {
-  color: #c0392b;
+  color: var(--warn);
   font-weight: 600;
 }
 
 .btn-outline {
   padding: 0.3rem 0.8rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-control);
   border-radius: 4px;
-  background: #fff;
+  background: var(--bg-surface);
   font-size: 13px;
   cursor: pointer;
 }
 
-.btn-outline:hover { background: #f5f5f5; }
+.btn-outline:hover { background: var(--bg-subtle); }
 
 .calendar-body {
   flex: 1;
@@ -171,7 +373,7 @@ body {
   flex: 1;
   padding: 1rem;
   overflow: auto;
-  background: #fff;
+  background: var(--bg-surface);
 }
 
 /* ── Agenda view ── */
@@ -199,7 +401,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #fff;
+  background: var(--bg-surface);
 }
 
 .agenda-scroll {
@@ -215,15 +417,15 @@ body {
 .agenda-day-header {
   position: sticky;
   top: -1px;
-  background: #fff;
+  background: var(--bg-surface);
   z-index: 1;
   font-weight: 600;
   padding: 0.35rem 0;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .agenda-day-header.is-today {
-  color: #1a73e8;
+  color: var(--today);
 }
 
 .agenda-row {
@@ -231,17 +433,17 @@ body {
   align-items: baseline;
   gap: 0.6rem;
   padding: 0.5rem 0.25rem;
-  border-bottom: 1px solid #f3f3f3;
+  border-bottom: 1px solid var(--border-faint);
   cursor: pointer;
 }
 
 .agenda-row:hover {
-  background: #f7f9fc;
+  background: var(--bg-row-hover);
 }
 
 .agenda-time {
   flex: 0 0 7rem;
-  color: #555;
+  color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -263,13 +465,13 @@ body {
 }
 
 .agenda-loc {
-  color: #777;
+  color: var(--text-faint);
   font-size: 0.85em;
 }
 
 .agenda-status {
   text-align: center;
-  color: #888;
+  color: var(--text-faint);
   padding: 1rem;
 }
 
@@ -277,8 +479,8 @@ body {
   display: inline-block;
   width: 1.1rem;
   height: 1.1rem;
-  border: 2px solid #ccc;
-  border-top-color: #1a73e8;
+  border: 2px solid var(--border-control);
+  border-top-color: var(--today);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
   vertical-align: middle;
@@ -302,23 +504,23 @@ body {
   height: 3.25rem;
   border-radius: 50%;
   border: none;
-  background: #1a73e8;
+  background: var(--fab);
   color: #fff;
   font-size: 1.9rem;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 2px 8px var(--shadow-fab);
 }
 
 .fab:hover {
-  background: #1666cf;
+  background: var(--fab-hover);
 }
 
 /* ── Settings panel ── */
 .settings-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.3);
+  background: var(--scrim);
   z-index: 100;
 }
 
@@ -329,8 +531,8 @@ body {
   bottom: 0;
   width: 360px;
   max-width: 100vw;
-  background: #fff;
-  border-left: 1px solid #e0e0e0;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border-panel);
   z-index: 101;
   display: flex;
   flex-direction: column;
@@ -346,8 +548,8 @@ body {
 .settings-footer {
   flex: 0 0 auto;
   padding: 0.75rem 1rem;
-  border-top: 1px solid #e0e0e0;
-  background: #fff;
+  border-top: 1px solid var(--border-panel);
+  background: var(--bg-surface);
 }
 
 .settings-footer button {
@@ -359,11 +561,11 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-panel);
   font-weight: 600;
   font-size: 15px;
   flex: 0 0 auto;
-  background: #fff;
+  background: var(--bg-surface);
 }
 
 .btn-icon {
@@ -371,15 +573,15 @@ body {
   background: none;
   cursor: pointer;
   font-size: 16px;
-  color: #666;
+  color: var(--text-muted-2);
   padding: 0.25rem;
   line-height: 1;
 }
-.btn-icon:hover { color: #111; }
+.btn-icon:hover { color: var(--text); }
 
 .settings-section {
   padding: 1rem;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border-lighter);
 }
 
 .settings-section h2 {
@@ -387,7 +589,7 @@ body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .05em;
-  color: #888;
+  color: var(--text-faint);
   margin-bottom: 0.75rem;
 }
 
@@ -396,14 +598,14 @@ body {
   align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 0;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid var(--border-faintest);
 }
 .account-row:last-child { border-bottom: none; }
 
 .account-url {
   flex: 1;
   font-size: 12px;
-  color: #444;
+  color: var(--text-account);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -411,15 +613,15 @@ body {
 
 .btn-danger-sm {
   padding: 0.2rem 0.5rem;
-  border: 1px solid #fca5a5;
+  border: 1px solid var(--error-border);
   border-radius: 3px;
-  background: #fff;
-  color: #b91c1c;
+  background: var(--bg-surface);
+  color: var(--error-text);
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
 }
-.btn-danger-sm:hover { background: #fee2e2; }
+.btn-danger-sm:hover { background: var(--error-bg); }
 
 .calendar-row {
   display: flex;
@@ -431,7 +633,7 @@ body {
 .cal-color {
   width: 28px;
   height: 28px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-control);
   border-radius: 4px;
   padding: 2px;
   cursor: pointer;
@@ -448,7 +650,7 @@ body {
 .cal-default-label {
   margin-left: auto;
   font-size: 12px;
-  color: #666;
+  color: var(--text-muted-2);
   display: flex;
   align-items: center;
   gap: 0.3rem;
@@ -462,7 +664,7 @@ details#add-account-details {
 details#add-account-details summary {
   cursor: pointer;
   font-size: 13px;
-  color: #3788d8;
+  color: var(--accent);
   user-select: none;
   padding: 0.2rem 0;
 }
@@ -476,24 +678,24 @@ details#add-account-details summary {
 .inner-form label {
   font-size: 12px;
   font-weight: 500;
-  color: #555;
+  color: var(--text-muted);
 }
 .inner-form input,
 .inner-form select {
   padding: 0.4rem 0.6rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-control);
   border-radius: 4px;
   font-size: 13px;
 }
 .inner-form input:focus,
 .inner-form select:focus {
-  outline: 2px solid #3788d8;
+  outline: 2px solid var(--accent);
   border-color: transparent;
 }
 .inner-form button[type="submit"] {
   margin-top: 0.5rem;
   padding: 0.45rem 0.8rem;
-  background: #3788d8;
+  background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 4px;
@@ -502,13 +704,13 @@ details#add-account-details summary {
   cursor: pointer;
   align-self: flex-start;
 }
-.inner-form button[type="submit"]:hover { background: #2670bc; }
+.inner-form button[type="submit"]:hover { background: var(--accent-hover); }
 .inner-form button[type="submit"]:disabled { opacity: .6; cursor: not-allowed; }
 
-.pref-note { margin: 0; font-size: 11px; color: #888; line-height: 1.4; }
+.pref-note { margin: 0; font-size: 11px; color: var(--text-faint); line-height: 1.4; }
 
-.loading, .empty-note { font-size: 12px; color: #888; }
-.error-note { font-size: 12px; color: #b91c1c; }
+.loading, .empty-note { font-size: 12px; color: var(--text-faint); }
+.error-note { font-size: 12px; color: var(--error-text); }
 
 /* ── Event detail modal ── */
 .fc-event, .fc-event-main { cursor: pointer; }
@@ -516,7 +718,7 @@ details#add-account-details summary {
 .event-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.3);
+  background: var(--scrim);
   z-index: 200;
 }
 
@@ -531,10 +733,10 @@ details#add-account-details summary {
   min-height: fit-content;
   max-width: min(90vw, 760px);
   max-height: calc(100vh - 2rem);
-  background: #fff;
-  border: 1px solid #e0e0e0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-panel);
   border-radius: 6px;
-  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  box-shadow: 0 8px 32px var(--shadow);
   z-index: 201;
   display: flex;
   flex-direction: column;
@@ -547,7 +749,7 @@ details#add-account-details summary {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--border-panel);
   font-weight: 600;
   font-size: 15px;
 }
@@ -574,19 +776,19 @@ details#add-account-details summary {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .05em;
-  color: #888;
+  color: var(--text-faint);
 }
 
 .event-modal-body input[type="text"],
 .event-modal-body .ev-dnum,
 .event-modal-body textarea {
   padding: 0.4rem 0.5rem;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--border-input);
   border-radius: 4px;
   font: inherit;
   font-size: 13px;
-  background: #fafafa;
-  color: #222;
+  background: var(--bg-control);
+  color: var(--text-strong);
 }
 
 .event-modal-body textarea { resize: vertical; }
@@ -611,22 +813,22 @@ details#add-account-details summary {
 .ev-dsep {
   display: flex;
   align-items: center;
-  color: #888;
+  color: var(--text-faint);
   font-weight: 600;
 }
 
 .ev-cal-btn {
   margin-left: 0.25rem;
   padding: 0 0.4rem;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--border-input);
   border-radius: 4px;
-  background: #fafafa;
+  background: var(--bg-control);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
 }
 
-.ev-cal-btn:hover { background: #e6e6e6; }
+.ev-cal-btn:hover { background: var(--bg-control-hover); }
 .ev-cal-btn:disabled { cursor: default; opacity: 0.5; }
 
 /* Custom mini date picker popup (replaces the native one so it can honour the
@@ -634,10 +836,10 @@ details#add-account-details summary {
 .ev-cal-pop {
   position: fixed;
   z-index: 210;
-  background: #fff;
-  border: 1px solid #d0d0d0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-input);
   border-radius: 6px;
-  box-shadow: 0 6px 24px rgba(0,0,0,.18);
+  box-shadow: 0 6px 24px var(--shadow);
   padding: 0.5rem;
   width: 15rem;
   font-size: 13px;
@@ -656,15 +858,15 @@ details#add-account-details summary {
 .ev-cal-title:hover { text-decoration: underline; }
 
 .ev-cal-nav {
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--border-input);
   border-radius: 4px;
-  background: #fafafa;
+  background: var(--bg-control);
   width: 1.8em;
   line-height: 1.4;
   cursor: pointer;
 }
 
-.ev-cal-nav:hover { background: #e6e6e6; }
+.ev-cal-nav:hover { background: var(--bg-control-hover); }
 
 .ev-cal-grid {
   display: grid;
@@ -676,7 +878,7 @@ details#add-account-details summary {
   text-align: center;
   font-size: 11px;
   font-weight: 600;
-  color: #888;
+  color: var(--text-faint);
   padding: 0.2rem 0;
 }
 
@@ -686,13 +888,13 @@ details#add-account-details summary {
   padding: 0.3rem 0;
   border-radius: 4px;
   cursor: pointer;
-  color: #222;
+  color: var(--text-strong);
 }
 
-.ev-cal-day:hover { background: #e6e6e6; }
-.ev-cal-day.other-month { color: #bbb; }
-.ev-cal-day.today { outline: 1px solid #93c5fd; }
-.ev-cal-day.selected { background: #2563eb; color: #fff; }
+.ev-cal-day:hover { background: var(--bg-control-hover); }
+.ev-cal-day.other-month { color: var(--text-dim); }
+.ev-cal-day.today { outline: 1px solid var(--today-outline); }
+.ev-cal-day.selected { background: var(--primary); color: #fff; }
 
 .ev-cal-grid.months { grid-template-columns: repeat(3, 1fr); }
 
@@ -702,12 +904,12 @@ details#add-account-details summary {
   padding: 0.5rem 0;
   border-radius: 4px;
   cursor: pointer;
-  color: #222;
+  color: var(--text-strong);
 }
 
-.ev-cal-month:hover { background: #e6e6e6; }
-.ev-cal-month.today { outline: 1px solid #93c5fd; }
-.ev-cal-month.selected { background: #2563eb; color: #fff; }
+.ev-cal-month:hover { background: var(--bg-control-hover); }
+.ev-cal-month.today { outline: 1px solid var(--today-outline); }
+.ev-cal-month.selected { background: var(--primary); color: #fff; }
 
 /* Header title is a jump-to-date trigger (opens the mini picker). */
 .fc-toolbar-title { cursor: pointer; }
@@ -724,16 +926,16 @@ details#add-account-details summary {
 .ev-ampm {
   margin-left: 0.25rem;
   padding: 0 0.5rem;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--border-input);
   border-radius: 4px;
-  background: #fafafa;
+  background: var(--bg-control);
   font: inherit;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
 
-.ev-ampm:hover { background: #e6e6e6; }
+.ev-ampm:hover { background: var(--bg-control-hover); }
 .ev-ampm:disabled { cursor: default; opacity: 0.6; }
 
 .event-modal-body .ev-hh,
@@ -759,9 +961,9 @@ details#add-account-details summary {
   width: 1.6em;
   min-height: 0;
   padding: 0;
-  border: 1px solid #d0d0d0;
-  background: #f3f3f3;
-  color: #555;
+  border: 1px solid var(--border-input);
+  background: var(--bg-stepper);
+  color: var(--text-muted);
   font-size: 9px;
   line-height: 1;
   cursor: pointer;
@@ -770,11 +972,11 @@ details#add-account-details summary {
   justify-content: center;
 }
 
-.ev-spin button:hover { background: #e6e6e6; }
+.ev-spin button:hover { background: var(--bg-control-hover); }
 .ev-spin-up { border-radius: 4px 4px 0 0; }
 .ev-spin-down { border-radius: 0 0 4px 4px; border-top: none; }
 
-.ev-colon { display: flex; align-items: center; color: #888; font-weight: 600; }
+.ev-colon { display: flex; align-items: center; color: var(--text-faint); font-weight: 600; }
 
 .event-modal-body input[readonly],
 .event-modal-body textarea[readonly],
@@ -783,8 +985,8 @@ details#add-account-details summary {
 
 .event-modal-body input[disabled],
 .event-modal-body textarea[disabled] {
-  background: #f0f0f0;
-  color: #777;
+  background: var(--bg-disabled);
+  color: var(--text-faint);
 }
 
 .event-modal-footer {
@@ -793,24 +995,24 @@ details#add-account-details summary {
   justify-content: flex-end;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--border-panel);
 }
 
 .btn-primary {
   padding: 0.3rem 0.9rem;
-  border: 1px solid #2563eb;
+  border: 1px solid var(--primary);
   border-radius: 4px;
-  background: #2563eb;
+  background: var(--primary);
   color: #fff;
   font-size: 13px;
   cursor: pointer;
 }
 
-.btn-primary:hover { background: #1d4ed8; }
+.btn-primary:hover { background: var(--primary-hover); }
 .btn-primary:disabled { opacity: .6; cursor: default; }
 
 .ev-group {
-  border: 1px solid #eee;
+  border: 1px solid var(--border-light);
   border-radius: 4px;
   padding: 0.6rem 0.75rem;
   display: flex;
@@ -823,7 +1025,7 @@ details#add-account-details summary {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .05em;
-  color: #888;
+  color: var(--text-faint);
   padding: 0 0.25rem;
 }
 
@@ -866,16 +1068,16 @@ details#add-account-details summary {
   gap: 0.25rem;
   font-size: 13px;
 }
-.ev-recur-unit { font-size: 13px; color: #555; }
+.ev-recur-unit { font-size: 13px; color: var(--text-muted); }
 .ev-recur-summary {
   font-size: 13px;
-  color: #555;
+  color: var(--text-muted);
   font-style: italic;
   margin-bottom: 0.25rem;
 }
 .ev-recur-preview {
   font-size: 13px;
-  color: #2563eb;
+  color: var(--primary);
   min-height: 1.2em;
 }
 
@@ -892,13 +1094,13 @@ details#add-account-details summary {
 
 .ev-reminder {
   font-size: 13px;
-  color: #333;
+  color: var(--text-body);
   padding: 0.3rem 0.5rem;
-  background: #f5f5f5;
+  background: var(--bg-subtle);
   border-radius: 4px;
 }
 .ev-reminder.empty-note { background: none; padding: 0; }
-.ev-reminder-locked { color: #999; }
+.ev-reminder-locked { color: var(--text-disabled); }
 
 .ev-reminder-row {
   display: flex;
@@ -908,19 +1110,19 @@ details#add-account-details summary {
 .ev-reminder-row .ev-reminder { flex: 1; }
 .ev-reminder-row .ev-reminder-word {
   font-size: 13px;
-  color: #333;
+  color: var(--text-body);
 }
 .ev-reminder-value {
   width: 4.5rem;
   padding: 0.3rem 0.4rem;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--border-input);
   border-radius: 4px;
   font: inherit;
   font-size: 13px;
 }
 .ev-reminder-unit {
   padding: 0.3rem 0.4rem;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--border-input);
   border-radius: 4px;
   font: inherit;
   font-size: 13px;
@@ -928,7 +1130,7 @@ details#add-account-details summary {
 .ev-reminder-row .ev-hh,
 .ev-reminder-row .ev-mm {
   width: 2.6em;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--border-input);
   border-radius: 4px;
   font: inherit;
   font-size: 13px;
@@ -944,12 +1146,12 @@ details#add-account-details summary {
 
 .event-modal-body select {
   padding: 0.4rem 0.5rem;
-  border: 1px solid #d0d0d0;
+  border: 1px solid var(--border-input);
   border-radius: 4px;
   font: inherit;
   font-size: 13px;
-  background: #fafafa;
-  color: #222;
+  background: var(--bg-control);
+  color: var(--text-strong);
 }
 
 /* Footer Delete sits on the left; Cancel/Save stay right. */
@@ -957,14 +1159,14 @@ details#add-account-details summary {
 
 .btn-danger {
   padding: 0.3rem 0.9rem;
-  border: 1px solid #dc2626;
+  border: 1px solid var(--danger-border);
   border-radius: 4px;
-  background: #fff;
-  color: #b91c1c;
+  background: var(--bg-surface);
+  color: var(--error-text);
   font-size: 13px;
   cursor: pointer;
 }
-.btn-danger:hover { background: #fee2e2; }
+.btn-danger:hover { background: var(--error-bg); }
 .btn-danger:disabled { opacity: .6; cursor: default; }
 
 /* Right-click context menu on events. */
@@ -972,10 +1174,10 @@ details#add-account-details summary {
   position: fixed;
   z-index: 250;
   min-width: 120px;
-  background: #fff;
-  border: 1px solid #d0d0d0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-input);
   border-radius: 4px;
-  box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  box-shadow: 0 4px 16px var(--shadow);
   padding: 0.25rem;
   display: flex;
   flex-direction: column;
@@ -987,13 +1189,13 @@ details#add-account-details summary {
   background: none;
   font: inherit;
   font-size: 13px;
-  color: #222;
+  color: var(--text-strong);
   border-radius: 3px;
   cursor: pointer;
 }
-.ev-context-menu button:hover { background: #f0f0f0; }
-.ev-context-menu #ctx-delete { color: #b91c1c; }
-.ev-context-menu #ctx-delete:hover { background: #fee2e2; }
+.ev-context-menu button:hover { background: var(--bg-menu-hover); }
+.ev-context-menu #ctx-delete { color: var(--error-text); }
+.ev-context-menu #ctx-delete:hover { background: var(--error-bg); }
 
 /* Confirm (yes/no) dialog — above the event modal. */
 #confirm-overlay { z-index: 300; }
@@ -1004,17 +1206,17 @@ details#add-account-details summary {
   transform: translate(-50%, -50%);
   width: 320px;
   max-width: 90vw;
-  background: #fff;
-  border: 1px solid #e0e0e0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-panel);
   border-radius: 6px;
-  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  box-shadow: 0 8px 32px var(--shadow);
   z-index: 301;
   padding: 1.25rem;
 }
 .confirm-modal p {
   margin: 0 0 1rem;
   font-size: 14px;
-  color: #222;
+  color: var(--text-strong);
 }
 .confirm-footer {
   display: flex;
@@ -1096,5 +1298,5 @@ details#add-account-details summary {
 .ev-task-hint {
   margin: 0.4rem 0 0;
   font-size: 12px;
-  color: #888;
+  color: var(--text-faint);
 }

@@ -18,6 +18,7 @@ DEFAULT_VIEW = "dayGridMonth"
 
 VALID_COMPLETED_TASK = {"hidden", "grayed"}
 VALID_UNDATED_TASK = {"agenda", "today"}
+VALID_THEME = {"system", "light", "dark"}
 
 
 class SettingsOut(BaseModel):
@@ -31,6 +32,7 @@ class SettingsOut(BaseModel):
     notifications_enabled: bool
     completed_task_display: str
     undated_task_display: str
+    theme: str
 
 
 class SettingsIn(BaseModel):
@@ -44,6 +46,7 @@ class SettingsIn(BaseModel):
     notifications_enabled: bool | None = None
     completed_task_display: str | None = None
     undated_task_display: str | None = None
+    theme: str | None = None
 
 
 def _to_out(s: UserSettings) -> SettingsOut:
@@ -58,6 +61,7 @@ def _to_out(s: UserSettings) -> SettingsOut:
         notifications_enabled=s.notifications_enabled,
         completed_task_display=s.completed_task_display,
         undated_task_display=s.undated_task_display,
+        theme=s.theme,
     )
 
 
@@ -82,6 +86,7 @@ async def get_settings(
             notifications_enabled=False,
             completed_task_display="hidden",
             undated_task_display="agenda",
+            theme="system",
         )
     return _to_out(s)
 
@@ -127,6 +132,12 @@ async def put_settings(
             detail=f"undated_task_display must be one of {sorted(VALID_UNDATED_TASK)}",
         )
 
+    if body.theme is not None and body.theme not in VALID_THEME:
+        raise HTTPException(
+            status_code=422,
+            detail=f"theme must be one of {sorted(VALID_THEME)}",
+        )
+
     result = await db.execute(
         select(UserSettings).where(UserSettings.user_id == entry.user_id)
     )
@@ -161,6 +172,8 @@ async def put_settings(
         s.completed_task_display = body.completed_task_display
     if body.undated_task_display is not None:
         s.undated_task_display = body.undated_task_display
+    if body.theme is not None:
+        s.theme = body.theme
 
     # Notifications only fire while a tab stays logged in, so the two are
     # mutually exclusive: enabling notifications forces auto-logout off.

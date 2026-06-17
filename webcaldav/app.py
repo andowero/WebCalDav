@@ -122,6 +122,7 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_notifications_enabled = False
     user_settings_completed_task_display = "hidden"
     user_settings_undated_task_display = "agenda"
+    user_settings_theme = "system"
 
     if session_id:
         try:
@@ -151,6 +152,7 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_notifications_enabled = s.notifications_enabled
                         user_settings_completed_task_display = s.completed_task_display
                         user_settings_undated_task_display = s.undated_task_display
+                        user_settings_theme = s.theme
         except Exception:
             logger.warning("root_session_lookup_failed", exc_info=True)
 
@@ -170,6 +172,7 @@ async def root(request: Request) -> HTMLResponse:
             "notifications_enabled": user_settings_notifications_enabled,
             "completed_task_display": user_settings_completed_task_display,
             "undated_task_display": user_settings_undated_task_display,
+            "theme": user_settings_theme,
             "notification_horizon_days": settings.notification_horizon_days,
             "notification_lookback_days": settings.notification_lookback_days,
             "static_v": STATIC_VERSION,

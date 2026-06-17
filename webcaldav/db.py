@@ -48,6 +48,7 @@ _USER_SETTINGS_MIGRATION = {
     # TEXT columns: the legacy default is interpolated raw, so quote it.
     "completed_task_display": ("TEXT", "'hidden'"),
     "undated_task_display": ("TEXT", "'agenda'"),
+    "theme": ("TEXT", "'system'"),
 }
 
 

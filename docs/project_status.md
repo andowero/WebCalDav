@@ -9,6 +9,7 @@
 | v2        | Editing of calendar events -> repetition                  | Complete |
 | v3        | Reminders and browser notifications                       | Complete |
 | v4        | Tasks (VTODO): view, edit, complete, recurrence           | Complete |
+| v5        | Dark mode (system/light/dark theme)                       | Complete |
 
 ## Known issues
 
@@ -308,7 +309,25 @@ CalDAV task support, mirroring the event stack.
   RFC-advance and undated, plus tasks-API validation and settings round-trip).
   FullCalendar rendering, the square, and notifications remain manually verified.
 
+### Dark mode (2026-06-17) — v5
+
+User-selectable UI theme.
+
+- New `theme` user setting: `system` (default), `light`, `dark`. Added to the
+  `UserSettings` model, the `/settings` API (validated like other enum settings),
+  and the Settings → Preferences form, with the usual SQLite `ALTER TABLE`
+  migration.
+- `app.css` was refactored from hardcoded hex to CSS custom properties on
+  `:root`; a dark palette overrides them under `:root[data-theme="dark"]` and,
+  for `system`, under a `prefers-color-scheme: dark` media query. FullCalendar is
+  themed via its own `--fc-*` variables; per-calendar event colours are untouched.
+- The server renders `data-theme` on `<html>` so the right theme paints on first
+  load with no flash; live changes set `document.documentElement.dataset.theme`.
+  `system` tracks the OS automatically (no JS).
+- 141 tests pass (3 new: theme default, round-trip, invalid-value rejection).
+  Visual theming is verified manually across the supported browsers.
+
 ## What is next
 
-- v5 scoping: TBD. Possible: task reminders in browser notifications (currently
+- v6 scoping: TBD. Possible: task reminders in browser notifications (currently
   events only); sub-tasks / RELATED-TO; task sort/filter in agenda.

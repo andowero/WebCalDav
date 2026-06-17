@@ -307,6 +307,7 @@
       document.getElementById('pref-default-view').value = s.default_view || 'dayGridMonth';
       document.getElementById('pref-completed-task').value = s.completed_task_display || 'hidden';
       document.getElementById('pref-undated-task').value = s.undated_task_display || 'agenda';
+      document.getElementById('pref-theme').value = s.theme || 'system';
       const enabled = s.auto_logout_enabled ?? true;
       const mins = Math.max(1, Math.round((s.auto_logout_timeout_seconds ?? 3600) / 60));
       const enEl = document.getElementById('pref-auto-logout-enabled');
@@ -432,6 +433,7 @@
         const defaultView = document.getElementById('pref-default-view').value;
         const completedTask = document.getElementById('pref-completed-task').value;
         const undatedTask = document.getElementById('pref-undated-task').value;
+        const theme = document.getElementById('pref-theme').value;
         const notifEnabled = document.getElementById('pref-notifications-enabled').checked;
         // Notifications force auto-logout off (server enforces the same).
         const autoEnabled = notifEnabled ? false : document.getElementById('pref-auto-logout-enabled').checked;
@@ -451,6 +453,7 @@
           notifications_enabled: notifEnabled,
           completed_task_display: completedTask,
           undated_task_display: undatedTask,
+          theme: theme,
         });
         window.__SETTINGS__ = window.__SETTINGS__ || {};
         window.__SETTINGS__.timezone = tz;
@@ -463,6 +466,9 @@
         window.__SETTINGS__.notifications_enabled = notifEnabled;
         window.__SETTINGS__.completed_task_display = completedTask;
         window.__SETTINGS__.undated_task_display = undatedTask;
+        window.__SETTINGS__.theme = theme;
+        // Apply theme live; "system" tracked by CSS media query (no JS needed).
+        document.documentElement.dataset.theme = theme;
         if (notifEnabled) startNotifications(); else stopNotifications();
         applyCalendarPrefs(tz, fdow, timefmt, datefmt);
         // Live session timeout changed server-side; resync the countdown.

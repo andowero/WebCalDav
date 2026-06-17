@@ -2,6 +2,17 @@
 
 ## Unreleased — MVP
 
+### Added — dark mode (2026-06-17)
+- User-selectable UI **theme**: `system` (follow OS `prefers-color-scheme`,
+  default), `light`, or `dark`. New `theme` field on `UserSettings` (with the
+  usual SQLite `ALTER TABLE` migration) and on `/settings`.
+- The whole UI is themed via CSS custom properties on `:root`; the server
+  renders `data-theme` on `<html>` so the correct theme paints on first load
+  (no flash). `system` tracks the OS live through a `prefers-color-scheme`
+  media query; explicit changes apply instantly via `document.documentElement`.
+  FullCalendar is themed through its own `--fc-*` variables. A **Theme** picker
+  was added to the Settings → Preferences form.
+
 ### Added — tasks (VTODO) (2026-06-16)
 - Full CalDAV **task** support alongside events. Tasks are read from and written
   to the same calendars as VTODO components and shown in every view (month,

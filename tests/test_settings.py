@@ -78,3 +78,29 @@ async def test_enabling_notifications_forces_auto_logout_off(client: AsyncClient
     body = r.json()
     assert body["notifications_enabled"] is True
     assert body["auto_logout_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_theme_defaults_to_system(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "th1@example.com")
+    r = await client.get("/settings")
+    assert r.status_code == 200
+    assert r.json()["theme"] == "system"
+
+
+@pytest.mark.asyncio
+async def test_theme_roundtrip(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "th2@example.com")
+    r = await client.put("/settings", json={"theme": "dark"})
+    assert r.status_code == 200
+    assert r.json()["theme"] == "dark"
+    # Persisted across a fresh read.
+    r = await client.get("/settings")
+    assert r.json()["theme"] == "dark"
+
+
+@pytest.mark.asyncio
+async def test_theme_rejects_invalid(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "th3@example.com")
+    r = await client.put("/settings", json={"theme": "neon"})
+    assert r.status_code == 422
