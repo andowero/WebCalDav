@@ -79,5 +79,10 @@ class UserSettings(Base):
     # Browser reminder notifications. Off by default; enabling forces
     # auto_logout off (the tab must stay logged in to keep resyncing events).
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # How completed VTODO tasks are shown: "hidden" (default) or "grayed".
+    completed_task_display: Mapped[str] = mapped_column(String, default="hidden", nullable=False)
+    # Where tasks with no DTSTART/DUE appear: "agenda" (agenda list only, default)
+    # or "today" (pinned to the current day in grid views as well as the agenda).
+    undated_task_display: Mapped[str] = mapped_column(String, default="agenda", nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="settings")

@@ -16,6 +16,9 @@ MIN_AUTO_LOGOUT_SECONDS = 60
 VALID_DEFAULT_VIEWS = {"dayGridMonth", "timeGridWeek", "timeGridDay", "agenda"}
 DEFAULT_VIEW = "dayGridMonth"
 
+VALID_COMPLETED_TASK = {"hidden", "grayed"}
+VALID_UNDATED_TASK = {"agenda", "today"}
+
 
 class SettingsOut(BaseModel):
     timezone: str
@@ -26,6 +29,8 @@ class SettingsOut(BaseModel):
     auto_logout_enabled: bool
     auto_logout_timeout_seconds: int
     notifications_enabled: bool
+    completed_task_display: str
+    undated_task_display: str
 
 
 class SettingsIn(BaseModel):
@@ -37,6 +42,8 @@ class SettingsIn(BaseModel):
     auto_logout_enabled: bool | None = None
     auto_logout_timeout_seconds: int | None = None
     notifications_enabled: bool | None = None
+    completed_task_display: str | None = None
+    undated_task_display: str | None = None
 
 
 def _to_out(s: UserSettings) -> SettingsOut:
@@ -49,6 +56,8 @@ def _to_out(s: UserSettings) -> SettingsOut:
         auto_logout_enabled=s.auto_logout_enabled,
         auto_logout_timeout_seconds=s.auto_logout_timeout_seconds,
         notifications_enabled=s.notifications_enabled,
+        completed_task_display=s.completed_task_display,
+        undated_task_display=s.undated_task_display,
     )
 
 
@@ -71,6 +80,8 @@ async def get_settings(
             auto_logout_enabled=True,
             auto_logout_timeout_seconds=3600,
             notifications_enabled=False,
+            completed_task_display="hidden",
+            undated_task_display="agenda",
         )
     return _to_out(s)
 
@@ -96,6 +107,24 @@ async def put_settings(
         raise HTTPException(
             status_code=422,
             detail=f"default_view must be one of {sorted(VALID_DEFAULT_VIEWS)}",
+        )
+
+    if (
+        body.completed_task_display is not None
+        and body.completed_task_display not in VALID_COMPLETED_TASK
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"completed_task_display must be one of {sorted(VALID_COMPLETED_TASK)}",
+        )
+
+    if (
+        body.undated_task_display is not None
+        and body.undated_task_display not in VALID_UNDATED_TASK
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=f"undated_task_display must be one of {sorted(VALID_UNDATED_TASK)}",
         )
 
     result = await db.execute(
@@ -128,6 +157,10 @@ async def put_settings(
         s.auto_logout_timeout_seconds = body.auto_logout_timeout_seconds
     if body.notifications_enabled is not None:
         s.notifications_enabled = body.notifications_enabled
+    if body.completed_task_display is not None:
+        s.completed_task_display = body.completed_task_display
+    if body.undated_task_display is not None:
+        s.undated_task_display = body.undated_task_display
 
     # Notifications only fire while a tab stays logged in, so the two are
     # mutually exclusive: enabling notifications forces auto-logout off.

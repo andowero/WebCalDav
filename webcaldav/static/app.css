@@ -334,7 +334,24 @@ body {
   z-index: 101;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+/* The sections scroll between the fixed header and the pinned Save footer. */
+.settings-scroll {
+  flex: 1 1 auto;
   overflow-y: auto;
+}
+
+.settings-footer {
+  flex: 0 0 auto;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid #e0e0e0;
+  background: #fff;
+}
+
+.settings-footer button {
+  width: 100%;
 }
 
 .settings-header {
@@ -345,8 +362,7 @@ body {
   border-bottom: 1px solid #e0e0e0;
   font-weight: 600;
   font-size: 15px;
-  position: sticky;
-  top: 0;
+  flex: 0 0 auto;
   background: #fff;
 }
 
@@ -1014,4 +1030,71 @@ details#add-account-details summary {
 .scope-options button {
   text-align: left;
   width: 100%;
+}
+
+/* ── Tasks (VTODO) ─────────────────────────────────────────────────────────── */
+
+/* A task's checkbox square replaces FullCalendar's round event dot. It takes
+   the event (per-calendar) colour as its border; a completed task fills the box
+   and shows a tick. */
+.fc-task-box {
+  box-sizing: border-box;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 0.8em;
+  height: 0.8em;
+  margin: 0 0.35em 0 0.1em;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  vertical-align: -0.05em;
+  cursor: pointer;
+  position: relative;
+}
+.fc-task-box.done::after {
+  content: "✓";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  font-size: 0.7em;
+  line-height: 1;
+}
+/* In dayGrid the event text colour is the calendar colour, so currentColor on
+   the box already matches. In timeGrid/list the box sits on a coloured chip;
+   keep it readable with the chip's own contrast. */
+.fc-event .fc-task-box { color: inherit; }
+
+/* Grayed-out completed tasks (the alternative to hiding them). */
+.fc-task-grayed { opacity: 0.55; }
+.fc-task-grayed .fc-event-title,
+.fc-task-grayed .fc-list-event-title { text-decoration: line-through; }
+
+/* Agenda square mirrors the grid one, coloured per calendar inline. */
+.agenda-box {
+  box-sizing: border-box;
+  flex: 0 0 0.7rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  align-self: center;
+  cursor: pointer;
+  position: relative;
+}
+.agenda-box.done::after {
+  content: "✓";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -55%);
+  font-size: 0.6rem;
+  line-height: 1;
+}
+.agenda-row.is-task-done { opacity: 0.55; }
+.agenda-row.is-task-done .agenda-title { text-decoration: line-through; }
+
+.ev-task-hint {
+  margin: 0.4rem 0 0;
+  font-size: 12px;
+  color: #888;
 }

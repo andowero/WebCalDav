@@ -14,6 +14,7 @@ from dateutil.rrule import rrulestr
 from icalendar import Alarm as IAlarm
 from icalendar import Calendar as ICalendar
 from icalendar import Event as IEvent
+from icalendar import Todo as ITodo
 from icalendar.prop import vRecur
 
 from .metrics import caldav_request_duration_seconds, caldav_request_errors_total
@@ -372,7 +373,7 @@ def _extract_reminders(vevent: Any) -> list[dict[str, Any]]:
 
 
 def _apply_alarms(
-    vevent: Any, triggers: list[tuple[timedelta, str]] | None
+    vevent: Any, triggers: list[tuple[timedelta, str]] | None, end_key: str = "dtend"
 ) -> None:
     """Replace the VEVENT's editable VALARMs with one DISPLAY alarm per trigger.
 
@@ -389,7 +390,7 @@ def _apply_alarms(
     except Exception:
         dtstart = None
     all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
-    has_end = "dtend" in vevent or "duration" in vevent
+    has_end = end_key in vevent or "duration" in vevent
     for comp in list(vevent.subcomponents):
         if comp.name == "VALARM" and _classify_alarm(comp, all_day) is not None:
             vevent.subcomponents.remove(comp)
@@ -426,8 +427,24 @@ def _extract_props(vevent: Any) -> dict[str, Any]:
     return out
 
 
+class _Kind(NamedTuple):
+    """A VCALENDAR component flavour. VEVENT and VTODO share almost all of the
+    recurrence/override/reminder machinery; the few divergences (component name,
+    the "end" property, the icalendar class, and the caldav search flag) are
+    captured here so the shared helpers can serve both."""
+
+    name: str  # "VEVENT" / "VTODO"
+    end_key: str  # "dtend" / "due"
+    make: Callable[[], Any]  # IEvent / ITodo
+    search_kw: str  # "event" / "todo"
+
+
+_EVENT = _Kind("VEVENT", "dtend", IEvent, "event")
+_TODO = _Kind("VTODO", "due", ITodo, "todo")
+
+
 def _master_meta(
-    cal: Any, from_dt: datetime, to_dt: datetime
+    cal: Any, from_dt: datetime, to_dt: datetime, kind: _Kind = _EVENT
 ) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], list[Any]]]:
     """(UID -> master props, (UID, recurrence id) -> override reminders).
 
@@ -439,13 +456,13 @@ def _master_meta(
     meta: dict[str, dict[str, Any]] = {}
     override_reminders: dict[tuple[str, str], list[Any]] = {}
     try:
-        masters = cal.search(start=from_dt, end=to_dt, event=True, expand=False)
+        masters = cal.search(start=from_dt, end=to_dt, expand=False, **{kind.search_kw: True})
     except Exception as e:
         logger.warning("master search failed url=%s: %s", cal.url, e)
         return meta, override_reminders
     for event in masters:
         try:
-            for vevent in event.icalendar_instance.walk("VEVENT"):
+            for vevent in event.icalendar_instance.walk(kind.name):
                 uid = str(vevent.get("uid")) if vevent.get("uid") else None
                 if not uid:
                     continue
@@ -475,13 +492,13 @@ class EventNotFoundError(Exception):
 # the master's RRULE/DTSTART in place for truncate/shift operations.
 
 
-def _master_vevent(ical: Any) -> Any:
-    """The series master VEVENT (the one without a RECURRENCE-ID)."""
-    vevents = list(ical.walk("VEVENT"))
-    for v in vevents:
+def _master_vevent(ical: Any, name: str = "VEVENT") -> Any:
+    """The series master component (the one without a RECURRENCE-ID)."""
+    comps = list(ical.walk(name))
+    for v in comps:
         if "recurrence-id" not in v:
             return v
-    return vevents[0] if vevents else None
+    return comps[0] if comps else None
 
 
 def _as_dt(d: date | datetime) -> datetime:
@@ -676,12 +693,16 @@ def _remaining_rule_parts(vevent: Any, pivot: date | datetime) -> dict[str, Any]
 def _apply_fields(
     vevent: Any,
     title: str,
-    start: date | datetime,
-    end: date | datetime,
+    start: date | datetime | None,
+    end: date | datetime | None,
     location: str | None,
     description: str | None,
+    kind: _Kind = _EVENT,
 ) -> None:
-    """Overwrite a VEVENT's editable fields + time span, bumping SEQUENCE."""
+    """Overwrite a component's editable fields + time span, bumping SEQUENCE.
+
+    ``start``/``end`` may be ``None`` for tasks (VTODO needs neither DTSTART nor
+    DUE); a ``None`` clears the property rather than re-adding it."""
     def _replace(key: str, value: Any) -> None:
         vevent.pop(key, None)
         if value is not None and value != "":
@@ -691,10 +712,12 @@ def _apply_fields(
     _replace("location", location)
     _replace("description", description)
     vevent.pop("dtstart", None)
-    vevent.pop("dtend", None)
+    vevent.pop(kind.end_key, None)
     vevent.pop("duration", None)
-    vevent.add("dtstart", start)
-    vevent.add("dtend", end)
+    if start is not None:
+        vevent.add("dtstart", start)
+    if end is not None:
+        vevent.add(kind.end_key, end)
     try:
         seq = int(vevent.get("sequence", 0)) + 1
     except (TypeError, ValueError):
@@ -709,45 +732,57 @@ def _upsert_override(
     master: Any,
     pivot: date | datetime,
     title: str,
-    start: date | datetime,
-    end: date | datetime,
+    start: date | datetime | None,
+    end: date | datetime | None,
     location: str | None,
     description: str | None,
     reminders: list[tuple[timedelta, str]] | None = None,
+    kind: _Kind = _EVENT,
+    status: str | None = None,
+    completed: datetime | None = None,
 ) -> None:
     """Add/replace a detached single-occurrence override (RECURRENCE-ID = pivot)."""
     for comp in list(ical.subcomponents):
-        if comp.name == "VEVENT" and "recurrence-id" in comp:
+        if comp.name == kind.name and "recurrence-id" in comp:
             try:
                 if comp.decoded("recurrence-id") == pivot:
                     ical.subcomponents.remove(comp)
             except Exception:
                 pass
-    ov = IEvent()
+    ov = kind.make()
     ov.add("uid", str(master.get("uid")))
     ov.add("recurrence-id", pivot)
     ov.add("dtstamp", datetime.now(timezone.utc))
     if title:
         ov.add("summary", title)
-    ov.add("dtstart", start)
-    ov.add("dtend", end)
+    if start is not None:
+        ov.add("dtstart", start)
+    if end is not None:
+        ov.add(kind.end_key, end)
     if location:
         ov.add("location", location)
     if description:
         ov.add("description", description)
-    _apply_alarms(ov, reminders)
+    if status:
+        ov.add("status", status)
+    if completed is not None:
+        ov.add("completed", completed)
+        ov.add("percent-complete", 100)
+    _apply_alarms(ov, reminders, kind.end_key)
     ical.add_component(ov)
 
 
-def _overrides(ical: Any) -> list[Any]:
-    """Detached single-occurrence override VEVENTs (those with a RECURRENCE-ID)."""
+def _overrides(ical: Any, name: str = "VEVENT") -> list[Any]:
+    """Detached single-occurrence overrides (those with a RECURRENCE-ID)."""
     return [
         c for c in ical.subcomponents
-        if c.name == "VEVENT" and "recurrence-id" in c
+        if c.name == name and "recurrence-id" in c
     ]
 
 
-def _shift_override(ve: Any, delta: timedelta, new_uid: str | None = None) -> None:
+def _shift_override(
+    ve: Any, delta: timedelta, new_uid: str | None = None, kind: _Kind = _EVENT
+) -> None:
     """Relocate a detached override by ``delta`` (and optionally re-key its UID).
 
     Only the recurrence id and time span move; the override's own customized
@@ -759,21 +794,23 @@ def _shift_override(ve: Any, delta: timedelta, new_uid: str | None = None) -> No
         ve.add("uid", new_uid)
     if not delta:
         return
-    for key in ("recurrence-id", "dtstart", "dtend"):
+    for key in ("recurrence-id", "dtstart", kind.end_key):
         if key in ve:
             val = ve.decoded(key)
             ve.pop(key, None)
             ve.add(key, val + delta)
 
 
-def _pop_overrides(ical: Any, keep: Callable[[Any], bool]) -> list[Any]:
+def _pop_overrides(
+    ical: Any, keep: Callable[[Any], bool], name: str = "VEVENT"
+) -> list[Any]:
     """Remove overrides whose recurrence id fails ``keep(rid)``; return the removed.
 
     ``keep`` receives the decoded RECURRENCE-ID; overrides it rejects are
     detached from ``ical`` (to migrate elsewhere) and returned in document order.
     """
     removed = []
-    for comp in _overrides(ical):
+    for comp in _overrides(ical, name):
         try:
             rid = comp.decoded("recurrence-id")
         except Exception:
@@ -787,8 +824,8 @@ def _pop_overrides(ical: Any, keep: Callable[[Any], bool]) -> list[Any]:
 def _series_ical(
     uid: str,
     title: str,
-    start: date | datetime,
-    end: date | datetime,
+    start: date | datetime | None,
+    end: date | datetime | None,
     location: str | None,
     description: str | None,
     rule_parts: dict[str, Any] | None,
@@ -796,28 +833,37 @@ def _series_ical(
     exdates: list[Any] | None = None,
     reminders: list[tuple[timedelta, str]] | None = None,
     alarms: list[Any] | None = None,
+    kind: _Kind = _EVENT,
+    status: str | None = None,
+    priority: int | None = None,
 ) -> str:
     ical = ICalendar()
     ical.add("prodid", "-//WebCalDav//EN")
     ical.add("version", "2.0")
-    ve = IEvent()
+    ve = kind.make()
     ve.add("uid", uid)
     ve.add("dtstamp", datetime.now(timezone.utc))
     if title:
         ve.add("summary", title)
-    ve.add("dtstart", start)
-    ve.add("dtend", end)
+    if start is not None:
+        ve.add("dtstart", start)
+    if end is not None:
+        ve.add(kind.end_key, end)
     if location:
         ve.add("location", location)
     if description:
         ve.add("description", description)
+    if status:
+        ve.add("status", status)
+    if priority is not None:
+        ve.add("priority", priority)
     if rule_parts:
         ve.add("rrule", rule_parts)
     for d in exdates or []:
         ve.add("exdate", d)
     for a in alarms or []:
         ve.add_component(a)
-    _apply_alarms(ve, reminders)
+    _apply_alarms(ve, reminders, kind.end_key)
     ical.add_component(ve)
     for ov in overrides or []:
         ical.add_component(ov)
@@ -1283,4 +1329,552 @@ async def delete_event(
             raise
         except Exception:
             caldav_request_errors_total.labels(operation="delete_event").inc()
+            raise
+
+
+# ── Tasks (VTODO) ─────────────────────────────────────────────────────────────
+#
+# Tasks reuse the whole recurrence/override/reminder toolkit above via the _TODO
+# kind. The orchestration below mirrors the event functions but talks to the
+# caldav lib's todo_by_uid/save_todo/get_todos, anchors on DUE (falling back to
+# DTSTART), tolerates undated tasks, and carries the VTODO-only STATUS / COMPLETED
+# / PERCENT-COMPLETE / PRIORITY properties.
+
+
+def _task_completed(vtodo: Any) -> bool:
+    if str(vtodo.get("status") or "").upper() == "COMPLETED":
+        return True
+    if "completed" in vtodo:
+        return True
+    try:
+        return int(vtodo.get("percent-complete") or 0) >= 100
+    except (TypeError, ValueError):
+        return False
+
+
+def _extract_task_props(vtodo: Any) -> dict[str, Any]:
+    """description/location/recurrence/reminders (shared) + VTODO-only props."""
+    out = _extract_props(vtodo)
+    prio = vtodo.get("priority")
+    if prio is not None:
+        try:
+            out["priority"] = int(prio)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def _set_status(comp: Any, completed: bool) -> None:
+    """Mark a VTODO component done/undone in place."""
+    comp.pop("status", None)
+    comp.pop("completed", None)
+    comp.pop("percent-complete", None)
+    if completed:
+        comp.add("status", "COMPLETED")
+        comp.add("percent-complete", 100)
+        comp.add("completed", datetime.now(timezone.utc))
+    else:
+        comp.add("status", "NEEDS-ACTION")
+        comp.add("percent-complete", 0)
+    comp.pop("last-modified", None)
+    comp.add("last-modified", datetime.now(timezone.utc))
+
+
+def _occurrence_span(
+    master: Any, pivot: date | datetime
+) -> tuple[date | datetime | None, date | datetime | None]:
+    """(dtstart, due) of the occurrence at ``pivot`` on a recurring VTODO."""
+    anchor_key = "dtstart" if "dtstart" in master else "due"
+    base = master.decoded(anchor_key)
+    delta = _as_dt(pivot) - _as_dt(base)
+    start = master.decoded("dtstart") + delta if "dtstart" in master else None
+    due = master.decoded("due") + delta if "due" in master else None
+    return start, due
+
+
+def _build_task_event(
+    vtodo: Any,
+    color: str,
+    calendar_id: int,
+    meta: dict[str, dict[str, Any]],
+    override_reminders: dict[tuple[str, str], list[Any]],
+    fallback_uid: str,
+    undated: bool = False,
+) -> dict[str, Any] | None:
+    uid = str(vtodo.get("uid")) if vtodo.get("uid") else fallback_uid
+    summary = vtodo.get("summary")
+    title = str(summary) if summary else "(No title)"
+
+    dtstart = vtodo.decoded("dtstart") if "dtstart" in vtodo else None
+    due = vtodo.decoded("due") if "due" in vtodo else None
+    # The grid anchor is DUE if present, else DTSTART. A task with both renders
+    # as a span (start -> due); start/due are also exposed individually so the
+    # modal can populate its Start and Due fields.
+    anchor = due if due is not None else dtstart
+    all_day = _is_all_day(anchor) if anchor is not None else False
+
+    ev: dict[str, Any] = {"id": uid, "title": title, "color": color, "allDay": all_day}
+    if anchor is not None:
+        ev["start"] = _dt_to_iso(anchor)
+    if dtstart is not None and due is not None:
+        ev["start"] = _dt_to_iso(dtstart)
+        ev["end"] = _dt_to_iso(due)
+
+    completed = _task_completed(vtodo)
+    extended: dict[str, Any] = {
+        "isTask": True,
+        "calendarId": calendar_id,
+        "completed": completed,
+        "undated": undated,
+        "status": str(vtodo.get("status") or ("COMPLETED" if completed else "NEEDS-ACTION")).upper(),
+    }
+    if dtstart is not None:
+        extended["rawStart"] = _dt_to_iso(dtstart)
+    if due is not None:
+        extended["rawDue"] = _dt_to_iso(due)
+    pct = vtodo.get("percent-complete")
+    if pct is not None:
+        try:
+            extended["percentComplete"] = int(pct)
+        except (TypeError, ValueError):
+            pass
+
+    inst = _extract_task_props(vtodo)
+    master_props = meta.get(uid, {})
+    if "recurrence-id" in vtodo:
+        rid = _dt_to_iso(vtodo.decoded("recurrence-id"))
+        extended["recurrenceId"] = rid
+        if "reminders" not in inst and (uid, rid) in override_reminders:
+            inst["reminders"] = override_reminders[(uid, rid)]
+    for key in ("description", "location", "recurrence", "recurrenceRule", "reminders", "priority"):
+        val = inst.get(key, master_props.get(key))
+        if val:
+            extended[key] = val
+    ev["extendedProps"] = extended
+    return ev
+
+
+def _sync_fetch_tasks(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    from_dt: datetime,
+    to_dt: datetime,
+    color: str,
+    calendar_id: int,
+) -> list[dict[str, Any]]:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        todos = cal.search(start=from_dt, end=to_dt, todo=True, expand=True, include_completed=True)
+        logger.info(
+            "caldav_search_todos done url=%s from=%s to=%s raw_count=%d",
+            calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(todos),
+        )
+        meta, override_reminders = _master_meta(cal, from_dt, to_dt, _TODO)
+
+        overridden: set[tuple[str, str]] = set()
+        for todo in todos:
+            try:
+                for vtodo in todo.icalendar_instance.walk("VTODO"):
+                    if "recurrence-id" not in vtodo:
+                        continue
+                    uid = str(vtodo.get("uid")) if vtodo.get("uid") else str(todo.url)
+                    overridden.add((uid, _dt_to_iso(vtodo.decoded("recurrence-id"))))
+            except Exception as e:
+                logger.warning("Failed to scan todo for overrides: %s", e)
+
+        result: list[dict[str, Any]] = []
+        for todo in todos:
+            try:
+                for vtodo in todo.icalendar_instance.walk("VTODO"):
+                    if "dtstart" not in vtodo and "due" not in vtodo:
+                        continue
+                    uid = str(vtodo.get("uid")) if vtodo.get("uid") else str(todo.url)
+                    anchor_key = "due" if "due" in vtodo else "dtstart"
+                    if "recurrence-id" not in vtodo and (uid, _dt_to_iso(vtodo.decoded(anchor_key))) in overridden:
+                        continue
+                    ev = _build_task_event(
+                        vtodo, color, calendar_id, meta, override_reminders, str(todo.url)
+                    )
+                    if ev is not None:
+                        result.append(ev)
+            except Exception as e:
+                logger.warning("Failed to parse todo: %s", e)
+
+        # Undated tasks carry no date, so they never surface in the date-bounded
+        # expand search above; fetch them separately and tag them undated.
+        try:
+            for todo in cal.todos(include_completed=True):
+                for vtodo in todo.icalendar_instance.walk("VTODO"):
+                    if "recurrence-id" in vtodo:
+                        continue
+                    if "dtstart" in vtodo or "due" in vtodo:
+                        continue
+                    ev = _build_task_event(
+                        vtodo, color, calendar_id, {}, {}, str(todo.url), undated=True
+                    )
+                    if ev is not None:
+                        result.append(ev)
+        except Exception as e:
+            logger.warning("Failed to fetch undated todos url=%s: %s", calendar_url, e)
+        return result
+
+
+async def fetch_tasks(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    from_dt: datetime,
+    to_dt: datetime,
+    color: str,
+    calendar_id: int,
+) -> list[dict[str, Any]]:
+    with caldav_request_duration_seconds.labels(operation="fetch_tasks").time():
+        try:
+            return await asyncio.to_thread(
+                _sync_fetch_tasks, account_url, username, password, calendar_url,
+                from_dt, to_dt, color, calendar_id,
+            )
+        except Exception:
+            caldav_request_errors_total.labels(operation="fetch_tasks").inc()
+            raise
+
+
+def _sync_create_task(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    start: date | datetime | None,
+    due: date | datetime | None,
+    location: str | None,
+    description: str | None,
+    rrule: dict[str, Any] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
+    priority: int | None = None,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        anchor = start or due
+        rule_parts = _build_rrule(rrule, anchor) if rrule and anchor is not None else None
+        cal.save_todo(_series_ical(
+            uid, title, start, due, location, description, rule_parts,
+            reminders=reminders, kind=_TODO, status="NEEDS-ACTION", priority=priority,
+        ))
+
+
+async def create_task(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    start: date | datetime | None,
+    due: date | datetime | None,
+    location: str | None,
+    description: str | None,
+    rrule: dict[str, Any] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
+    priority: int | None = None,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="create_task").time():
+        try:
+            await asyncio.to_thread(
+                _sync_create_task, account_url, username, password, calendar_url,
+                uid, title, start, due, location, description, rrule, reminders, priority,
+            )
+        except Exception:
+            caldav_request_errors_total.labels(operation="create_task").inc()
+            raise
+
+
+def _set_priority(comp: Any, priority: int | None) -> None:
+    comp.pop("priority", None)
+    if priority is not None:
+        comp.add("priority", priority)
+
+
+def _sync_update_task(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    start: date | datetime | None,
+    due: date | datetime | None,
+    location: str | None,
+    description: str | None,
+    scope: str = "all",
+    recurrence_id: str | None = None,
+    rrule: dict[str, Any] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
+    priority: int | None = None,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        try:
+            todo = cal.todo_by_uid(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+
+        ical = todo.icalendar_instance
+        master = _master_vevent(ical, "VTODO")
+        if master is None:
+            raise EventNotFoundError(uid)
+
+        is_recurring = bool(master.get("rrule"))
+        if not is_recurring or not recurrence_id:
+            scope = "all"
+
+        if scope == "all":
+            anchor_start = start
+            anchor_end = due
+            if is_recurring and recurrence_id:
+                base_key = "dtstart" if "dtstart" in master else "due"
+                pivot = _occurrence_dt(recurrence_id, master.decoded(base_key))
+                edited_anchor = start if "dtstart" in master else due
+                delta = _as_dt(edited_anchor) - _as_dt(pivot) if edited_anchor is not None else timedelta()
+                old_start = master.decoded("dtstart") if "dtstart" in master else None
+                old_due = master.decoded("due") if "due" in master else None
+                anchor_start = old_start + delta if old_start is not None else None
+                anchor_end = old_due + delta if old_due is not None else None
+                for ov in _overrides(ical, "VTODO"):
+                    _shift_override(ov, delta, kind=_TODO)
+                _shift_exdate(master, delta)
+            _apply_fields(master, title, anchor_start, anchor_end, location, description, kind=_TODO)
+            _apply_alarms(master, reminders, _TODO.end_key)
+            _set_priority(master, priority)
+            rrule_anchor = anchor_start or anchor_end
+            if rrule is not None and rrule_anchor is not None:
+                _set_rrule(master, _build_rrule(rrule, rrule_anchor))
+            elif is_recurring and recurrence_id:
+                _shift_until(master, delta)
+            todo.data = ical.to_ical().decode("utf-8")
+            todo.save()
+            return
+
+        assert recurrence_id is not None
+        base_key = "dtstart" if "dtstart" in master else "due"
+        pivot = _occurrence_dt(recurrence_id, master.decoded(base_key))
+
+        if scope == "this":
+            _upsert_override(
+                ical, master, pivot, title, start, due, location, description,
+                reminders=reminders, kind=_TODO,
+            )
+            todo.data = ical.to_ical().decode("utf-8")
+            todo.save()
+            return
+
+        if scope == "thisfuture":
+            base = _as_dt(master.decoded(base_key))
+            edited_anchor = start if base_key == "dtstart" else due
+            anchor = edited_anchor if edited_anchor is not None else pivot
+            new_rule = _build_rrule(rrule, anchor) if rrule else _remaining_rule_parts(master, pivot)
+            if _as_dt(pivot) <= base:
+                shift = _as_dt(anchor) - base
+                for ov in _overrides(ical, "VTODO"):
+                    _shift_override(ov, shift, kind=_TODO)
+                _shift_exdate(master, shift)
+                _apply_fields(master, title, start, due, location, description, kind=_TODO)
+                _apply_alarms(master, reminders, _TODO.end_key)
+                _set_priority(master, priority)
+                _set_rrule(master, new_rule)
+                todo.data = ical.to_ical().decode("utf-8")
+                todo.save()
+                return
+            new_uid = f"{uuid.uuid4()}@webcaldav"
+            shift = _as_dt(anchor) - _as_dt(pivot)
+            migrated = _pop_overrides(ical, keep=lambda rid: _as_dt(rid) < _as_dt(pivot), name="VTODO")
+            for ov in migrated:
+                _shift_override(ov, shift, new_uid=new_uid, kind=_TODO)
+            old_ex = _exdates(master)
+            _set_exdates(master, [d for d in old_ex if _as_dt(d) < _as_dt(pivot)])
+            migrated_ex = [d + shift for d in old_ex if _as_dt(d) >= _as_dt(pivot)]
+            _truncate_until(master, pivot)
+            todo.data = ical.to_ical().decode("utf-8")
+            todo.save()
+            carried = [c for c in master.subcomponents if c.name == "VALARM"]
+            cal.save_todo(_series_ical(
+                new_uid, title, start, due, location, description, new_rule,
+                overrides=migrated, exdates=migrated_ex, reminders=reminders,
+                alarms=carried, kind=_TODO, status="NEEDS-ACTION", priority=priority,
+            ))
+            return
+
+        raise ValueError(f"unknown scope: {scope!r}")
+
+
+async def update_task(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    start: date | datetime | None,
+    due: date | datetime | None,
+    location: str | None,
+    description: str | None,
+    scope: str = "all",
+    recurrence_id: str | None = None,
+    rrule: dict[str, Any] | None = None,
+    reminders: list[tuple[timedelta, str]] | None = None,
+    priority: int | None = None,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="update_task").time():
+        try:
+            await asyncio.to_thread(
+                _sync_update_task, account_url, username, password, calendar_url,
+                uid, title, start, due, location, description, scope, recurrence_id,
+                rrule, reminders, priority,
+            )
+        except EventNotFoundError:
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="update_task").inc()
+            raise
+
+
+def _sync_delete_task(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    scope: str = "all",
+    recurrence_id: str | None = None,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        try:
+            todo = cal.todo_by_uid(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+
+        ical = todo.icalendar_instance
+        master = _master_vevent(ical, "VTODO")
+        if scope == "all" or master is None or not master.get("rrule") or not recurrence_id:
+            todo.delete()
+            return
+
+        base_key = "dtstart" if "dtstart" in master else "due"
+        pivot = _occurrence_dt(recurrence_id, master.decoded(base_key))
+        base = _as_dt(master.decoded(base_key))
+
+        if scope == "this":
+            _add_exdate(master, pivot)
+        elif scope == "thisfuture":
+            if _as_dt(pivot) <= base:
+                todo.delete()
+                return
+            _truncate_until(master, pivot)
+            _pop_overrides(ical, keep=lambda rid: _as_dt(rid) < _as_dt(pivot), name="VTODO")
+        else:
+            todo.delete()
+            return
+
+        todo.data = ical.to_ical().decode("utf-8")
+        todo.save()
+
+
+async def delete_task(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    scope: str = "all",
+    recurrence_id: str | None = None,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="delete_task").time():
+        try:
+            await asyncio.to_thread(
+                _sync_delete_task, account_url, username, password, calendar_url,
+                uid, scope, recurrence_id,
+            )
+        except EventNotFoundError:
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="delete_task").inc()
+            raise
+
+
+def _sync_set_task_status(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    completed: bool,
+    recurrence_id: str | None = None,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        try:
+            todo = cal.todo_by_uid(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+
+        ical = todo.icalendar_instance
+        master = _master_vevent(ical, "VTODO")
+        if master is None:
+            raise EventNotFoundError(uid)
+
+        is_recurring = bool(master.get("rrule"))
+        # Non-recurring (or no pivot): toggle the master directly.
+        if not is_recurring or not recurrence_id:
+            _set_status(master, completed)
+            todo.data = ical.to_ical().decode("utf-8")
+            todo.save()
+            return
+
+        # Recurring: RFC-advance. Completing the current occurrence writes a
+        # COMPLETED override for that instance and leaves the master series, so
+        # the next occurrence keeps showing. Un-completing drops the override.
+        base_key = "dtstart" if "dtstart" in master else "due"
+        pivot = _occurrence_dt(recurrence_id, master.decoded(base_key))
+        # Remove any existing override at the pivot first.
+        for comp in _overrides(ical, "VTODO"):
+            try:
+                if comp.decoded("recurrence-id") == pivot:
+                    ical.subcomponents.remove(comp)
+            except Exception:
+                pass
+        if completed:
+            occ_start, occ_due = _occurrence_span(master, pivot)
+            _upsert_override(
+                ical, master, pivot, str(master.get("summary") or ""),
+                occ_start, occ_due, None, None, kind=_TODO,
+                status="COMPLETED", completed=datetime.now(timezone.utc),
+            )
+        todo.data = ical.to_ical().decode("utf-8")
+        todo.save()
+
+
+async def set_task_status(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    completed: bool,
+    recurrence_id: str | None = None,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="set_task_status").time():
+        try:
+            await asyncio.to_thread(
+                _sync_set_task_status, account_url, username, password, calendar_url,
+                uid, completed, recurrence_id,
+            )
+        except EventNotFoundError:
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="set_task_status").inc()
             raise

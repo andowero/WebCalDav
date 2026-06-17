@@ -2,6 +2,46 @@
 
 ## Unreleased — MVP
 
+### Added — tasks (VTODO) (2026-06-16)
+- Full CalDAV **task** support alongside events. Tasks are read from and written
+  to the same calendars as VTODO components and shown in every view (month,
+  week, day, agenda), visually distinct from events: a **checkbox square**
+  (empty / ticked) instead of the event dot, sharing the per-calendar colour.
+- New `/tasks` API mirroring `/events`: `GET /tasks`, `POST /tasks`,
+  `PUT /tasks/{uid}`, `DELETE /tasks/{uid}`, plus `POST /tasks/{uid}/status` for
+  done/undone toggling. Implemented in `webcaldav/routers/tasks.py`; the CalDAV
+  layer gains `fetch_tasks` / `create_task` / `update_task` / `delete_task` /
+  `set_task_status` that **reuse** the existing recurrence, override, and VALARM
+  machinery (generalised over a component `_Kind`).
+- Tasks reuse the **same editing modal** as events via an Event/Task type
+  toggle; Start → DTSTART, Due → DUE (both optional — undated tasks are
+  supported), plus a Priority field. All-day, recurrence, reminders, location,
+  notes, and cross-calendar move work the same as events.
+- **Completion**: toggle via the checkbox square or the right-click menu
+  ("Mark as done" / "Mark as undone"). Recurring tasks use **RFC advance** —
+  completing one occurrence writes a per-occurrence `STATUS:COMPLETED` override
+  and leaves the series so the next occurrence still appears.
+- Two new user settings (with SQLite `ALTER TABLE` migrations and `/settings`
+  fields): `completed_task_display` (`hidden` default / `grayed`) and
+  `undated_task_display` (`agenda` default / `today`). Undated tasks appear in a
+  dedicated "Tasks" section in the agenda, and (in `today` mode) pinned to the
+  current day in the grid views.
+- The Settings panel now scrolls between a fixed header and a **pinned Save
+  button** that stays visible at the bottom.
+- **Browser notifications for tasks**: the foreground scheduler now fetches
+  `/tasks` alongside `/events` and fires reminders + due/start notifications for
+  tasks the same way as events. Completed tasks are skipped; undated tasks (no
+  date) produce no triggers.
+- The editing modal gains a **"Task done" checkbox** (existing tasks only),
+  which toggles completion on save via `/tasks/{uid}/status`. The
+  this/this-and-future/all scope prompt now reads "task" instead of "event"
+  when acting on a task.
+- Fix: the checkbox square on **timed** tasks (dot-style chips in month/list
+  views) now keeps its per-calendar colour instead of rendering black.
+- The agenda view gains a pinned **"Overdue"** section (dated tasks still undone
+  with a due/start before today, each shown with its date + time), sitting above
+  the existing undated **"Tasks"** section and the day-grouped scroll list.
+
 ### Added — anchored reminders (before/after × start/end) (2026-06-14)
 - Reminders can now fire relative to either the event **start** or **end**, and
   either **before** or **after** it — four quadrants instead of the old

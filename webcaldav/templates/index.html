@@ -21,7 +21,7 @@
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }}, completed_task_display: {{ completed_task_display | tojson }}, undated_task_display: {{ undated_task_display | tojson }} };
   window.__CONFIG__ = { notification_horizon_days: {{ notification_horizon_days }}, notification_lookback_days: {{ notification_lookback_days }}, static_v: {{ static_v | tojson }} };
 </script>
 
@@ -94,6 +94,14 @@
     <div id="ev-edit-note" class="info-msg" style="display:none"></div>
     <div id="ev-error" class="error-msg" style="display:none"></div>
 
+    <label class="ev-field" id="ev-type-field">
+      <span class="ev-label">Type</span>
+      <select id="ev-type">
+        <option value="event">Event</option>
+        <option value="task">Task</option>
+      </select>
+    </label>
+
     <label class="ev-field">
       <span class="ev-label">Name</span>
       <input id="ev-name" type="text">
@@ -105,18 +113,19 @@
     </label>
 
     <fieldset class="ev-group">
-      <legend>Duration</legend>
+      <legend id="ev-duration-legend">Duration</legend>
       <label class="ev-check"><input type="checkbox" id="ev-allday"> All day</label>
       <div class="ev-dt-row">
-        <span class="ev-label">From</span>
+        <span class="ev-label" id="ev-from-label">From</span>
         <span class="ev-date-fields" id="ev-start-date-fields"></span>
         <span class="ev-time ev-time-fields" id="ev-start-time-fields"></span>
       </div>
       <div class="ev-dt-row">
-        <span class="ev-label">To</span>
+        <span class="ev-label" id="ev-to-label">To</span>
         <span class="ev-date-fields" id="ev-end-date-fields"></span>
         <span class="ev-time ev-time-fields" id="ev-end-time-fields"></span>
       </div>
+      <p class="ev-task-hint" id="ev-undated-hint" style="display:none">Leave dates empty for an undated task.</p>
     </fieldset>
 
     <fieldset class="ev-group">
@@ -169,6 +178,20 @@
       <input id="ev-location" type="text" placeholder="—">
     </label>
 
+    <label class="ev-field" id="ev-priority-field" style="display:none">
+      <span class="ev-label">Priority</span>
+      <select id="ev-priority">
+        <option value="0">None</option>
+        <option value="1">High</option>
+        <option value="5">Medium</option>
+        <option value="9">Low</option>
+      </select>
+    </label>
+
+    <label class="ev-check" id="ev-done-field" style="display:none">
+      <input type="checkbox" id="ev-done"> Task done
+    </label>
+
     <label class="ev-field">
       <span class="ev-label">Notes</span>
       <textarea id="ev-notes" rows="3" placeholder="—"></textarea>
@@ -191,6 +214,7 @@
 
 <!-- ── Event context menu (right-click) ── -->
 <div id="ev-context-menu" class="ev-context-menu" style="display:none">
+  <button type="button" id="ctx-toggle-done" style="display:none">Mark as done</button>
   <button type="button" id="ctx-edit">Edit</button>
   <button type="button" id="ctx-delete">Delete</button>
 </div>
@@ -210,9 +234,9 @@
 <div id="scope-modal" class="confirm-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="scope-title">
   <p id="scope-title"></p>
   <div class="scope-options">
-    <button type="button" class="btn-outline" data-scope="this">This event only</button>
-    <button type="button" class="btn-outline" data-scope="thisfuture">This and all future events</button>
-    <button type="button" class="btn-outline" data-scope="all">All events in the series</button>
+    <button type="button" class="btn-outline" data-scope="this">This <span class="scope-noun">event</span> only</button>
+    <button type="button" class="btn-outline" data-scope="thisfuture">This and all future <span class="scope-noun">event</span>s</button>
+    <button type="button" class="btn-outline" data-scope="all">All <span class="scope-noun">event</span>s in the series</button>
   </div>
   <div class="confirm-footer">
     <button id="scope-cancel" class="btn-outline">Cancel</button>
@@ -227,6 +251,7 @@
     <button id="btn-settings-close" class="btn-icon" aria-label="Close">&#x2715;</button>
   </div>
 
+  <div class="settings-scroll">
   <section class="settings-section">
     <h2>CalDAV Accounts</h2>
     <div id="accounts-list"></div>
@@ -280,6 +305,16 @@
         <option value="timeGridDay">Day</option>
         <option value="agenda">Agenda</option>
       </select>
+      <label>Completed tasks</label>
+      <select id="pref-completed-task">
+        <option value="hidden">Hidden</option>
+        <option value="grayed">Grayed out</option>
+      </select>
+      <label>Undated tasks</label>
+      <select id="pref-undated-task">
+        <option value="agenda">Agenda only</option>
+        <option value="today">Today &amp; agenda</option>
+      </select>
       <label class="ev-check">
         <input type="checkbox" id="pref-auto-logout-enabled">
         Automatic logout after inactivity
@@ -296,9 +331,13 @@
       <button type="button" id="pref-notifications-grant" class="btn-outline">
         Enable notifications on this browser
       </button>
-      <button type="submit">Save</button>
     </form>
   </section>
+  </div>
+
+  <div class="settings-footer">
+    <button type="submit" form="prefs-form" id="prefs-save" class="btn-primary">Save</button>
+  </div>
 </aside>
 
 <script src="/static/app.js?v={{ static_v }}"></script>

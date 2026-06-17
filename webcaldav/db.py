@@ -45,6 +45,9 @@ _USERS_KDF_MIGRATION = {
 # an existing table, so add missing columns explicitly for pre-migration DBs.
 _USER_SETTINGS_MIGRATION = {
     "notifications_enabled": ("BOOLEAN", 0),
+    # TEXT columns: the legacy default is interpolated raw, so quote it.
+    "completed_task_display": ("TEXT", "'hidden'"),
+    "undated_task_display": ("TEXT", "'agenda'"),
 }
 
 
@@ -69,11 +72,11 @@ async def create_tables() -> None:
                 await conn.execute(text("PRAGMA table_info(user_settings)"))
             ).fetchall()
         }
-        for column, (sql_type, legacy_default) in _USER_SETTINGS_MIGRATION.items():
+        for column, (sql_type, settings_default) in _USER_SETTINGS_MIGRATION.items():
             if column not in settings_existing:
                 await conn.execute(
                     text(
                         f"ALTER TABLE user_settings ADD COLUMN {column} {sql_type} "
-                        f"NOT NULL DEFAULT {legacy_default}"
+                        f"NOT NULL DEFAULT {settings_default}"
                     )
                 )

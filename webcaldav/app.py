@@ -16,7 +16,15 @@ from .db import create_tables, init_engine, get_session_factory
 from .deps import init_login_rate_limiter, init_session_store, get_session_store
 from .metrics import http_requests_total
 from .models import User, UserSettings
-from .routers import auth, caldav_accounts, calendars, events, ops, settings as settings_router
+from .routers import (
+    auth,
+    caldav_accounts,
+    calendars,
+    events,
+    ops,
+    settings as settings_router,
+    tasks,
+)
 
 _PKG = Path(__file__).parent
 
@@ -71,6 +79,7 @@ app.include_router(auth.router)
 app.include_router(caldav_accounts.router)
 app.include_router(calendars.router)
 app.include_router(events.router)
+app.include_router(tasks.router)
 app.include_router(settings_router.router)
 app.include_router(ops.router)
 
@@ -111,6 +120,8 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_auto_logout_enabled = True
     user_settings_auto_logout_timeout = 3600
     user_settings_notifications_enabled = False
+    user_settings_completed_task_display = "hidden"
+    user_settings_undated_task_display = "agenda"
 
     if session_id:
         try:
@@ -138,6 +149,8 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_auto_logout_enabled = s.auto_logout_enabled
                         user_settings_auto_logout_timeout = s.auto_logout_timeout_seconds
                         user_settings_notifications_enabled = s.notifications_enabled
+                        user_settings_completed_task_display = s.completed_task_display
+                        user_settings_undated_task_display = s.undated_task_display
         except Exception:
             logger.warning("root_session_lookup_failed", exc_info=True)
 
@@ -155,6 +168,8 @@ async def root(request: Request) -> HTMLResponse:
             "auto_logout_enabled": user_settings_auto_logout_enabled,
             "auto_logout_timeout": user_settings_auto_logout_timeout,
             "notifications_enabled": user_settings_notifications_enabled,
+            "completed_task_display": user_settings_completed_task_display,
+            "undated_task_display": user_settings_undated_task_display,
             "notification_horizon_days": settings.notification_horizon_days,
             "notification_lookback_days": settings.notification_lookback_days,
             "static_v": STATIC_VERSION,

@@ -8,6 +8,7 @@
 | v1        | Basic editing of calendar events -> without repetition    | Complete |
 | v2        | Editing of calendar events -> repetition                  | Complete |
 | v3        | Reminders and browser notifications                       | Complete |
+| v4        | Tasks (VTODO): view, edit, complete, recurrence           | Complete |
 
 ## Known issues
 
@@ -283,6 +284,31 @@ Post-v3 enhancement to the reminder editor.
 - All 120 tests pass (new round-trip coverage for each quadrant + an all-day
   after-end case; model validation for the new fields).
 
+### Tasks — VTODO (2026-06-16) — v4
+
+CalDAV task support, mirroring the event stack.
+
+- New `/tasks` API and `webcaldav/routers/tasks.py`; CalDAV layer gains
+  `fetch_tasks` / `create_task` / `update_task` / `delete_task` /
+  `set_task_status`. The delicate recurrence/override/VALARM helpers were
+  generalised over a component `_Kind` (VEVENT vs VTODO) and reused, so events
+  and tasks share one implementation; only the thin orchestration is duplicated.
+- Anchor on DUE (else DTSTART); DTSTART and DUE are both optional, so undated
+  tasks are first-class. STATUS / COMPLETED / PERCENT-COMPLETE / PRIORITY are
+  read and written; unknown VTODO properties round-trip untouched (in-place edit).
+- Frontend: tasks merge into the same FullCalendar source and agenda, render a
+  checkbox **square** (empty/ticked) coloured per calendar, and reuse the event
+  modal via an Event/Task type toggle (Start/Due fields, Priority, optional
+  dates). Completion toggles from the square or the right-click menu; recurring
+  completion uses RFC advance (per-occurrence COMPLETED override).
+- Settings: `completed_task_display` (hidden/grayed) and `undated_task_display`
+  (agenda/today), with SQLite migrations; the Settings panel scrolls with a
+  pinned Save button.
+- 138 tests pass (18 new: VTODO create/fetch/update/delete/status incl. recurring
+  RFC-advance and undated, plus tasks-API validation and settings round-trip).
+  FullCalendar rendering, the square, and notifications remain manually verified.
+
 ## What is next
 
-- v4 scoping (post-v3): TBD.
+- v5 scoping: TBD. Possible: task reminders in browser notifications (currently
+  events only); sub-tasks / RELATED-TO; task sort/filter in agenda.

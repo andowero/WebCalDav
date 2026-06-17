@@ -220,7 +220,9 @@ class EventUpdate(BaseModel):
 _UNIT_MINUTES = {"minutes": 1, "hours": 60, "days": 1440, "weeks": 10080}
 
 
-def _reminder_deltas(body: EventUpdate) -> list[tuple[timedelta, str]] | None:
+def _reminder_deltas(
+    reminders: list[Reminder] | None, all_day: bool
+) -> list[tuple[timedelta, str]] | None:
     """Reminder rows -> (offset, RELATED) VALARM triggers (deduped, ordered).
 
     The offset sign encodes direction (before = negative, after = positive) and
@@ -229,11 +231,11 @@ def _reminder_deltas(body: EventUpdate) -> list[tuple[timedelta, str]] | None:
     "N days before at HH:MM" collapses to HH:MM minus N days (and "after" adds
     them) measured from the anchor.
     """
-    if body.reminders is None:
+    if reminders is None:
         return None
     deltas: list[tuple[timedelta, str]] = []
-    for r in body.reminders:
-        if body.all_day:
+    for r in reminders:
+        if all_day:
             hours, minutes = (int(p) for p in r.time.split(":"))  # type: ignore[union-attr]
             day = timedelta(days=r.value * (7 if r.unit == "weeks" else 1))
             delta = (day if r.direction == "after" else -day) + timedelta(
@@ -332,7 +334,7 @@ async def post_event(
             location=body.location,
             description=body.description,
             rrule=rrule,
-            reminders=_reminder_deltas(body),
+            reminders=_reminder_deltas(body.reminders, body.all_day),
         )
     except Exception as e:
         logger.warning("event_create_failed", error=repr(e))
@@ -426,7 +428,7 @@ async def put_event(
                 end=end,
                 location=body.location,
                 description=body.description,
-                reminders=_reminder_deltas(body),
+                reminders=_reminder_deltas(body.reminders, body.all_day),
             )
             await delete_event(
                 account_url=src_account.url,
@@ -451,7 +453,7 @@ async def put_event(
                 scope=body.scope,
                 recurrence_id=body.recurrence_id,
                 rrule=rrule,
-                reminders=_reminder_deltas(body),
+                reminders=_reminder_deltas(body.reminders, body.all_day),
             )
     except EventNotFoundError:
         raise HTTPException(status_code=404, detail="Event not found")

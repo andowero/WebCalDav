@@ -305,6 +305,8 @@
       datefmt = s.date_format || 'YYYY-MM-DD';
       document.getElementById('pref-fdow').value = String(s.first_day_of_week ?? 1);
       document.getElementById('pref-default-view').value = s.default_view || 'dayGridMonth';
+      document.getElementById('pref-completed-task').value = s.completed_task_display || 'hidden';
+      document.getElementById('pref-undated-task').value = s.undated_task_display || 'agenda';
       const enabled = s.auto_logout_enabled ?? true;
       const mins = Math.max(1, Math.round((s.auto_logout_timeout_seconds ?? 3600) / 60));
       const enEl = document.getElementById('pref-auto-logout-enabled');
@@ -428,6 +430,8 @@
         const timefmt = document.getElementById('pref-timefmt').value;
         const datefmt = document.getElementById('pref-datefmt').value;
         const defaultView = document.getElementById('pref-default-view').value;
+        const completedTask = document.getElementById('pref-completed-task').value;
+        const undatedTask = document.getElementById('pref-undated-task').value;
         const notifEnabled = document.getElementById('pref-notifications-enabled').checked;
         // Notifications force auto-logout off (server enforces the same).
         const autoEnabled = notifEnabled ? false : document.getElementById('pref-auto-logout-enabled').checked;
@@ -445,6 +449,8 @@
           auto_logout_enabled: autoEnabled,
           auto_logout_timeout_seconds: autoSecs,
           notifications_enabled: notifEnabled,
+          completed_task_display: completedTask,
+          undated_task_display: undatedTask,
         });
         window.__SETTINGS__ = window.__SETTINGS__ || {};
         window.__SETTINGS__.timezone = tz;
@@ -455,6 +461,8 @@
         window.__SETTINGS__.auto_logout_enabled = autoEnabled;
         window.__SETTINGS__.auto_logout_timeout_seconds = autoSecs;
         window.__SETTINGS__.notifications_enabled = notifEnabled;
+        window.__SETTINGS__.completed_task_display = completedTask;
+        window.__SETTINGS__.undated_task_display = undatedTask;
         if (notifEnabled) startNotifications(); else stopNotifications();
         applyCalendarPrefs(tz, fdow, timefmt, datefmt);
         // Live session timeout changed server-side; resync the countdown.
@@ -519,6 +527,38 @@
     if (repeats) { updateRecurUI(); scheduleRecurPreview(); }
   }
 
+  // ── Event / Task type toggle ─────────────────────────────────────────────────
+
+  function modalIsTask() {
+    return document.getElementById('ev-type').value === 'task';
+  }
+
+  // Point the shared modal at one kind. `locked` disables the switch (existing
+  // items can't change kind).
+  function setModalType(isTask, locked) {
+    const sel = document.getElementById('ev-type');
+    sel.value = isTask ? 'task' : 'event';
+    sel.disabled = !!locked;
+    applyTypeToggle();
+  }
+
+  function applyTypeToggle() {
+    const isTask = modalIsTask();
+    document.getElementById('ev-duration-legend').textContent = isTask ? 'Schedule' : 'Duration';
+    document.getElementById('ev-from-label').textContent = isTask ? 'Start' : 'From';
+    document.getElementById('ev-to-label').textContent = isTask ? 'Due' : 'To';
+    document.getElementById('ev-priority-field').style.display = isTask ? '' : 'none';
+    document.getElementById('ev-undated-hint').style.display = isTask ? '' : 'none';
+    const isNew = _currentEvent && _currentEvent.isNew;
+    document.getElementById('ev-done-field').style.display = isTask && !isNew ? '' : 'none';
+    if (_currentEvent && _currentEvent.isNew) {
+      _currentEvent.isTask = isTask;
+      document.getElementById('ev-title-text').textContent = isTask ? 'New task' : 'New event';
+    }
+    // Relabel reminder anchors (before/after due vs end) for the new type.
+    renderReminders();
+  }
+
   // ── Reminders editor ─────────────────────────────────────────────────────────
   //
   // Editable reminders live in _reminders as {value, unit, time?, isNew}. Timed
@@ -556,15 +596,16 @@
   }
 
   function reminderText(r) {
+    const isTask = modalIsTask();
     const dir = r.direction === 'after' ? 'after' : 'before';
-    const anchor = r.anchor === 'end' ? 'end' : 'start';
+    const anchor = r.anchor === 'end' ? (isTask ? 'due' : 'end') : 'start';
     if (r.time != null) {
       const at = reminderTimeText(r.time);
       if (r.value === 0) return `On the ${anchor} day at ${at}`;
       const unit = r.value === 1 ? r.unit.slice(0, -1) : r.unit;
       return `${r.value} ${unit} ${dir} ${anchor} at ${at}`;
     }
-    if (r.value === 0) return `At ${anchor} of event`;
+    if (r.value === 0) return `At ${anchor} of ${isTask ? 'task' : 'event'}`;
     const unit = r.value === 1 ? r.unit.slice(0, -1) : r.unit;
     return `${r.value} ${unit} ${dir} ${anchor}`;
   }
@@ -650,11 +691,12 @@
         .join('');
       const time = allDay ? reminderTimeHtml(idx, r.time) : '';
       const sel = `${r.direction === 'after' ? 'after' : 'before'}|${r.anchor === 'end' ? 'end' : 'start'}`;
+      const endLabel = modalIsTask() ? 'due' : 'end';
       const anchorOpts = [
         ['before|start', 'before start'],
         ['after|start', 'after start'],
-        ['before|end', 'before end'],
-        ['after|end', 'after end'],
+        ['before|end', `before ${endLabel}`],
+        ['after|end', `after ${endLabel}`],
       ].map(([v, t]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${t}</option>`).join('');
       rows.push(
         `<div class="ev-reminder-row">` +
@@ -1390,15 +1432,27 @@
     const props = event.extendedProps || {};
     hideError('ev-error');
 
-    document.getElementById('ev-title-text').textContent = event.title || 'Event';
+    const isTask = !!props.isTask;
+    document.getElementById('ev-title-text').textContent =
+      event.title || (isTask ? 'Task' : 'Event');
     document.getElementById('ev-name').value = event.title || '';
     document.getElementById('ev-allday').checked = !!event.allDay;
+    setModalType(isTask, true);
+    document.getElementById('ev-priority').value = String(props.priority || 0);
+    document.getElementById('ev-done').checked = !!props.completed;
 
     const tz = effectiveTz();
     const rawStart = props.rawStart || (event.start ? event.start.toISOString() : null);
-    let rawEnd = props.rawEnd || (event.end ? event.end.toISOString() : rawStart);
-    // iCal all-day DTEND is exclusive — show the inclusive last day.
-    if (event.allDay && props.rawEnd) rawEnd = shiftDateStr(props.rawEnd, -1);
+    let rawEnd;
+    if (isTask) {
+      // Tasks anchor on DUE (stored as-is, no exclusive-end shift); either side
+      // may be absent (undated / start-only / due-only).
+      rawEnd = props.rawDue || null;
+    } else {
+      rawEnd = props.rawEnd || (event.end ? event.end.toISOString() : rawStart);
+      // iCal all-day DTEND is exclusive — show the inclusive last day.
+      if (event.allDay && props.rawEnd) rawEnd = shiftDateStr(props.rawEnd, -1);
+    }
 
     // Rebuild date + time inputs per current date_format / time_format before
     // populating values.
@@ -1407,16 +1461,22 @@
     renderTimeFields('start', onFromChange);
     renderTimeFields('end', onToChange);
 
+    // Events always carry both ends; tasks may leave fields blank.
+    const endSrc = isTask ? rawEnd : (rawEnd || rawStart);
     if (event.allDay) {
-      setDateFieldValue('start', String(rawStart || '').slice(0, 10));
-      setDateFieldValue('end', String(rawEnd || rawStart || '').slice(0, 10));
+      setDateFieldValue('start', rawStart ? String(rawStart).slice(0, 10) : '');
+      setDateFieldValue('end', endSrc ? String(endSrc).slice(0, 10) : '');
     } else {
-      const from = isoToInputs(rawStart, tz);
-      const to = isoToInputs(rawEnd, tz);
-      setDateFieldValue('start', from.date);
-      setTimeParts('start', from.hour, from.minute);
-      setDateFieldValue('end', to.date);
-      setTimeParts('end', to.hour, to.minute);
+      if (rawStart) {
+        const from = isoToInputs(rawStart, tz);
+        setDateFieldValue('start', from.date);
+        setTimeParts('start', from.hour, from.minute);
+      }
+      if (endSrc) {
+        const to = isoToInputs(endSrc, tz);
+        setDateFieldValue('end', to.date);
+        setTimeParts('end', to.hour, to.minute);
+      }
     }
 
     const recurrence = props.recurrence || '';
@@ -1447,7 +1507,8 @@
       editable = false;
       note = 'Demo event — connect a CalDAV account to add real events.';
     } else if (recurrence) {
-      note = 'Recurring event — you’ll choose which occurrences to change when you save.';
+      const kind = isTask ? 'task' : 'event';
+      note = `Recurring ${kind} — you’ll choose which occurrences to change when you save.`;
     }
     noteEl.textContent = note;
     noteEl.style.display = note ? '' : 'none';
@@ -1483,12 +1544,14 @@
       calendarId: props.calendarId,
       originalCalendarId: props.calendarId,
       editable,
+      isTask,
       recurring: !!recurrence,
       rawStart: props.rawStart || (event.start ? event.start.toISOString() : null),
       // Stable pivot for scoped edits: an already-detached override keeps its
       // RECURRENCE-ID even after being moved, so prefer it over the (mutable)
       // current start to avoid creating a duplicate override on re-edit.
       recurrenceId: props.recurrenceId || null,
+      completed: !!props.completed,
       isNew: false,
     };
 
@@ -1533,11 +1596,13 @@
     document.getElementById('ev-allday').checked = !!allDay;
     document.getElementById('ev-location').value = '';
     document.getElementById('ev-notes').value = '';
+    document.getElementById('ev-priority').value = '0';
     document.getElementById('ev-repeats').checked = false;
     document.getElementById('ev-repeats').disabled = false;
     document.getElementById('ev-recur-summary').style.display = 'none';
     resetRecurEditorDefaults();
     resetReminders([]);
+    setModalType(false, false);
 
     // Populate the calendar picker (create-only).
     const calField = document.getElementById('ev-calendar-field');
@@ -1606,13 +1671,16 @@
     const name = document.getElementById('ev-name').value.trim();
 
     if (!name) { showError('ev-error', 'Name is required.'); return; }
-    if (!startDate) { showError('ev-error', 'Start date is required.'); return; }
 
     const pad = (n) => String(n).padStart(2, '0');
     const timeStr = (prefix) => {
       const { h24, m } = getTimeParts(prefix);
       return `${pad(h24)}:${pad(m)}`;
     };
+
+    if (modalIsTask()) { await saveTask(name, allDay, startDate, endDate, timeStr); return; }
+
+    if (!startDate) { showError('ev-error', 'Start date is required.'); return; }
 
     const body = {
       calendar_id: _currentEvent.calendarId,
@@ -1669,6 +1737,65 @@
     }
   }
 
+  // Save the modal as a VTODO. Mirrors the event path but dates are optional
+  // (undated tasks), there is a priority, and writes target /tasks.
+  async function saveTask(name, allDay, startDate, endDate, timeStr) {
+    const body = {
+      calendar_id: _currentEvent.calendarId,
+      title: name,
+      all_day: allDay,
+      location: document.getElementById('ev-location').value,
+      description: document.getElementById('ev-notes').value,
+      timezone: effectiveTz(),
+      priority: parseInt(document.getElementById('ev-priority').value, 10) || 0,
+      reminders: collectReminders(),
+    };
+    const recurrence = getRecurrence();
+    if (recurrence) body.recurrence = recurrence;
+    if (recurrence && !startDate && !endDate) {
+      showError('ev-error', 'A recurring task needs a start or due date.');
+      return;
+    }
+    if (startDate) body.start = allDay ? startDate : `${startDate}T${timeStr('start')}:00`;
+    if (endDate) body.due = allDay ? endDate : `${endDate}T${timeStr('end')}:00`;
+
+    if (!_currentEvent.isNew && _currentEvent.recurring) {
+      const scope = await chooseScope('What to change?', 'task');
+      if (!scope) return;
+      body.scope = scope;
+      const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
+      if (pivot) body.recurrence_id = pivot;
+    }
+
+    const btn = document.getElementById('btn-event-save');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      if (_currentEvent.isNew) {
+        await apiPost('/tasks', body);
+      } else {
+        body.original_calendar_id = _currentEvent.originalCalendarId;
+        await apiPut(`/tasks/${encodeURIComponent(_currentEvent.id)}`, body);
+        const wantDone = document.getElementById('ev-done').checked;
+        if (wantDone !== _currentEvent.completed) {
+          const st = { calendar_id: _currentEvent.calendarId, completed: wantDone };
+          if (_currentEvent.recurring) {
+            const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
+            if (pivot) st.recurrence_id = pivot;
+          }
+          await apiPost(`/tasks/${encodeURIComponent(_currentEvent.id)}/status`, st);
+        }
+      }
+      closeEventModal();
+      refreshViews();
+    } catch (err) {
+      showError('ev-error', err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
+  }
+
   // Delete the event currently open in the modal (Delete button). No confirm
   // here — the spec reserves the "are you sure" prompt for the right-click menu.
   async function deleteCurrentEvent() {
@@ -1676,7 +1803,7 @@
     // Recurring events delete by scope; pick one before hitting the server.
     let qs = `calendar_id=${_currentEvent.calendarId}`;
     if (_currentEvent.recurring) {
-      const scope = await chooseScope('What to delete?');
+      const scope = await chooseScope('What to delete?', _currentEvent.isTask ? 'task' : 'event');
       if (!scope) return;
       qs += `&scope=${scope}`;
       const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
@@ -1684,10 +1811,11 @@
         qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
       }
     }
+    const base = _currentEvent.isTask ? '/tasks' : '/events';
     const btn = document.getElementById('btn-event-delete');
     btn.disabled = true;
     try {
-      await apiDelete(`/events/${encodeURIComponent(_currentEvent.id)}?${qs}`);
+      await apiDelete(`${base}/${encodeURIComponent(_currentEvent.id)}?${qs}`);
       closeEventModal();
       refreshViews();
     } catch (err) {
@@ -1713,6 +1841,7 @@
       remindersOnAllDayToggle();
     });
     document.getElementById('ev-repeats').addEventListener('change', applyRepeatsToggle);
+    document.getElementById('ev-type').addEventListener('change', applyTypeToggle);
     document.getElementById('ev-reminder-add').addEventListener('click', addReminderRow);
     initRecurEditor();
     // Date-field and time-field listeners/steppers are bound per-open inside
@@ -1732,6 +1861,14 @@
   function showContextMenu(x, y, event) {
     _ctxEvent = event;
     const menu = document.getElementById('ev-context-menu');
+    const toggleBtn = document.getElementById('ctx-toggle-done');
+    const p = event.extendedProps || {};
+    if (p.isTask) {
+      toggleBtn.style.display = '';
+      toggleBtn.textContent = p.completed ? 'Mark as undone' : 'Mark as done';
+    } else {
+      toggleBtn.style.display = 'none';
+    }
     menu.style.display = '';
     // Keep the menu on-screen.
     const mw = menu.offsetWidth;
@@ -1752,27 +1889,36 @@
       hideContextMenu();
       if (ev) openEventModal(ev);
     });
+    document.getElementById('ctx-toggle-done').addEventListener('click', () => {
+      const ev = _ctxEvent;
+      hideContextMenu();
+      if (!ev) return;
+      const p = ev.extendedProps || {};
+      toggleTaskDone(ev, !p.completed);
+    });
     document.getElementById('ctx-delete').addEventListener('click', async () => {
       const ev = _ctxEvent;
       hideContextMenu();
       if (!ev) return;
       const props = ev.extendedProps || {};
       if (props.calendarId == null) return;
+      const isTask = !!props.isTask;
+      const kind = isTask ? 'task' : 'event';
       let qs = `calendar_id=${props.calendarId}`;
       if (props.recurrence) {
         // Recurring: a scope choice replaces the plain yes/no confirm.
-        const scope = await chooseScope('What to delete?');
+        const scope = await chooseScope('What to delete?', kind);
         if (!scope) return;
         qs += `&scope=${scope}`;
         const pivot =
           props.recurrenceId || props.rawStart || (ev.start ? ev.start.toISOString() : null);
         if (pivot) qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
       } else {
-        const ok = await confirmDialog(`Delete "${ev.title || 'this event'}"?`);
+        const ok = await confirmDialog(`Delete "${ev.title || 'this ' + kind}"?`);
         if (!ok) return;
       }
       try {
-        await apiDelete(`/events/${encodeURIComponent(ev.id)}?${qs}`);
+        await apiDelete(`/${isTask ? 'tasks' : 'events'}/${encodeURIComponent(ev.id)}?${qs}`);
         refreshViews();
       } catch (err) {
         alert(err.message);
@@ -1818,8 +1964,11 @@
 
   let _scopeResolve = null;
 
-  function chooseScope(text) {
+  function chooseScope(text, noun) {
     document.getElementById('scope-title').textContent = text;
+    document.querySelectorAll('#scope-modal .scope-noun').forEach((el) => {
+      el.textContent = noun || 'event';
+    });
     show('scope-overlay');
     show('scope-modal');
     return new Promise((resolve) => { _scopeResolve = resolve; });
@@ -2046,6 +2195,7 @@
     _agendaLastDayKey = null;
     document.getElementById('agenda-list').innerHTML = '';
     agendaSetStatus('');
+    renderAgendaPinned();
     agendaObserve();
   }
 
@@ -2077,9 +2227,21 @@
     const to = from.plus({ days: AGENDA_CHUNK_DAYS });
     try {
       const params = new URLSearchParams({ from: from.toISO(), to: to.toISO() });
-      const r = await fetch('/events?' + params.toString());
-      if (!r.ok) throw new Error('Failed to fetch events');
-      const data = await r.json();
+      const [evR, tkR] = await Promise.all([
+        fetch('/events?' + params.toString()),
+        fetch('/tasks?' + params.toString()),
+      ]);
+      if (!evR.ok) throw new Error('Failed to fetch events');
+      const data = await evR.json();
+      if (tkR.ok) {
+        const completedMode = (window.__SETTINGS__ || {}).completed_task_display || 'hidden';
+        (await tkR.json()).forEach((e) => {
+          const p = e.extendedProps || {};
+          if (p.undated) return; // shown in the pinned "Tasks" section
+          if (p.completed && completedMode === 'hidden') return;
+          data.push(e);
+        });
+      }
 
       const fresh = [];
       for (const e of data) {
@@ -2131,11 +2293,48 @@
     if (near) agendaLoadMore();
   }
 
+  // Build one agenda row. Events get a colour dot; tasks get a checkbox square
+  // (the dot's task counterpart) that toggles completion without opening the
+  // modal. `forcedTimeTxt` is used by the undated "Tasks" section.
+  function agendaRowEl(e, forcedTimeTxt) {
+    const tz = effectiveTz();
+    const timeFmt = timeFormatKey() === '12h' ? 'h:mm a' : 'HH:mm';
+    const p = e.extendedProps || {};
+    const isTask = !!p.isTask;
+    const completedMode = (window.__SETTINGS__ || {}).completed_task_display || 'hidden';
+
+    const row = document.createElement('div');
+    row.className = 'agenda-row';
+    if (isTask && p.completed && completedMode === 'grayed') row.classList.add('is-task-done');
+
+    let timeTxt = forcedTimeTxt;
+    if (timeTxt == null) {
+      const start = luxon.DateTime.fromISO(p.rawStart || e.start, { setZone: true }).setZone(tz);
+      timeTxt = e.allDay ? 'All day' : start.toFormat(timeFmt);
+    }
+    const loc = p.location ? `<div class="agenda-loc">${escHtml(p.location)}</div>` : '';
+    const marker = isTask
+      ? `<span class="agenda-box${p.completed ? ' done' : ''}" style="color:${escHtml(e.color || '#3788d8')}" role="checkbox"></span>`
+      : `<span class="agenda-dot" style="background:${escHtml(e.color || '#3788d8')}"></span>`;
+    row.innerHTML =
+      `<span class="agenda-time">${escHtml(timeTxt)}</span>` + marker +
+      `<span class="agenda-main"><div class="agenda-title">${escHtml(e.title || '(no title)')}</div>${loc}</span>`;
+    if (isTask) {
+      const box = row.querySelector('.agenda-box');
+      if (box) box.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        toggleTaskDone(agendaToFcShim(e), !p.completed);
+      });
+    }
+    row.addEventListener('click', () => openEventModal(agendaToFcShim(e)));
+    return row;
+  }
+
   function agendaAppendRows(events) {
     const tz = effectiveTz();
     const list = document.getElementById('agenda-list');
     const todayKey = luxon.DateTime.now().setZone(tz).toFormat('yyyy-MM-dd');
-    const timeFmt = timeFormatKey() === '12h' ? 'h:mm a' : 'HH:mm';
     const headerFmt = 'cccc, ' + luxonDateFmt(dateFormatKey());
     const frag = document.createDocumentFragment();
 
@@ -2152,21 +2351,90 @@
         h.textContent = start.toFormat(headerFmt);
         frag.appendChild(h);
       }
-
-      const row = document.createElement('div');
-      row.className = 'agenda-row';
-      const timeTxt = e.allDay ? 'All day' : start.toFormat(timeFmt);
-      const loc = p.location
-        ? `<div class="agenda-loc">${escHtml(p.location)}</div>`
-        : '';
-      row.innerHTML =
-        `<span class="agenda-time">${escHtml(timeTxt)}</span>` +
-        `<span class="agenda-dot" style="background:${escHtml(e.color || '#3788d8')}"></span>` +
-        `<span class="agenda-main"><div class="agenda-title">${escHtml(e.title || '(no title)')}</div>${loc}</span>`;
-      row.addEventListener('click', () => openEventModal(agendaToFcShim(e)));
-      frag.appendChild(row);
+      frag.appendChild(agendaRowEl(e));
     }
     list.appendChild(frag);
+  }
+
+  // Pinned sections at the top of the agenda, above the day-grouped scroll list:
+  //   • "Overdue" — dated tasks still undone whose due/start is before today,
+  //     each shown with its own date + time. These sit first.
+  //   • "Tasks"   — undated tasks (no date). Shown in both undated modes.
+  // One /tasks fetch over a past window (today back AGENDA_OVERDUE_DAYS) feeds
+  // both; undated tasks always come back via the server's separate todos pass.
+  const AGENDA_OVERDUE_DAYS = 365;
+
+  function agendaPinnedSection(id, label) {
+    const sec = document.createElement('div');
+    sec.id = id;
+    const h = document.createElement('div');
+    h.className = 'agenda-day-header';
+    h.textContent = label;
+    sec.appendChild(h);
+    return sec;
+  }
+
+  async function renderAgendaPinned() {
+    const tz = effectiveTz();
+    const list = document.getElementById('agenda-list');
+    ['agenda-overdue', 'agenda-undated'].forEach((id) => {
+      const old = document.getElementById(id);
+      if (old) old.remove();
+    });
+    const completedMode = (window.__SETTINGS__ || {}).completed_task_display || 'hidden';
+    const todayStart = luxon.DateTime.now().setZone(tz).startOf('day');
+    const dfmt = luxonDateFmt(dateFormatKey());
+    const tfmt = timeFormatKey() === '12h' ? 'h:mm a' : 'HH:mm';
+    try {
+      const params = new URLSearchParams({
+        from: todayStart.minus({ days: AGENDA_OVERDUE_DAYS }).toISO(),
+        to: todayStart.toISO(),
+      });
+      const r = await fetch('/tasks?' + params.toString());
+      if (!r.ok) return;
+      const data = await r.json();
+      // Recurring tasks expand into many past occurrences; collapse each series
+      // (keyed by task id) to just its latest overdue occurrence so the list
+      // shows one row per recurring task, not one per missed instance.
+      const overdueById = new Map();
+      const undated = [];
+      data.forEach((e) => {
+        const p = e.extendedProps || {};
+        if (p.undated) {
+          if (p.completed && completedMode === 'hidden') return;
+          undated.push(e);
+          return;
+        }
+        if (p.completed) return; // overdue lists undone tasks only
+        const sISO = p.rawDue || e.start || p.rawStart;
+        if (!sISO) return;
+        const s = luxon.DateTime.fromISO(sISO, { setZone: true }).setZone(tz);
+        if (s >= todayStart) return; // today/future handled by the scroll list
+        e.__sortKey = s.toMillis();
+        const prev = overdueById.get(e.id);
+        if (!prev || e.__sortKey > prev.__sortKey) overdueById.set(e.id, e);
+      });
+      const overdue = Array.from(overdueById.values());
+
+      // Build undated first, then overdue, so prepending overdue lands it above.
+      if (undated.length) {
+        const sec = agendaPinnedSection('agenda-undated', 'Tasks');
+        undated.forEach((e) => sec.appendChild(agendaRowEl(e, 'Task')));
+        list.prepend(sec);
+      }
+      if (overdue.length) {
+        overdue.sort(agendaCompare);
+        const sec = agendaPinnedSection('agenda-overdue', 'Overdue');
+        overdue.forEach((e) => {
+          const p = e.extendedProps || {};
+          const s = luxon.DateTime
+            .fromISO(p.rawDue || e.start || p.rawStart, { setZone: true }).setZone(tz);
+          const when = e.allDay ? s.toFormat(dfmt) : s.toFormat(dfmt + ' ' + tfmt);
+          sec.appendChild(agendaRowEl(e, when));
+        });
+        list.prepend(sec);
+      }
+    } catch (_) {}
   }
 
   // Build the minimal FullCalendar-event shape openEventModal() consumes from a
@@ -2229,11 +2497,13 @@
     document.getElementById('ev-allday').checked = false;
     document.getElementById('ev-location').value = '';
     document.getElementById('ev-notes').value = '';
+    document.getElementById('ev-priority').value = '0';
     document.getElementById('ev-repeats').checked = false;
     document.getElementById('ev-repeats').disabled = false;
     document.getElementById('ev-recur-summary').style.display = 'none';
     resetRecurEditorDefaults();
     resetReminders([]);
+    setModalType(false, false);
 
     const calField = document.getElementById('ev-calendar-field');
     const calSel = document.getElementById('ev-calendar');
@@ -2275,6 +2545,80 @@
 
     show('event-overlay');
     show('event-modal');
+  }
+
+  // ── Tasks (VTODO) ────────────────────────────────────────────────────────────
+
+  // Shape the /tasks payload into FullCalendar events for the grid views,
+  // honouring the completed-task and undated-task display settings.
+  function prepTasksForGrid(data) {
+    const s = window.__SETTINGS__ || {};
+    const completedMode = s.completed_task_display || 'hidden';
+    const undatedMode = s.undated_task_display || 'agenda';
+    const todayStr = luxon.DateTime.now().setZone(effectiveTz()).toFormat('yyyy-MM-dd');
+    const out = [];
+    data.forEach((e) => {
+      const p = e.extendedProps || {};
+      // Tasks aren't drag/resize editable; left-click still opens the modal.
+      e.editable = false;
+      if (p.completed && completedMode === 'hidden') return;
+      if (p.undated) {
+        if (undatedMode !== 'today') return; // agenda-only → keep off the grid
+        e.start = todayStr;
+        e.allDay = true;
+      }
+      if (!e.start) return;
+      const classes = ['fc-task'];
+      if (p.completed && completedMode === 'grayed') classes.push('fc-task-grayed');
+      e.classNames = classes;
+      out.push(e);
+    });
+    return out;
+  }
+
+  // Swap FullCalendar's round dot for a checkbox square (empty / ticked). The
+  // square toggles completion without opening the modal.
+  function decorateTaskEl(info) {
+    const props = info.event.extendedProps || {};
+    const box = document.createElement('span');
+    box.className = 'fc-task-box' + (props.completed ? ' done' : '');
+    box.setAttribute('role', 'checkbox');
+    box.setAttribute('aria-checked', props.completed ? 'true' : 'false');
+    box.title = props.completed ? 'Mark as undone' : 'Mark as done';
+    box.addEventListener('click', function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+      toggleTaskDone(info.event, !props.completed);
+    });
+    const dot = info.el.querySelector('.fc-daygrid-event-dot');
+    if (dot) {
+      // The dot carries the per-calendar colour as an inline border-color; the
+      // box otherwise inherits the chip's dark text colour (black). Copy it so
+      // the square stays calendar-coloured.
+      box.style.color = dot.style.borderColor || getComputedStyle(dot).borderColor;
+      dot.replaceWith(box);
+    } else {
+      const titleEl = info.el.querySelector('.fc-event-title, .fc-list-event-title');
+      if (titleEl && titleEl.parentNode) titleEl.parentNode.insertBefore(box, titleEl);
+      else info.el.prepend(box);
+    }
+  }
+
+  async function toggleTaskDone(event, done) {
+    const p = event.extendedProps || {};
+    if (p.calendarId == null) return;
+    const body = { calendar_id: p.calendarId, completed: done };
+    if (p.recurrence) {
+      const pivot =
+        p.recurrenceId || p.rawStart || (event.start ? event.start.toISOString() : null);
+      if (pivot) body.recurrence_id = pivot;
+    }
+    try {
+      await apiPost(`/tasks/${encodeURIComponent(event.id)}/status`, body);
+      refreshViews();
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   // ── Calendar page ───────────────────────────────────────────────────────────
@@ -2330,16 +2674,21 @@
       events: async function (fetchInfo, successCallback, failureCallback) {
         try {
           const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr });
-          const r = await fetch('/events?' + params.toString());
-          if (!r.ok) throw new Error('Failed to fetch events');
-          const data = await r.json();
+          const [evR, tkR] = await Promise.all([
+            fetch('/events?' + params.toString()),
+            fetch('/tasks?' + params.toString()),
+          ]);
+          if (!evR.ok) throw new Error('Failed to fetch events');
+          const data = await evR.json();
           // Only real (calendar-backed) events are editable; recurring ones
           // prompt for occurrence scope on drop (see onEventChange).
           data.forEach((e) => {
             const p = e.extendedProps || {};
             e.editable = p.calendarId != null;
           });
-          successCallback(data);
+          let tasks = [];
+          if (tkR.ok) tasks = prepTasksForGrid(await tkR.json());
+          successCallback(data.concat(tasks));
         } catch (err) {
           failureCallback(err);
         }
@@ -2399,6 +2748,7 @@
         const props = info.event.extendedProps || {};
         // Demo events have no calendar; skip the right-click menu for them.
         if (props.calendarId == null) return;
+        if (props.isTask) decorateTaskEl(info);
         info.el.addEventListener('contextmenu', function (e) {
           e.preventDefault();
           showContextMenu(e.pageX, e.pageY, info.event);
@@ -2574,9 +2924,20 @@
       from: now.minus({ days: lookback }).toISO(),
       to: now.plus({ days: horizon }).toISO(),
     });
-    const r = await fetch('/events?' + params.toString());
-    if (!r.ok) throw new Error('events fetch failed');
-    return await r.json();
+    // Notify on events and tasks alike. Tasks anchor on due/start (their
+    // `start`) and carry reminders in the same shape, so buildTriggers handles
+    // both. Skip completed tasks — a done task shouldn't keep nagging.
+    const [evR, tkR] = await Promise.all([
+      fetch('/events?' + params.toString()),
+      fetch('/tasks?' + params.toString()),
+    ]);
+    if (!evR.ok) throw new Error('events fetch failed');
+    const events = await evR.json();
+    let tasks = [];
+    if (tkR.ok) {
+      tasks = (await tkR.json()).filter((t) => !((t.extendedProps || {}).completed));
+    }
+    return events.concat(tasks);
   }
 
   // True if events should be refetched. Compares per-calendar change tokens;

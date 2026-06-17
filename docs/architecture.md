@@ -46,6 +46,14 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 
 - Wraps the `caldav` library.
 - For each outbound request, looks up the current session's DEK, decrypts the relevant `caldav_accounts.encrypted_password`, and uses the plaintext credential only for the duration of that HTTP call.
+- Handles both **VEVENT** (events) and **VTODO** (tasks). The recurrence,
+  scoped-override, EXDATE/UNTIL, and VALARM helpers are generalised over a
+  component `_Kind` (component name, end property `dtend`/`due`, icalendar class,
+  caldav search flag) so events and tasks share one implementation; tasks add
+  `fetch_tasks`/`create_task`/`update_task`/`delete_task`/`set_task_status`.
+  Tasks anchor on DUE (else DTSTART), both optional (undated tasks), and carry
+  STATUS/COMPLETED/PERCENT-COMPLETE/PRIORITY; completing a recurring task writes
+  a per-occurrence COMPLETED override (RFC advance).
 - Handles timeouts and retries.
 - Never logs credentials or the DEK.
 
@@ -54,11 +62,15 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 - SQLAlchemy 2.x models for `users`, `caldav_accounts`, `calendars`, `user_settings`.
 - `calendars.is_default` marks the per-user calendar pre-selected for new events
   (at most one, enforced at the API layer).
+- `user_settings` carries the task display prefs `completed_task_display`
+  (`hidden`/`grayed`) and `undated_task_display` (`agenda`/`today`); columns are
+  added to pre-existing DBs via the `ALTER TABLE` migrations in `create_tables`.
 - SQLite in WAL mode on a named Docker volume.
 
 ### API layer
 
-- FastAPI routers per resource: `auth`, `caldav_accounts`, `calendars`, `events`, `settings`, `ops` (`/health`, `/metrics`).
+- FastAPI routers per resource: `auth`, `caldav_accounts`, `calendars`, `events`, `tasks`, `settings`, `ops` (`/health`, `/metrics`).
+- `tasks` mirrors `events` for VTODO: `GET/POST /tasks`, `PUT/DELETE /tasks/{uid}`, and `POST /tasks/{uid}/status` (done/undone). It reuses the events router's recurrence/reminder models and helpers.
 - `calendars` also serves `GET /calendars/ctags` — a per-calendar change token (the caldav lib's sync-token, falling back to an etag-hash on Radicale) used by the notification scheduler to skip redundant event refetches.
 - `settings` carries `notifications_enabled`; enabling it forces `auto_logout_enabled` off (the two are mutually exclusive — notifications need a live session).
 - Dependency injection resolves the current session and DEK; protected endpoints require an unrestricted session.
@@ -232,6 +244,23 @@ matching the de-facto standard: editing or deleting one half never touches the
 other. Overrides outside a surviving range are garbage-collected rather than
 orphaned. Moving a recurring event is rejected (400) since a move recreates a
 single VEVENT. No local event cache.
+
+### View / create / edit / complete tasks
+
+```
+view:    GET    /tasks?from=…&to=…          ──► CalDAV REPORT (VTODO, expand)
+                                                + a pass for undated VTODOs
+create:  POST   /tasks                      ──► CalDAV PUT (new UID, VTODO)
+edit:    PUT    /tasks/{uid}                 ──► CalDAV PUT (in place)
+status:  POST   /tasks/{uid}/status         ──► set STATUS/COMPLETED (or a
+           {completed, recurrence_id?}           per-occurrence override for a series)
+delete:  DELETE /tasks/{uid}?calendar_id=…  ──► CalDAV DELETE / EXDATE / truncate
+```
+
+Tasks follow the same scope/recurrence rules as events (shared CalDAV helpers).
+The frontend merges `/tasks` into the FullCalendar source and the agenda,
+applying the `completed_task_display` (hidden/grayed) and `undated_task_display`
+(agenda/today) settings client-side. No local task cache.
 
 ### Logout or expiry
 
