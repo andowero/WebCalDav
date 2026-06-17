@@ -49,6 +49,7 @@ _USER_SETTINGS_MIGRATION = {
     "completed_task_display": ("TEXT", "'hidden'"),
     "undated_task_display": ("TEXT", "'agenda'"),
     "theme": ("TEXT", "'system'"),
+    "language": ("TEXT", "'autodetect'"),
 }
 
 

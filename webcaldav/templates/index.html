@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="{{ theme }}">
+<html lang="{{ lang }}" data-theme="{{ theme }}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -21,8 +21,10 @@
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }}, completed_task_display: {{ completed_task_display | tojson }}, undated_task_display: {{ undated_task_display | tojson }}, theme: {{ theme | tojson }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }}, completed_task_display: {{ completed_task_display | tojson }}, undated_task_display: {{ undated_task_display | tojson }}, theme: {{ theme | tojson }}, language: {{ language | tojson }} };
   window.__CONFIG__ = { notification_horizon_days: {{ notification_horizon_days }}, notification_lookback_days: {{ notification_lookback_days }}, static_v: {{ static_v | tojson }} };
+  window.__LANG__ = {{ lang | tojson }};
+  window.__I18N__ = {{ i18n | tojson }};
 </script>
 
 <!-- ── Login ── -->
@@ -32,11 +34,11 @@
     <h1>WebCalDav</h1>
     <div id="login-error" class="error-msg" style="display:none"></div>
     <form id="login-form">
-      <label for="login-email">Email</label>
+      <label for="login-email" data-i18n="ui.login_email">Email</label>
       <input id="login-email" type="email" autocomplete="username" required>
-      <label for="login-password">Password</label>
+      <label for="login-password" data-i18n="ui.login_password">Password</label>
       <input id="login-password" type="password" autocomplete="current-password" required>
-      <button type="submit">Sign in</button>
+      <button type="submit" data-i18n="ui.login_signin">Sign in</button>
     </form>
   </div>
 </div>
@@ -46,16 +48,16 @@
   <div class="auth-card">
     <img src="/static/icon.png?v={{ static_v }}" alt="" class="auth-logo">
     <h1>WebCalDav</h1>
-    <p class="info-msg">First login — please set a new password before continuing.</p>
+    <p class="info-msg" data-i18n="ui.cpw_intro">First login — please set a new password before continuing.</p>
     <div id="cpw-error" class="error-msg" style="display:none"></div>
     <form id="change-pw-form">
-      <label for="cpw-old">Current (one-off) password</label>
+      <label for="cpw-old" data-i18n="ui.cpw_old">Current (one-off) password</label>
       <input id="cpw-old" type="password" autocomplete="current-password" required>
-      <label for="cpw-new">New password</label>
+      <label for="cpw-new" data-i18n="ui.cpw_new">New password</label>
       <input id="cpw-new" type="password" autocomplete="new-password" required minlength="10">
-      <label for="cpw-confirm">Confirm new password</label>
+      <label for="cpw-confirm" data-i18n="ui.cpw_confirm">Confirm new password</label>
       <input id="cpw-confirm" type="password" autocomplete="new-password" required minlength="10">
-      <button type="submit">Set password</button>
+      <button type="submit" data-i18n="ui.cpw_submit">Set password</button>
     </form>
   </div>
 </div>
@@ -66,9 +68,9 @@
     <img src="/static/icon.png?v={{ static_v }}" alt="" class="app-logo">
     <span class="app-name">WebCalDav</span>
     <span class="user-email" id="header-email"></span>
-    <span class="logout-countdown" id="logout-countdown" title="Time until automatic logout"></span>
-    <button id="btn-settings" class="btn-outline">Settings</button>
-    <button id="btn-logout" class="btn-outline">Log out</button>
+    <span class="logout-countdown" id="logout-countdown" data-i18n-title="ui.header_logout_title" title="Time until automatic logout"></span>
+    <button id="btn-settings" class="btn-outline" data-i18n="ui.header_settings">Settings</button>
+    <button id="btn-logout" class="btn-outline" data-i18n="ui.header_logout">Log out</button>
   </header>
   <div class="calendar-body">
     <div id="calendar"></div>
@@ -79,7 +81,7 @@
         <div id="agenda-status" class="agenda-status" style="display:none"></div>
       </div>
     </div>
-    <button id="btn-create-fab" class="fab" type="button" aria-label="New event" title="New event">+</button>
+    <button id="btn-create-fab" class="fab" type="button" data-i18n-aria-label="ui.fab_new_event" data-i18n-title="ui.fab_new_event" aria-label="New event" title="New event">+</button>
   </div>
 </div>
 
@@ -88,33 +90,33 @@
 <div id="event-modal" class="event-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="ev-title-text">
   <div class="event-modal-header">
     <span id="ev-title-text">Event</span>
-    <button id="btn-event-close" class="btn-icon" aria-label="Close">&#x2715;</button>
+    <button id="btn-event-close" class="btn-icon" data-i18n-aria-label="ui.modal_close" aria-label="Close">&#x2715;</button>
   </div>
   <div class="event-modal-body">
     <div id="ev-edit-note" class="info-msg" style="display:none"></div>
     <div id="ev-error" class="error-msg" style="display:none"></div>
 
     <label class="ev-field" id="ev-type-field">
-      <span class="ev-label">Type</span>
+      <span class="ev-label" data-i18n="ui.modal_type">Type</span>
       <select id="ev-type">
-        <option value="event">Event</option>
-        <option value="task">Task</option>
+        <option value="event" data-i18n="ui.opt_event">Event</option>
+        <option value="task" data-i18n="ui.opt_task">Task</option>
       </select>
     </label>
 
     <label class="ev-field">
-      <span class="ev-label">Name</span>
+      <span class="ev-label" data-i18n="ui.modal_name">Name</span>
       <input id="ev-name" type="text">
     </label>
 
     <label class="ev-field" id="ev-calendar-field" style="display:none">
-      <span class="ev-label">Calendar</span>
+      <span class="ev-label" data-i18n="ui.modal_calendar">Calendar</span>
       <select id="ev-calendar"></select>
     </label>
 
     <fieldset class="ev-group">
       <legend id="ev-duration-legend">Duration</legend>
-      <label class="ev-check"><input type="checkbox" id="ev-allday"> All day</label>
+      <label class="ev-check"><input type="checkbox" id="ev-allday"> <span data-i18n="ui.modal_allday">All day</span></label>
       <div class="ev-dt-row">
         <span class="ev-label" id="ev-from-label">From</span>
         <span class="ev-date-fields" id="ev-start-date-fields"></span>
@@ -125,48 +127,48 @@
         <span class="ev-date-fields" id="ev-end-date-fields"></span>
         <span class="ev-time ev-time-fields" id="ev-end-time-fields"></span>
       </div>
-      <p class="ev-task-hint" id="ev-undated-hint" style="display:none">Leave dates empty for an undated task.</p>
+      <p class="ev-task-hint" id="ev-undated-hint" style="display:none" data-i18n="ui.modal_undated_hint">Leave dates empty for an undated task.</p>
     </fieldset>
 
     <fieldset class="ev-group">
-      <legend>Repetition</legend>
-      <label class="ev-check"><input type="checkbox" id="ev-repeats"> Repeats</label>
+      <legend data-i18n="ui.modal_repetition">Repetition</legend>
+      <label class="ev-check"><input type="checkbox" id="ev-repeats"> <span data-i18n="ui.modal_repeats">Repeats</span></label>
       <div id="ev-repeat-details" class="ev-repeat-details" style="display:none">
         <div id="ev-recur-summary" class="ev-recur-summary" style="display:none"></div>
         <div id="ev-recur-editor" class="ev-recur-editor">
           <div class="ev-recur-row">
-            <span class="ev-label">Every</span>
+            <span class="ev-label" data-i18n="ui.modal_every">Every</span>
             <input id="ev-recur-interval" type="number" min="1" value="1" class="ev-recur-interval">
             <select id="ev-recur-freq">
-              <option value="hourly">hour(s)</option>
-              <option value="daily">day(s)</option>
-              <option value="weekly">week(s)</option>
-              <option value="monthly">month(s)</option>
-              <option value="yearly">year(s)</option>
+              <option value="hourly" data-i18n="ui.freq_hourly">hour(s)</option>
+              <option value="daily" data-i18n="ui.freq_daily">day(s)</option>
+              <option value="weekly" data-i18n="ui.freq_weekly">week(s)</option>
+              <option value="monthly" data-i18n="ui.freq_monthly">month(s)</option>
+              <option value="yearly" data-i18n="ui.freq_yearly">year(s)</option>
             </select>
           </div>
           <div class="ev-recur-row" id="ev-recur-monthly" style="display:none">
             <label class="ev-radio">
               <input type="radio" name="ev-monthly-mode" value="monthday" checked>
-              On day <span id="ev-recur-monthday-desc"></span>
+              <span data-i18n="ui.modal_on_day">On day</span> <span id="ev-recur-monthday-desc"></span>
             </label>
             <label class="ev-radio">
               <input type="radio" name="ev-monthly-mode" value="weekday">
-              On the <span id="ev-recur-weekday-desc"></span>
+              <span data-i18n="ui.modal_on_the">On the</span> <span id="ev-recur-weekday-desc"></span>
             </label>
           </div>
           <div class="ev-recur-row">
             <label class="ev-check">
-              <input type="checkbox" id="ev-recur-end-date"> End by date
+              <input type="checkbox" id="ev-recur-end-date"> <span data-i18n="ui.modal_end_by_date">End by date</span>
             </label>
             <span class="ev-date-fields" id="ev-recur-until-date-fields"></span>
           </div>
           <div class="ev-recur-row">
             <label class="ev-check">
-              <input type="checkbox" id="ev-recur-end-count"> End after
+              <input type="checkbox" id="ev-recur-end-count"> <span data-i18n="ui.modal_end_after">End after</span>
             </label>
             <input id="ev-recur-count" type="number" min="1" value="10" class="ev-recur-count">
-            <span class="ev-recur-unit">occurrence(s)</span>
+            <span class="ev-recur-unit" data-i18n="ui.modal_occurrences">occurrence(s)</span>
           </div>
           <div id="ev-recur-preview" class="ev-recur-preview"></div>
         </div>
@@ -174,49 +176,49 @@
     </fieldset>
 
     <label class="ev-field">
-      <span class="ev-label">Location</span>
+      <span class="ev-label" data-i18n="ui.modal_location">Location</span>
       <input id="ev-location" type="text" placeholder="—">
     </label>
 
     <label class="ev-field" id="ev-priority-field" style="display:none">
-      <span class="ev-label">Priority</span>
+      <span class="ev-label" data-i18n="ui.modal_priority">Priority</span>
       <select id="ev-priority">
-        <option value="0">None</option>
-        <option value="1">High</option>
-        <option value="5">Medium</option>
-        <option value="9">Low</option>
+        <option value="0" data-i18n="ui.prio_none">None</option>
+        <option value="1" data-i18n="ui.prio_high">High</option>
+        <option value="5" data-i18n="ui.prio_medium">Medium</option>
+        <option value="9" data-i18n="ui.prio_low">Low</option>
       </select>
     </label>
 
     <label class="ev-check" id="ev-done-field" style="display:none">
-      <input type="checkbox" id="ev-done"> Task done
+      <input type="checkbox" id="ev-done"> <span data-i18n="ui.modal_task_done">Task done</span>
     </label>
 
     <label class="ev-field">
-      <span class="ev-label">Notes</span>
+      <span class="ev-label" data-i18n="ui.modal_notes">Notes</span>
       <textarea id="ev-notes" rows="3" placeholder="—"></textarea>
     </label>
 
     <div class="ev-field">
-      <span class="ev-label">Reminders</span>
+      <span class="ev-label" data-i18n="ui.modal_reminders">Reminders</span>
       <div class="ev-reminders-box">
         <div id="ev-reminders" class="ev-reminders"></div>
-        <button type="button" id="ev-reminder-add" class="btn-icon ev-reminder-add" aria-label="Add reminder">+</button>
+        <button type="button" id="ev-reminder-add" class="btn-icon ev-reminder-add" data-i18n-aria-label="ui.modal_add_reminder" aria-label="Add reminder">+</button>
       </div>
     </div>
   </div>
   <div class="event-modal-footer">
-    <button id="btn-event-delete" class="btn-danger" style="display:none">Delete</button>
-    <button id="btn-event-cancel" class="btn-outline">Cancel</button>
-    <button id="btn-event-save" class="btn-primary">Save</button>
+    <button id="btn-event-delete" class="btn-danger" style="display:none" data-i18n="ui.modal_delete">Delete</button>
+    <button id="btn-event-cancel" class="btn-outline" data-i18n="ui.modal_cancel">Cancel</button>
+    <button id="btn-event-save" class="btn-primary" data-i18n="ui.modal_save">Save</button>
   </div>
 </div>
 
 <!-- ── Event context menu (right-click) ── -->
 <div id="ev-context-menu" class="ev-context-menu" style="display:none">
-  <button type="button" id="ctx-toggle-done" style="display:none">Mark as done</button>
-  <button type="button" id="ctx-edit">Edit</button>
-  <button type="button" id="ctx-delete">Delete</button>
+  <button type="button" id="ctx-toggle-done" style="display:none" data-i18n="ui.ctx_mark_done">Mark as done</button>
+  <button type="button" id="ctx-edit" data-i18n="ui.ctx_edit">Edit</button>
+  <button type="button" id="ctx-delete" data-i18n="ui.ctx_delete">Delete</button>
 </div>
 
 <!-- ── Confirm dialog ── -->
@@ -224,8 +226,8 @@
 <div id="confirm-modal" class="confirm-modal" style="display:none" role="dialog" aria-modal="true">
   <p id="confirm-text"></p>
   <div class="confirm-footer">
-    <button id="confirm-no" class="btn-outline">No</button>
-    <button id="confirm-yes" class="btn-danger">Yes</button>
+    <button id="confirm-no" class="btn-outline" data-i18n="ui.confirm_no">No</button>
+    <button id="confirm-yes" class="btn-danger" data-i18n="ui.confirm_yes">Yes</button>
   </div>
 </div>
 
@@ -234,12 +236,12 @@
 <div id="scope-modal" class="confirm-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="scope-title">
   <p id="scope-title"></p>
   <div class="scope-options">
-    <button type="button" class="btn-outline" data-scope="this">This <span class="scope-noun">event</span> only</button>
-    <button type="button" class="btn-outline" data-scope="thisfuture">This and all future <span class="scope-noun">event</span>s</button>
-    <button type="button" class="btn-outline" data-scope="all">All <span class="scope-noun">event</span>s in the series</button>
+    <button type="button" class="btn-outline" data-scope="this"></button>
+    <button type="button" class="btn-outline" data-scope="thisfuture"></button>
+    <button type="button" class="btn-outline" data-scope="all"></button>
   </div>
   <div class="confirm-footer">
-    <button id="scope-cancel" class="btn-outline">Cancel</button>
+    <button id="scope-cancel" class="btn-outline" data-i18n="ui.scope_cancel">Cancel</button>
   </div>
 </div>
 
@@ -247,94 +249,100 @@
 <div id="settings-overlay" class="settings-overlay" style="display:none"></div>
 <aside id="settings-panel" class="settings-panel" style="display:none">
   <div class="settings-header">
-    <span>Settings</span>
-    <button id="btn-settings-close" class="btn-icon" aria-label="Close">&#x2715;</button>
+    <span data-i18n="ui.settings_title">Settings</span>
+    <button id="btn-settings-close" class="btn-icon" data-i18n-aria-label="ui.settings_close" aria-label="Close">&#x2715;</button>
   </div>
 
   <div class="settings-scroll">
   <section class="settings-section">
-    <h2>CalDAV Accounts</h2>
+    <h2 data-i18n="ui.settings_accounts">CalDAV Accounts</h2>
     <div id="accounts-list"></div>
     <details id="add-account-details">
-      <summary>Add account</summary>
+      <summary data-i18n="ui.settings_add_account">Add account</summary>
       <form id="add-account-form" class="inner-form">
         <div id="add-account-error" class="error-msg" style="display:none"></div>
-        <label>Server URL</label>
+        <label data-i18n="ui.settings_server_url">Server URL</label>
         <input id="acc-url" type="url" placeholder="https://dav.example.com" required>
-        <label>Username</label>
+        <label data-i18n="ui.settings_username">Username</label>
         <input id="acc-user" type="text" autocomplete="off" required>
-        <label>Password</label>
+        <label data-i18n="ui.settings_password">Password</label>
         <input id="acc-pass" type="password" autocomplete="off" required>
-        <button type="submit">Connect</button>
+        <button type="submit" data-i18n="ui.settings_connect">Connect</button>
       </form>
     </details>
   </section>
 
   <section class="settings-section">
-    <h2>Calendars</h2>
+    <h2 data-i18n="ui.settings_calendars">Calendars</h2>
     <div id="calendars-list"></div>
   </section>
 
   <section class="settings-section">
-    <h2>Preferences</h2>
+    <h2 data-i18n="ui.settings_preferences">Preferences</h2>
     <form id="prefs-form" class="inner-form">
       <div id="prefs-msg" style="display:none"></div>
-      <label>Timezone</label>
+      <label data-i18n="ui.pref_timezone">Timezone</label>
       <select id="pref-tz"></select>
-      <label>First day of week</label>
+      <label data-i18n="ui.pref_first_day">First day of week</label>
       <select id="pref-fdow">
-        <option value="0">Sunday</option>
-        <option value="1">Monday</option>
-        <option value="6">Saturday</option>
+        <option value="0" data-i18n="ui.day_sunday">Sunday</option>
+        <option value="1" data-i18n="ui.day_monday">Monday</option>
+        <option value="6" data-i18n="ui.day_saturday">Saturday</option>
       </select>
-      <label>Time format</label>
+      <label data-i18n="ui.pref_time_format">Time format</label>
       <select id="pref-timefmt">
-        <option value="24h">24-hour (13:00)</option>
-        <option value="12h">12-hour (1pm)</option>
+        <option value="24h" data-i18n="ui.timefmt_24">24-hour (13:00)</option>
+        <option value="12h" data-i18n="ui.timefmt_12">12-hour (1pm)</option>
       </select>
-      <label>Date format</label>
+      <label data-i18n="ui.pref_date_format">Date format</label>
       <select id="pref-datefmt">
         <option value="YYYY-MM-DD">YYYY-MM-DD</option>
         <option value="MM/DD/YYYY">MM/DD/YYYY</option>
         <option value="DD/MM/YYYY">DD/MM/YYYY</option>
       </select>
-      <label>Default view</label>
+      <label data-i18n="ui.pref_default_view">Default view</label>
       <select id="pref-default-view">
-        <option value="dayGridMonth">Month</option>
-        <option value="timeGridWeek">Week</option>
-        <option value="timeGridDay">Day</option>
-        <option value="agenda">Agenda</option>
+        <option value="dayGridMonth" data-i18n="ui.view_month">Month</option>
+        <option value="timeGridWeek" data-i18n="ui.view_week">Week</option>
+        <option value="timeGridDay" data-i18n="ui.view_day">Day</option>
+        <option value="agenda" data-i18n="ui.view_agenda">Agenda</option>
       </select>
-      <label>Completed tasks</label>
+      <label data-i18n="ui.pref_completed_tasks">Completed tasks</label>
       <select id="pref-completed-task">
-        <option value="hidden">Hidden</option>
-        <option value="grayed">Grayed out</option>
+        <option value="hidden" data-i18n="ui.completed_hidden">Hidden</option>
+        <option value="grayed" data-i18n="ui.completed_grayed">Grayed out</option>
       </select>
-      <label>Undated tasks</label>
+      <label data-i18n="ui.pref_undated_tasks">Undated tasks</label>
       <select id="pref-undated-task">
-        <option value="agenda">Agenda only</option>
-        <option value="today">Today &amp; agenda</option>
+        <option value="agenda" data-i18n="ui.undated_agenda">Agenda only</option>
+        <option value="today" data-i18n="ui.undated_today">Today &amp; agenda</option>
       </select>
-      <label>Theme</label>
+      <label data-i18n="ui.pref_theme">Theme</label>
       <select id="pref-theme">
-        <option value="system">System</option>
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
+        <option value="system" data-i18n="ui.theme_system">System</option>
+        <option value="light" data-i18n="ui.theme_light">Light</option>
+        <option value="dark" data-i18n="ui.theme_dark">Dark</option>
+      </select>
+      <label data-i18n="ui.pref_language">Language</label>
+      <select id="pref-language">
+        <option value="autodetect" data-i18n="ui.lang_auto">Auto-detect</option>
+        <option value="english">English</option>
+        <option value="czech">Čeština</option>
       </select>
       <label class="ev-check">
         <input type="checkbox" id="pref-auto-logout-enabled">
-        Automatic logout after inactivity
+        <span data-i18n="ui.pref_auto_logout">Automatic logout after inactivity</span>
       </label>
-      <label>Logout after (minutes)</label>
+      <label data-i18n="ui.pref_logout_after">Logout after (minutes)</label>
       <input id="pref-auto-logout-min" type="number" min="1" step="1" value="60">
       <label class="ev-check">
         <input type="checkbox" id="pref-notifications-enabled">
-        Browser notifications (reminders &amp; event starts)
+        <span data-i18n="ui.pref_notifications">Browser notifications (reminders &amp; event starts)</span>
       </label>
-      <p id="pref-notifications-note" class="pref-note">
+      <p id="pref-notifications-note" class="pref-note" data-i18n="ui.pref_notifications_note">
         Fire only while a WebCalDav tab stays open. Enabling turns automatic logout off.
       </p>
-      <button type="button" id="pref-notifications-grant" class="btn-outline">
+      <button type="button" id="pref-notifications-grant" class="btn-outline" data-i18n="ui.pref_notifications_grant">
         Enable notifications on this browser
       </button>
     </form>
@@ -342,7 +350,7 @@
   </div>
 
   <div class="settings-footer">
-    <button type="submit" form="prefs-form" id="prefs-save" class="btn-primary">Save</button>
+    <button type="submit" form="prefs-form" id="prefs-save" class="btn-primary" data-i18n="ui.save">Save</button>
   </div>
 </aside>
 

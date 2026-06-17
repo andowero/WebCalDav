@@ -10,6 +10,7 @@
 | v3        | Reminders and browser notifications                       | Complete |
 | v4        | Tasks (VTODO): view, edit, complete, recurrence           | Complete |
 | v5        | Dark mode (system/light/dark theme)                       | Complete |
+| v6        | Internationalization (i18n) + Czech translation           | Complete |
 
 ## Known issues
 

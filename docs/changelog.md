@@ -2,6 +2,25 @@
 
 ## Unreleased — MVP
 
+### Added — internationalization + Czech (2026-06-17)
+- The app is now **translatable**, shipping **English** and **Czech**. A new
+  per-user **language** setting (`autodetect` / `english` / `czech`) lives on
+  `UserSettings` (with the usual SQLite `ALTER TABLE` migration) and on
+  `/settings`, with a **Language** picker in Settings → Preferences. Changing it
+  reloads the page (the active catalog is injected at render time).
+- Language resolution is server-side (`webcaldav/i18n.py`): a concrete setting
+  wins; `autodetect` parses the browser `Accept-Language` header (by q-order)
+  and falls back to English. The server sets `<html lang>` and injects the
+  resolved catalog as `window.__I18N__` + `window.__LANG__`.
+- Translation catalogs are JSON under `webcaldav/locales/` (`en.json` is the
+  source of truth; `cs.json` mirrors its keys). Sections: `ui` (static markup,
+  applied client-side over `data-i18n*` attributes), `dyn` (dynamic JS strings
+  with `{placeholder}` + Czech-aware pluralization), `errors` (server
+  `HTTPException` detail strings, translated client-side at the `api*` boundary),
+  and `fc` (FullCalendar buttons/labels). Date locale is **fully localized**:
+  FullCalendar uses a locale object whose `code` drives native Intl
+  month/weekday names, and Luxon's default locale follows the language.
+
 ### Added — dark mode (2026-06-17)
 - User-selectable UI **theme**: `system` (follow OS `prefers-color-scheme`,
   default), `light`, or `dark`. New `theme` field on `UserSettings` (with the

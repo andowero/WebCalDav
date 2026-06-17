@@ -1044,7 +1044,9 @@ details#add-account-details summary {
 }
 
 .ev-dt-row .ev-label {
-  width: 3rem;
+  width: auto;
+  min-width: 3rem;
+  white-space: nowrap;
   flex: none;
 }
 

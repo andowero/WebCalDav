@@ -139,6 +139,32 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   the browser stops notifications — see "Reminders while logged out" below.
 - No build step beyond bundling FullCalendar's CSS/JS.
 
+### Internationalization (i18n)
+
+- The app ships **English** and **Czech**. Translation catalogs are JSON files
+  under `webcaldav/locales/` (`en.json` is the source of truth; `cs.json` mirrors
+  its key set — a test enforces parity). Catalog sections: `ui` (static markup),
+  `dyn` (dynamic JS strings with `{placeholder}` interpolation and a Czech-aware
+  3-form plural helper), `errors` (server `HTTPException` detail strings keyed by
+  their exact English text), `fc` (FullCalendar button/helper text), plus `units`
+  and `ordinals` for grammar.
+- **Effective language** is resolved server-side in `webcaldav/i18n.py`
+  (`resolve_language`): the per-user `language` setting (`autodetect` / `english`
+  / `czech`) wins when concrete; `autodetect` parses the browser
+  `Accept-Language` header by q-order and falls back to English. The `/` route
+  sets `<html lang>` and injects the resolved catalog as `window.__I18N__` plus
+  `window.__LANG__`.
+- The frontend consumes the catalog in one place: a `tr(key, params)` helper
+  (named `tr`, not `t`, to avoid clashing with task variables) and a one-time
+  `applyTranslations()` DOM sweep over `data-i18n` / `data-i18n-placeholder` /
+  `data-i18n-title` / `data-i18n-aria-label` attributes. Server error messages
+  are translated at the `api*` fetch boundary via the `errors` map, so every call
+  site benefits without change. Changing the language setting triggers a reload
+  (the catalog is fixed at render time). Date locale is fully localized:
+  FullCalendar gets a locale object whose `code` drives native `Intl`
+  month/weekday names (no locale bundle vendored) and Luxon's default locale is
+  set to the active language.
+
 ### Observability
 
 - Prometheus middleware on FastAPI for `http_requests_total`.

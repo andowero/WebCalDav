@@ -87,5 +87,8 @@ class UserSettings(Base):
     # UI color theme: "system" (follow OS prefers-color-scheme, default),
     # "light", or "dark".
     theme: Mapped[str] = mapped_column(String, default="system", nullable=False)
+    # UI language: "autodetect" (use the browser Accept-Language, default),
+    # "english", or "czech". Resolved to a concrete code by webcaldav.i18n.
+    language: Mapped[str] = mapped_column(String, default="autodetect", nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="settings")

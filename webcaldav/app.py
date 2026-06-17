@@ -14,6 +14,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from .config import settings
 from .db import create_tables, init_engine, get_session_factory
 from .deps import init_login_rate_limiter, init_session_store, get_session_store
+from .i18n import load_catalog, resolve_language
 from .metrics import http_requests_total
 from .models import User, UserSettings
 from .routers import (
@@ -123,6 +124,7 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_completed_task_display = "hidden"
     user_settings_undated_task_display = "agenda"
     user_settings_theme = "system"
+    user_settings_language = "autodetect"
 
     if session_id:
         try:
@@ -153,8 +155,14 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_completed_task_display = s.completed_task_display
                         user_settings_undated_task_display = s.undated_task_display
                         user_settings_theme = s.theme
+                        user_settings_language = s.language
         except Exception:
             logger.warning("root_session_lookup_failed", exc_info=True)
+
+    lang = resolve_language(
+        user_settings_language, request.headers.get("accept-language")
+    )
+    catalog = load_catalog(lang)
 
     return templates.TemplateResponse(
         request,
@@ -173,6 +181,9 @@ async def root(request: Request) -> HTMLResponse:
             "completed_task_display": user_settings_completed_task_display,
             "undated_task_display": user_settings_undated_task_display,
             "theme": user_settings_theme,
+            "language": user_settings_language,
+            "lang": lang,
+            "i18n": catalog,
             "notification_horizon_days": settings.notification_horizon_days,
             "notification_lookback_days": settings.notification_lookback_days,
             "static_v": STATIC_VERSION,

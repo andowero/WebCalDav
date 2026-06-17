@@ -23,7 +23,7 @@
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error(errMsg(data.detail) || `HTTP ${r.status}`);
     return data;
   }
 
@@ -34,7 +34,7 @@
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error(errMsg(data.detail) || `HTTP ${r.status}`);
     return data;
   }
 
@@ -42,14 +42,14 @@
     const r = await fetch(path, { method: 'DELETE', headers: { 'X-Requested-With': 'fetch' } });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
-      throw new Error(data.detail || `HTTP ${r.status}`);
+      throw new Error(errMsg(data.detail) || `HTTP ${r.status}`);
     }
   }
 
   async function apiGet(path) {
     const r = await fetch(path);
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error(errMsg(data.detail) || `HTTP ${r.status}`);
     return data;
   }
 
@@ -60,8 +60,71 @@
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    if (!r.ok) throw new Error(errMsg(data.detail) || `HTTP ${r.status}`);
     return data;
+  }
+
+  // ── i18n ──────────────────────────────────────────────────────────────────
+  // Catalog + effective language code are injected by the server (see index.html).
+  // Note: the translate helper is named `tr` because `t` is used elsewhere for
+  // task objects.
+  const I18N = window.__I18N__ || {};
+  const LANG = window.__LANG__ || 'en';
+
+  // Dot-path lookup ("ui.modal_save") with {placeholder} interpolation. Returns
+  // the key itself when missing, so untranslated strings are visible, not blank.
+  function tr(key, params) {
+    let node = I18N;
+    for (const part of String(key).split('.')) {
+      node = node && typeof node === 'object' ? node[part] : undefined;
+    }
+    let str = typeof node === 'string' ? node : key;
+    if (params) {
+      str = str.replace(/\{(\w+)\}/g, (m, name) =>
+        params[name] != null ? String(params[name]) : m);
+    }
+    return str;
+  }
+
+  // Plural form select. English: 1 vs other. Czech: 1 / 2–4 / 5+.
+  function pluralIndex(n) {
+    if (LANG === 'cs') {
+      if (n === 1) return 0;
+      if (n >= 2 && n <= 4) return 1;
+      return 2;
+    }
+    return n === 1 ? 0 : 1;
+  }
+
+  // Localized unit noun ("minutes" → "minut") agreeing with count n.
+  function unitWord(unit, n) {
+    const forms = (I18N.units && I18N.units[unit]) || [unit];
+    return forms[Math.min(pluralIndex(n), forms.length - 1)] || forms[0];
+  }
+
+  // Map a server-returned error detail to its translation, leaving unknown
+  // (e.g. validation array or interpolated) details untouched.
+  function errMsg(detail) {
+    if (typeof detail !== 'string') return detail;
+    return (I18N.errors && I18N.errors[detail]) || detail;
+  }
+
+  // Fill DOM text/attributes tagged with data-i18n* from the catalog. Run once
+  // on load; the in-markup English text stays as a fallback for missing keys.
+  function applyTranslations(root) {
+    const scope = root || document;
+    scope.querySelectorAll('[data-i18n]').forEach((el) => {
+      el.textContent = tr(el.getAttribute('data-i18n'));
+    });
+    scope.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+      el.setAttribute('placeholder', tr(el.getAttribute('data-i18n-placeholder')));
+    });
+    scope.querySelectorAll('[data-i18n-title]').forEach((el) => {
+      el.setAttribute('title', tr(el.getAttribute('data-i18n-title')));
+    });
+    scope.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
+      el.setAttribute('aria-label', tr(el.getAttribute('data-i18n-aria-label')));
+    });
   }
 
   function initLogin() {
@@ -208,11 +271,11 @@
 
   async function loadAccounts() {
     const list = document.getElementById('accounts-list');
-    list.innerHTML = '<p class="loading">Loading…</p>';
+    list.innerHTML = `<p class="loading">${escHtml(tr('dyn.loading'))}</p>`;
     try {
       const accounts = await apiGet('/caldav-accounts');
       if (accounts.length === 0) {
-        list.innerHTML = '<p class="empty-note">No accounts yet.</p>';
+        list.innerHTML = `<p class="empty-note">${escHtml(tr('dyn.no_accounts'))}</p>`;
         return;
       }
       list.innerHTML = '';
@@ -221,9 +284,9 @@
         row.className = 'account-row';
         row.innerHTML =
           `<span class="account-url" title="${escHtml(a.url)}">${escHtml(a.username)} — ${escHtml(a.url)}</span>` +
-          `<button class="btn-danger-sm" data-id="${a.id}">Remove</button>`;
+          `<button class="btn-danger-sm" data-id="${a.id}">${escHtml(tr('dyn.remove'))}</button>`;
         row.querySelector('button').addEventListener('click', async () => {
-          if (!confirm(`Remove account ${a.url}?`)) return;
+          if (!confirm(tr('dyn.remove_account', { url: a.url }))) return;
           try {
             await apiDelete(`/caldav-accounts/${a.id}`);
             await loadSettings();
@@ -240,11 +303,11 @@
 
   async function loadCalendars() {
     const list = document.getElementById('calendars-list');
-    list.innerHTML = '<p class="loading">Loading…</p>';
+    list.innerHTML = `<p class="loading">${escHtml(tr('dyn.loading'))}</p>`;
     try {
       const cals = await apiGet('/calendars');
       if (cals.length === 0) {
-        list.innerHTML = '<p class="empty-note">No calendars found.</p>';
+        list.innerHTML = `<p class="empty-note">${escHtml(tr('dyn.no_calendars'))}</p>`;
         return;
       }
       list.innerHTML = '';
@@ -257,9 +320,9 @@
             `<input type="checkbox" class="cal-enabled" data-id="${c.id}"${c.enabled ? ' checked' : ''}>` +
             ` ${escHtml(c.display_name)}` +
           `</label>` +
-          `<label class="cal-default-label" title="Default calendar for new events">` +
+          `<label class="cal-default-label" title="${escHtml(tr('dyn.default_calendar_title'))}">` +
             `<input type="checkbox" class="cal-default" data-id="${c.id}"${c.is_default ? ' checked' : ''}>` +
-            ` Default` +
+            ` ${escHtml(tr('dyn.default'))}` +
           `</label>`;
         const colorInput = row.querySelector('.cal-color');
         const enabledInput = row.querySelector('.cal-enabled');
@@ -308,6 +371,7 @@
       document.getElementById('pref-completed-task').value = s.completed_task_display || 'hidden';
       document.getElementById('pref-undated-task').value = s.undated_task_display || 'agenda';
       document.getElementById('pref-theme').value = s.theme || 'system';
+      document.getElementById('pref-language').value = s.language || 'autodetect';
       const enabled = s.auto_logout_enabled ?? true;
       const mins = Math.max(1, Math.round((s.auto_logout_timeout_seconds ?? 3600) / 60));
       const enEl = document.getElementById('pref-auto-logout-enabled');
@@ -344,7 +408,7 @@
       hideError('add-account-error');
       const btn = addForm.querySelector('button');
       btn.disabled = true;
-      btn.textContent = 'Connecting…';
+      btn.textContent = tr('dyn.connecting');
       try {
         await apiPost('/caldav-accounts', {
           url: document.getElementById('acc-url').value,
@@ -358,7 +422,7 @@
         showError('add-account-error', err.message);
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Connect';
+        btn.textContent = tr('dyn.connect');
       }
     });
 
@@ -375,7 +439,7 @@
       if (notifEnabledEl.checked) {
         if (!('Notification' in window)) {
           notifEnabledEl.checked = false;
-          alert('This browser does not support notifications.');
+          alert(tr('dyn.notif_unsupported'));
           return;
         }
         let perm = Notification.permission;
@@ -384,7 +448,7 @@
         }
         if (perm !== 'granted') {
           notifEnabledEl.checked = false;
-          alert('Notifications are blocked. Allow them for this site in your browser settings, then try again.');
+          alert(tr('dyn.notif_blocked_try'));
           return;
         }
         // Enabling notifications forces auto-logout off (the tab must stay
@@ -404,7 +468,7 @@
     const grantBtn = document.getElementById('pref-notifications-grant');
     grantBtn.addEventListener('click', async () => {
       if (!('Notification' in window)) {
-        alert('This browser does not support notifications.');
+        alert(tr('dyn.notif_unsupported'));
         return;
       }
       let perm = Notification.permission;
@@ -413,9 +477,9 @@
       }
       if (perm === 'granted') {
         if ((window.__SETTINGS__ || {}).notifications_enabled) startNotifications();
-        alert('Notifications are enabled on this browser.');
+        alert(tr('dyn.notif_enabled'));
       } else {
-        alert('Notifications are blocked. Allow them for this site in your browser settings.');
+        alert(tr('dyn.notif_blocked'));
       }
     });
 
@@ -434,12 +498,14 @@
         const completedTask = document.getElementById('pref-completed-task').value;
         const undatedTask = document.getElementById('pref-undated-task').value;
         const theme = document.getElementById('pref-theme').value;
+        const language = document.getElementById('pref-language').value;
+        const languageChanged = language !== (window.__SETTINGS__?.language ?? 'autodetect');
         const notifEnabled = document.getElementById('pref-notifications-enabled').checked;
         // Notifications force auto-logout off (server enforces the same).
         const autoEnabled = notifEnabled ? false : document.getElementById('pref-auto-logout-enabled').checked;
         const autoMin = parseInt(document.getElementById('pref-auto-logout-min').value, 10);
         if (autoEnabled && (!Number.isFinite(autoMin) || autoMin < 1)) {
-          throw new Error('Logout time must be at least 1 minute');
+          throw new Error(tr('dyn.logout_min'));
         }
         const autoSecs = autoEnabled ? autoMin * 60 : (window.__SETTINGS__?.auto_logout_timeout_seconds ?? 3600);
         await apiPut('/settings', {
@@ -454,7 +520,11 @@
           completed_task_display: completedTask,
           undated_task_display: undatedTask,
           theme: theme,
+          language: language,
         });
+        // The active translation catalog is injected at page render, so a
+        // language change only takes full effect after a reload.
+        if (languageChanged) { window.location.reload(); return; }
         window.__SETTINGS__ = window.__SETTINGS__ || {};
         window.__SETTINGS__.timezone = tz;
         window.__SETTINGS__.first_day_of_week = fdow;
@@ -467,13 +537,14 @@
         window.__SETTINGS__.completed_task_display = completedTask;
         window.__SETTINGS__.undated_task_display = undatedTask;
         window.__SETTINGS__.theme = theme;
+        window.__SETTINGS__.language = language;
         // Apply theme live; "system" tracked by CSS media query (no JS needed).
         document.documentElement.dataset.theme = theme;
         if (notifEnabled) startNotifications(); else stopNotifications();
         applyCalendarPrefs(tz, fdow, timefmt, datefmt);
         // Live session timeout changed server-side; resync the countdown.
         refreshLogoutCountdown();
-        msg.textContent = 'Saved.';
+        msg.textContent = tr('dyn.saved');
         msg.className = 'info-msg';
         msg.style.display = '';
         setTimeout(() => { msg.style.display = 'none'; }, 2000);
@@ -550,16 +621,16 @@
 
   function applyTypeToggle() {
     const isTask = modalIsTask();
-    document.getElementById('ev-duration-legend').textContent = isTask ? 'Schedule' : 'Duration';
-    document.getElementById('ev-from-label').textContent = isTask ? 'Start' : 'From';
-    document.getElementById('ev-to-label').textContent = isTask ? 'Due' : 'To';
+    document.getElementById('ev-duration-legend').textContent = isTask ? tr('dyn.schedule') : tr('dyn.duration');
+    document.getElementById('ev-from-label').textContent = isTask ? tr('dyn.start') : tr('dyn.from');
+    document.getElementById('ev-to-label').textContent = isTask ? tr('dyn.due') : tr('dyn.to');
     document.getElementById('ev-priority-field').style.display = isTask ? '' : 'none';
     document.getElementById('ev-undated-hint').style.display = isTask ? '' : 'none';
     const isNew = _currentEvent && _currentEvent.isNew;
     document.getElementById('ev-done-field').style.display = isTask && !isNew ? '' : 'none';
     if (_currentEvent && _currentEvent.isNew) {
       _currentEvent.isTask = isTask;
-      document.getElementById('ev-title-text').textContent = isTask ? 'New task' : 'New event';
+      document.getElementById('ev-title-text').textContent = isTask ? tr('dyn.new_task') : tr('dyn.new_event');
     }
     // Relabel reminder anchors (before/after due vs end) for the new type.
     renderReminders();
@@ -604,16 +675,22 @@
   function reminderText(r) {
     const isTask = modalIsTask();
     const dir = r.direction === 'after' ? 'after' : 'before';
-    const anchor = r.anchor === 'end' ? (isTask ? 'due' : 'end') : 'start';
+    const anchorWord = r.anchor === 'end' ? (isTask ? 'due' : 'end') : 'start';
+    const relwhen = tr(`dyn.relwhen_${dir}_${anchorWord}`);
     if (r.time != null) {
       const at = reminderTimeText(r.time);
-      if (r.value === 0) return `On the ${anchor} day at ${at}`;
-      const unit = r.value === 1 ? r.unit.slice(0, -1) : r.unit;
-      return `${r.value} ${unit} ${dir} ${anchor} at ${at}`;
+      if (r.value === 0) {
+        return tr('dyn.rem_on_day_at', { anchorDay: tr(`dyn.rem_anchor_day_${anchorWord}`), time: at });
+      }
+      return tr('dyn.rem_n_at', { n: r.value, unit: unitWord(r.unit, r.value), relwhen, time: at });
     }
-    if (r.value === 0) return `At ${anchor} of ${isTask ? 'task' : 'event'}`;
-    const unit = r.value === 1 ? r.unit.slice(0, -1) : r.unit;
-    return `${r.value} ${unit} ${dir} ${anchor}`;
+    if (r.value === 0) {
+      return tr('dyn.rem_at_of', {
+        atof: tr(`dyn.rem_atof_${anchorWord}`),
+        kind: tr(isTask ? 'dyn.kind_task_gen' : 'dyn.kind_event_gen'),
+      });
+    }
+    return tr('dyn.rem_n', { n: r.value, unit: unitWord(r.unit, r.value), relwhen });
   }
 
   // hh:mm (+ AM/PM) inputs for an all-day reminder row, honoring time_format —
@@ -628,7 +705,7 @@
       if (hVal === 0) hVal = 12;
     }
     return (
-      `<span class="ev-reminder-word">at</span>` +
+      `<span class="ev-reminder-word">${escHtml(tr('dyn.rem_at_word'))}</span>` +
       `<input type="text" class="ev-hh ev-rem-hh" data-idx="${idx}" inputmode="numeric" maxlength="2" value="${pad2(hVal)}">` +
       `<span class="ev-colon">:</span>` +
       `<input type="text" class="ev-mm ev-rem-mm" data-idx="${idx}" inputmode="numeric" maxlength="2" value="${pad2(m || 0)}">` +
@@ -642,9 +719,9 @@
   // user's date/time-format settings instead of the server's raw ISO text.
   function readonlyReminderAtText(iso) {
     const dt = luxon.DateTime.fromISO(iso, { setZone: true }).setZone(effectiveTz());
-    if (!dt.isValid) return `At ${iso}`;
+    if (!dt.isValid) return tr('dyn.at_iso', { value: iso });
     const timeFmt = timeFormatKey() === '12h' ? 'h:mm a' : 'HH:mm';
-    return `At ${dt.toFormat(`${luxonDateFmt(dateFormatKey())} ${timeFmt}`)}`;
+    return tr('dyn.at_iso', { value: dt.toFormat(`${luxonDateFmt(dateFormatKey())} ${timeFmt}`) });
   }
 
   // Split the server's extendedProps.reminders into editable and read-only rows.
@@ -654,7 +731,7 @@
     (list || []).forEach((r) => {
       if (!r || typeof r !== 'object') return;
       if (r.readonly) {
-        _remindersReadonly.push(r.at ? readonlyReminderAtText(r.at) : (r.text || 'Reminder'));
+        _remindersReadonly.push(r.at ? readonlyReminderAtText(r.at) : (r.text || tr('dyn.reminder')));
       } else if (r.unit) {
         _reminders.push({
           value: r.value,
@@ -683,7 +760,7 @@
     const rows = [];
     committed.forEach((r, i) => {
       const del = _remindersEditable
-        ? `<button type="button" class="btn-icon ev-reminder-del" data-idx="${i}" aria-label="Delete reminder">×</button>`
+        ? `<button type="button" class="btn-icon ev-reminder-del" data-idx="${i}" aria-label="${escHtml(tr('dyn.delete_reminder'))}">×</button>`
         : '';
       rows.push(
         `<div class="ev-reminder-row"><span class="ev-reminder">${escHtml(reminderText(r))}</span>${del}</div>`
@@ -693,23 +770,23 @@
       const idx = committed.length + i;
       const units = allDay ? ['days', 'weeks'] : ['minutes', 'hours', 'days', 'weeks'];
       const opts = units
-        .map((u) => `<option value="${u}"${u === r.unit ? ' selected' : ''}>${u}</option>`)
+        .map((u) => `<option value="${u}"${u === r.unit ? ' selected' : ''}>${escHtml(unitWord(u, 5))}</option>`)
         .join('');
       const time = allDay ? reminderTimeHtml(idx, r.time) : '';
       const sel = `${r.direction === 'after' ? 'after' : 'before'}|${r.anchor === 'end' ? 'end' : 'start'}`;
-      const endLabel = modalIsTask() ? 'due' : 'end';
+      const endW = modalIsTask() ? 'due' : 'end';
       const anchorOpts = [
-        ['before|start', 'before start'],
-        ['after|start', 'after start'],
-        ['before|end', `before ${endLabel}`],
-        ['after|end', `after ${endLabel}`],
-      ].map(([v, t]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${t}</option>`).join('');
+        ['before|start', tr('dyn.relwhen_before_start')],
+        ['after|start', tr('dyn.relwhen_after_start')],
+        ['before|end', tr(`dyn.relwhen_before_${endW}`)],
+        ['after|end', tr(`dyn.relwhen_after_${endW}`)],
+      ].map(([v, label]) => `<option value="${v}"${v === sel ? ' selected' : ''}>${escHtml(label)}</option>`).join('');
       rows.push(
         `<div class="ev-reminder-row">` +
           `<input type="number" class="ev-reminder-value" data-idx="${idx}" min="0" max="10000" value="${escHtml(r.value)}">` +
           `<select class="ev-reminder-unit" data-idx="${idx}">${opts}</select>` +
           `<select class="ev-reminder-anchor" data-idx="${idx}">${anchorOpts}</select>${time}` +
-          `<button type="button" class="btn-icon ev-reminder-del" data-idx="${idx}" aria-label="Delete reminder">×</button>` +
+          `<button type="button" class="btn-icon ev-reminder-del" data-idx="${idx}" aria-label="${escHtml(tr('dyn.delete_reminder'))}">×</button>` +
         `</div>`
       );
     });
@@ -720,7 +797,7 @@
     });
     box.innerHTML = rows.length
       ? rows.join('')
-      : '<div class="ev-reminder empty-note">None</div>';
+      : `<div class="ev-reminder empty-note">${escHtml(tr('dyn.none'))}</div>`;
 
     box.querySelectorAll('.ev-reminder-del').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -825,7 +902,6 @@
   }
 
   // ── Recurrence editor ────────────────────────────────────────────────────────
-  const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th'];
 
   // Build the ISO start the rule is anchored to, from the modal's From inputs.
   function currentStartISO() {
@@ -844,9 +920,10 @@
     const dt = luxon.DateTime.fromISO(d);
     if (!dt.isValid) return;
     const ord = Math.floor((dt.day - 1) / 7) + 1;
+    const ords = I18N.ordinals || [];
     document.getElementById('ev-recur-monthday-desc').textContent = String(dt.day);
     document.getElementById('ev-recur-weekday-desc').textContent =
-      `${ORDINALS[ord - 1] || ord + 'th'} ${dt.toFormat('cccc')}`;
+      `${ords[ord - 1] || ord + '.'} ${dt.toFormat('cccc')}`;
   }
 
   function updateRecurUI() {
@@ -926,7 +1003,7 @@
     const rule = getRecurrence();
     const start = currentStartISO();
     if (!rule || !start) { box.textContent = ''; return; }
-    if (rule.count == null && rule.until == null) { box.textContent = 'Repeats forever.'; return; }
+    if (rule.count == null && rule.until == null) { box.textContent = tr('dyn.repeats_forever'); return; }
     try {
       const res = await apiPost('/events/recurrence-preview', {
         start,
@@ -935,8 +1012,12 @@
         recurrence: rule,
       });
       box.textContent = res.last
-        ? `${res.count} occurrence(s); last on ${String(res.last).slice(0, 10)}.`
-        : 'No occurrences in range.';
+        ? tr('dyn.recur_preview', {
+            count: res.count,
+            occ: tr(pluralIndex(res.count) === 0 ? 'dyn.occ_one' : 'dyn.occ_other'),
+            date: String(res.last).slice(0, 10),
+          })
+        : tr('dyn.recur_no_occ');
     } catch (_) {
       box.textContent = '';
     }
@@ -1047,7 +1128,7 @@
     });
     container.innerHTML =
       pieces.join(`<span class="ev-dsep">${sep}</span>`) +
-      `<button type="button" class="ev-cal-btn" tabindex="-1" aria-label="Pick date">📅</button>`;
+      `<button type="button" class="ev-cal-btn" tabindex="-1" aria-label="${escHtml(tr('dyn.pick_date'))}">📅</button>`;
 
     order.forEach((part) => {
       const [lo, hi] = DATE_PART_RANGE[part];
@@ -1087,9 +1168,9 @@
     pop.hidden = true;
     pop.innerHTML =
       `<div class="ev-cal-pop-head">` +
-      `<button type="button" class="ev-cal-nav" data-d="-1" aria-label="Previous">‹</button>` +
+      `<button type="button" class="ev-cal-nav" data-d="-1" aria-label="${escHtml(tr('dyn.prev'))}">‹</button>` +
       `<button type="button" class="ev-cal-title"></button>` +
-      `<button type="button" class="ev-cal-nav" data-d="1" aria-label="Next">›</button>` +
+      `<button type="button" class="ev-cal-nav" data-d="1" aria-label="${escHtml(tr('dyn.next'))}">›</button>` +
       `</div><div class="ev-cal-grid"></div>`;
     document.body.appendChild(pop);
     pop.querySelectorAll('.ev-cal-nav').forEach((b) => {
@@ -1440,7 +1521,7 @@
 
     const isTask = !!props.isTask;
     document.getElementById('ev-title-text').textContent =
-      event.title || (isTask ? 'Task' : 'Event');
+      event.title || (isTask ? tr('dyn.task') : tr('dyn.event'));
     document.getElementById('ev-name').value = event.title || '';
     document.getElementById('ev-allday').checked = !!event.allDay;
     setModalType(isTask, true);
@@ -1491,7 +1572,7 @@
     document.getElementById('ev-repeats').disabled = !!recurrence;
     const sumEl = document.getElementById('ev-recur-summary');
     if (recurrence) {
-      sumEl.textContent = `Current: ${recurrence}`;
+      sumEl.textContent = tr('dyn.recur_current', { rule: recurrence });
       sumEl.style.display = '';
     } else {
       sumEl.style.display = 'none';
@@ -1511,7 +1592,7 @@
     let note = '';
     if (props.calendarId == null) {
       editable = false;
-      note = 'Demo event — connect a CalDAV account to add real events.';
+      note = tr('dyn.demo_event');
     } else if (recurrence) {
       const kind = isTask ? 'task' : 'event';
       note = `Recurring ${kind} — you’ll choose which occurrences to change when you save.`;
@@ -1597,7 +1678,7 @@
     hideError('ev-error');
     const cals = await getEnabledCalendars();
 
-    document.getElementById('ev-title-text').textContent = 'New event';
+    document.getElementById('ev-title-text').textContent = tr('dyn.new_event');
     document.getElementById('ev-name').value = '';
     document.getElementById('ev-allday').checked = !!allDay;
     document.getElementById('ev-location').value = '';
@@ -1637,7 +1718,7 @@
     const noteEl = document.getElementById('ev-edit-note');
     const hasCal = cals.length > 0;
     if (!hasCal) {
-      noteEl.textContent = 'Connect a CalDAV account to create events.';
+      noteEl.textContent = tr('dyn.connect_to_create');
       noteEl.style.display = '';
     } else {
       noteEl.style.display = 'none';
@@ -1676,7 +1757,7 @@
     const endDate = getDateFieldValue('end');
     const name = document.getElementById('ev-name').value.trim();
 
-    if (!name) { showError('ev-error', 'Name is required.'); return; }
+    if (!name) { showError('ev-error', tr('dyn.name_required')); return; }
 
     const pad = (n) => String(n).padStart(2, '0');
     const timeStr = (prefix) => {
@@ -1686,7 +1767,7 @@
 
     if (modalIsTask()) { await saveTask(name, allDay, startDate, endDate, timeStr); return; }
 
-    if (!startDate) { showError('ev-error', 'Start date is required.'); return; }
+    if (!startDate) { showError('ev-error', tr('dyn.start_required')); return; }
 
     const body = {
       calendar_id: _currentEvent.calendarId,
@@ -1705,7 +1786,7 @@
       body.end = endDate || startDate;
     } else {
       if (!endDate) {
-        showError('ev-error', 'From and To date are required.');
+        showError('ev-error', tr('dyn.from_to_required'));
         return;
       }
       body.start = `${startDate}T${timeStr('start')}:00`;
@@ -1714,7 +1795,7 @@
 
     // Editing a recurring event: pick which occurrences the change applies to.
     if (!_currentEvent.isNew && _currentEvent.recurring) {
-      const scope = await chooseScope('What to change?');
+      const scope = await chooseScope(tr('dyn.what_to_change'), tr('dyn.noun_event'));
       if (!scope) return;
       body.scope = scope;
       const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
@@ -1723,7 +1804,7 @@
 
     const btn = document.getElementById('btn-event-save');
     btn.disabled = true;
-    btn.textContent = 'Saving…';
+    btn.textContent = tr('dyn.saving');
     try {
       if (_currentEvent.isNew) {
         await apiPost('/events', body);
@@ -1739,7 +1820,7 @@
       showError('ev-error', err.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Save';
+      btn.textContent = tr('dyn.save');
     }
   }
 
@@ -1766,7 +1847,7 @@
     if (endDate) body.due = allDay ? endDate : `${endDate}T${timeStr('end')}:00`;
 
     if (!_currentEvent.isNew && _currentEvent.recurring) {
-      const scope = await chooseScope('What to change?', 'task');
+      const scope = await chooseScope(tr('dyn.what_to_change'), tr('dyn.noun_task'));
       if (!scope) return;
       body.scope = scope;
       const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
@@ -1775,7 +1856,7 @@
 
     const btn = document.getElementById('btn-event-save');
     btn.disabled = true;
-    btn.textContent = 'Saving…';
+    btn.textContent = tr('dyn.saving');
     try {
       if (_currentEvent.isNew) {
         await apiPost('/tasks', body);
@@ -1798,7 +1879,7 @@
       showError('ev-error', err.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Save';
+      btn.textContent = tr('dyn.save');
     }
   }
 
@@ -1809,7 +1890,7 @@
     // Recurring events delete by scope; pick one before hitting the server.
     let qs = `calendar_id=${_currentEvent.calendarId}`;
     if (_currentEvent.recurring) {
-      const scope = await chooseScope('What to delete?', _currentEvent.isTask ? 'task' : 'event');
+      const scope = await chooseScope(tr('dyn.what_to_delete'), tr(_currentEvent.isTask ? 'dyn.noun_task' : 'dyn.noun_event'));
       if (!scope) return;
       qs += `&scope=${scope}`;
       const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
@@ -1871,7 +1952,7 @@
     const p = event.extendedProps || {};
     if (p.isTask) {
       toggleBtn.style.display = '';
-      toggleBtn.textContent = p.completed ? 'Mark as undone' : 'Mark as done';
+      toggleBtn.textContent = p.completed ? tr('dyn.mark_undone') : tr('dyn.mark_done');
     } else {
       toggleBtn.style.display = 'none';
     }
@@ -1909,18 +1990,18 @@
       const props = ev.extendedProps || {};
       if (props.calendarId == null) return;
       const isTask = !!props.isTask;
-      const kind = isTask ? 'task' : 'event';
+      const noun = tr(isTask ? 'dyn.noun_task' : 'dyn.noun_event');
       let qs = `calendar_id=${props.calendarId}`;
       if (props.recurrence) {
         // Recurring: a scope choice replaces the plain yes/no confirm.
-        const scope = await chooseScope('What to delete?', kind);
+        const scope = await chooseScope(tr('dyn.what_to_delete'), noun);
         if (!scope) return;
         qs += `&scope=${scope}`;
         const pivot =
           props.recurrenceId || props.rawStart || (ev.start ? ev.start.toISOString() : null);
         if (pivot) qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
       } else {
-        const ok = await confirmDialog(`Delete "${ev.title || 'this ' + kind}"?`);
+        const ok = await confirmDialog(tr('dyn.confirm_delete', { title: ev.title || tr(isTask ? 'dyn.this_task' : 'dyn.this_event') }));
         if (!ok) return;
       }
       try {
@@ -1971,10 +2052,11 @@
   let _scopeResolve = null;
 
   function chooseScope(text, noun) {
+    const n = noun || tr('dyn.noun_event');
     document.getElementById('scope-title').textContent = text;
-    document.querySelectorAll('#scope-modal .scope-noun').forEach((el) => {
-      el.textContent = noun || 'event';
-    });
+    document.querySelector('#scope-modal [data-scope="this"]').textContent = tr('dyn.scope_this', { noun: n });
+    document.querySelector('#scope-modal [data-scope="thisfuture"]').textContent = tr('dyn.scope_thisfuture', { noun: n });
+    document.querySelector('#scope-modal [data-scope="all"]').textContent = tr('dyn.scope_all', { noun: n });
     show('scope-overlay');
     show('scope-modal');
     return new Promise((resolve) => { _scopeResolve = resolve; });
@@ -2034,7 +2116,7 @@
     }
     const body = eventToBody(info.event);
     if (props.recurrence) {
-      const scope = await chooseScope('What to change?');
+      const scope = await chooseScope(tr('dyn.what_to_change'), tr(props.isTask ? 'dyn.noun_task' : 'dyn.noun_event'));
       if (!scope) { info.revert(); return; }
       body.scope = scope;
       // recurrence_id is the pivot: a detached override's stable RECURRENCE-ID
@@ -2079,7 +2161,7 @@
     const el = document.getElementById('logout-countdown');
     if (!el) return;
     if (!_logoutEnabled) {
-      el.textContent = 'Auto-logout off';
+      el.textContent = tr('dyn.auto_logout_off');
       el.classList.remove('logout-countdown--warn');
       return;
     }
@@ -2087,7 +2169,7 @@
       el.textContent = '';
       return;
     }
-    el.textContent = 'Logout in ' + fmtDuration(_logoutRemaining);
+    el.textContent = tr('dyn.logout_in', { time: fmtDuration(_logoutRemaining) });
     el.classList.toggle('logout-countdown--warn', _logoutRemaining <= 60);
   }
 
@@ -2157,7 +2239,7 @@
     document.querySelector('.calendar-body').classList.add('agenda-mode');
     show('agenda');
     const titleEl = document.querySelector('.fc-toolbar-title');
-    if (titleEl) titleEl.textContent = 'Agenda';
+    if (titleEl) titleEl.textContent = tr('dyn.agenda');
     const btn = agendaBtnEl();
     if (btn) btn.classList.add('fc-button-active');
     document
@@ -2316,7 +2398,7 @@
     let timeTxt = forcedTimeTxt;
     if (timeTxt == null) {
       const start = luxon.DateTime.fromISO(p.rawStart || e.start, { setZone: true }).setZone(tz);
-      timeTxt = e.allDay ? 'All day' : start.toFormat(timeFmt);
+      timeTxt = e.allDay ? tr('ui.modal_allday') : start.toFormat(timeFmt);
     }
     const loc = p.location ? `<div class="agenda-loc">${escHtml(p.location)}</div>` : '';
     const marker = isTask
@@ -2424,13 +2506,13 @@
 
       // Build undated first, then overdue, so prepending overdue lands it above.
       if (undated.length) {
-        const sec = agendaPinnedSection('agenda-undated', 'Tasks');
+        const sec = agendaPinnedSection('agenda-undated', tr('dyn.agenda_tasks'));
         undated.forEach((e) => sec.appendChild(agendaRowEl(e, 'Task')));
         list.prepend(sec);
       }
       if (overdue.length) {
         overdue.sort(agendaCompare);
-        const sec = agendaPinnedSection('agenda-overdue', 'Overdue');
+        const sec = agendaPinnedSection('agenda-overdue', tr('dyn.agenda_overdue'));
         overdue.forEach((e) => {
           const p = e.extendedProps || {};
           const s = luxon.DateTime
@@ -2465,12 +2547,12 @@
     } else if (kind === 'end') {
       el.style.display = '';
       el.textContent = document.getElementById('agenda-list').children.length
-        ? 'No more events.'
-        : 'No upcoming events.';
+        ? tr('dyn.agenda_no_more')
+        : tr('dyn.agenda_no_upcoming');
     } else if (kind === 'error') {
       el.style.display = '';
       el.innerHTML =
-        `Couldn’t load events. <button type="button" id="agenda-retry" class="btn-outline">Retry</button>`;
+        `${escHtml(tr('dyn.agenda_load_failed'))} <button type="button" id="agenda-retry" class="btn-outline">${escHtml(tr('dyn.agenda_retry'))}</button>`;
       el.querySelector('#agenda-retry').addEventListener('click', () => {
         _agendaDone = false;
         agendaSetStatus('');
@@ -2498,7 +2580,7 @@
     hideError('ev-error');
     const cals = await getEnabledCalendars();
 
-    document.getElementById('ev-title-text').textContent = 'New event';
+    document.getElementById('ev-title-text').textContent = tr('dyn.new_event');
     document.getElementById('ev-name').value = '';
     document.getElementById('ev-allday').checked = false;
     document.getElementById('ev-location').value = '';
@@ -2531,7 +2613,7 @@
     const noteEl = document.getElementById('ev-edit-note');
     const hasCal = cals.length > 0;
     if (!hasCal) {
-      noteEl.textContent = 'Connect a CalDAV account to create events.';
+      noteEl.textContent = tr('dyn.connect_to_create');
       noteEl.style.display = '';
     } else {
       noteEl.style.display = 'none';
@@ -2590,7 +2672,7 @@
     box.className = 'fc-task-box' + (props.completed ? ' done' : '');
     box.setAttribute('role', 'checkbox');
     box.setAttribute('aria-checked', props.completed ? 'true' : 'false');
-    box.title = props.completed ? 'Mark as undone' : 'Mark as done';
+    box.title = props.completed ? tr('dyn.mark_undone') : tr('dyn.mark_done');
     box.addEventListener('click', function (e) {
       e.stopPropagation();
       e.preventDefault();
@@ -2650,10 +2732,23 @@
     const calendarEl = document.getElementById('calendar');
     const s = window.__SETTINGS__ || {};
     const tf = fcTimeFormats(timeFormatKey());
+    const fcCat = I18N.fc || {};
+    const fcBtn = fcCat.buttonText || {};
     _fcCalendar = new FullCalendar.Calendar(calendarEl, {
       initialView: 'dayGridMonth',
+      // `locale` is the bare code so the Luxon plugin formats month/weekday
+      // names (and the title range) for that language; passing a full locale
+      // object instead would replace FullCalendar's range-formatting internals
+      // and break the header title. Translated button/helper text is supplied
+      // as top-level overrides. No locale bundle is vendored.
+      locale: LANG,
+      buttonText: fcBtn,
+      allDayText: fcCat.allDayText,
+      weekText: fcCat.weekText,
+      moreLinkText: fcCat.moreLinkText,
+      noEventsText: fcCat.noEventsText,
       customButtons: {
-        agenda: { text: 'agenda', click: showAgenda },
+        agenda: { text: fcBtn.agenda || 'agenda', click: showAgenda },
       },
       headerToolbar: {
         left: 'prev,next today',
@@ -2858,7 +2953,7 @@
         ? luxon.DateTime.fromISO(String(startStr).slice(0, 10), { zone: tz })
         : luxon.DateTime.fromISO(startStr, { setZone: true }).setZone(tz);
       if (!start.isValid) return;
-      const title = e.title || '(No title)';
+      const title = e.title || tr('dyn.no_title');
       const endStr = p.rawEnd || e.end;
       const end = endStr
         ? (allDay
@@ -3003,6 +3098,9 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
+    // Date/time formatting (Luxon) and static markup follow the active language.
+    if (window.luxon && luxon.Settings) luxon.Settings.defaultLocale = LANG;
+    applyTranslations(document);
     const state = window.__STATE__;
     if (state === 'anonymous') initLogin();
     else if (state === 'restricted') initChangePassword();

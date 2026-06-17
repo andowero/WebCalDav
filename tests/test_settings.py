@@ -104,3 +104,29 @@ async def test_theme_rejects_invalid(client: AsyncClient, db_engine):
     await _login_unrestricted(client, "th3@example.com")
     r = await client.put("/settings", json={"theme": "neon"})
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_language_defaults_to_autodetect(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "lng1@example.com")
+    r = await client.get("/settings")
+    assert r.status_code == 200
+    assert r.json()["language"] == "autodetect"
+
+
+@pytest.mark.asyncio
+async def test_language_roundtrip(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "lng2@example.com")
+    r = await client.put("/settings", json={"language": "czech"})
+    assert r.status_code == 200
+    assert r.json()["language"] == "czech"
+    # Persisted across a fresh read.
+    r = await client.get("/settings")
+    assert r.json()["language"] == "czech"
+
+
+@pytest.mark.asyncio
+async def test_language_rejects_invalid(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "lng3@example.com")
+    r = await client.put("/settings", json={"language": "klingon"})
+    assert r.status_code == 422

@@ -19,6 +19,7 @@ DEFAULT_VIEW = "dayGridMonth"
 VALID_COMPLETED_TASK = {"hidden", "grayed"}
 VALID_UNDATED_TASK = {"agenda", "today"}
 VALID_THEME = {"system", "light", "dark"}
+VALID_LANGUAGE = {"autodetect", "english", "czech"}
 
 
 class SettingsOut(BaseModel):
@@ -33,6 +34,7 @@ class SettingsOut(BaseModel):
     completed_task_display: str
     undated_task_display: str
     theme: str
+    language: str
 
 
 class SettingsIn(BaseModel):
@@ -47,6 +49,7 @@ class SettingsIn(BaseModel):
     completed_task_display: str | None = None
     undated_task_display: str | None = None
     theme: str | None = None
+    language: str | None = None
 
 
 def _to_out(s: UserSettings) -> SettingsOut:
@@ -62,6 +65,7 @@ def _to_out(s: UserSettings) -> SettingsOut:
         completed_task_display=s.completed_task_display,
         undated_task_display=s.undated_task_display,
         theme=s.theme,
+        language=s.language,
     )
 
 
@@ -87,6 +91,7 @@ async def get_settings(
             completed_task_display="hidden",
             undated_task_display="agenda",
             theme="system",
+            language="autodetect",
         )
     return _to_out(s)
 
@@ -138,6 +143,12 @@ async def put_settings(
             detail=f"theme must be one of {sorted(VALID_THEME)}",
         )
 
+    if body.language is not None and body.language not in VALID_LANGUAGE:
+        raise HTTPException(
+            status_code=422,
+            detail=f"language must be one of {sorted(VALID_LANGUAGE)}",
+        )
+
     result = await db.execute(
         select(UserSettings).where(UserSettings.user_id == entry.user_id)
     )
@@ -174,6 +185,8 @@ async def put_settings(
         s.undated_task_display = body.undated_task_display
     if body.theme is not None:
         s.theme = body.theme
+    if body.language is not None:
+        s.language = body.language
 
     # Notifications only fire while a tab stays logged in, so the two are
     # mutually exclusive: enabling notifications forces auto-logout off.
