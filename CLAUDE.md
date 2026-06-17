@@ -4,7 +4,7 @@ Provide a self-hosted, lightweight web UI for viewing and editing events on user
 
 # Project overview
 
-Multi-user web application where each user links one or more CalDAV servers and picks which calendars from each to display. The calendar UI offers month, week, and day views. Events are read from and written directly to the CalDAV server with no local caching. Deployed as a single Docker container behind a reverse proxy.
+Multi-user web application where each user links one or more CalDAV servers and picks which calendars from each to display. The calendar UI offers month, week, day, and agenda views. Events and tasks (VTODO) are read from and written directly to the CalDAV server with no local caching. UI theme is user-selectable (system/light/dark). The interface is internationalized; Czech translation is included and locale is auto-detected from the browser. Deployed as a single Docker container behind a reverse proxy.
 
 # Design style guide
 
@@ -12,13 +12,16 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 
 # Product & UX guidelines
 
-- Three calendar views: month, week, day.
+- Four calendar views: month, week, day, and agenda (infinitely scrolling).
+- Tasks (VTODO): view, create, edit, complete, and set recurrence alongside calendar events.
 - First day of the week is a user setting.
 - Timezone is a user setting; default from the browser.
-- All event attributes are editable; all-day and multi-day events supported.
-- Events are clickable and editable in place.
+- UI theme is a user setting: system (follows OS), light, or dark.
+- Locale is auto-detected from the browser; Czech translation included; more languages can be added under `webcaldav/locales/`.
+- All event and task attributes are editable; all-day and multi-day events supported.
+- Events and tasks are clickable and editable in place.
 - Desktop-first. Mobile browsers should work but are not the priority — native mobile apps already cover that use case.
-- Browser notifications for reminders on Firefox, Chrome, Opera, and Safari.
+- Browser notifications for event and task reminders on Firefox, Chrome, Opera, and Safari.
 
 # Constraints and policies
 
@@ -33,10 +36,16 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 
 - Update files in `./docs` after major milestones or major additions to the project.
 - When commiting changes, always update files in `./docs` (if necessary)
+- When commiting changes, always check `CLAUDE.md` if it is still up to date
 
 # Often used commands
 
-TBD — populated once the app is scaffolded. Expected: `uv run pytest` (test suite), `uv run ruff check`, `uv run mypy`.
+```sh
+uv run pytest                    # run test suite
+uv run pytest --cov              # run tests with coverage
+uv run ruff check .              # lint
+uv run mypy webcaldav/           # type check
+```
 
 # Testing instructions
 

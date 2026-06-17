@@ -4,13 +4,16 @@ A lightweight, self-hosted web UI for viewing and editing calendar events on you
 
 ## Features
 
-- Month, week, and day views plus an infinitely scrolling agenda view, built on FullCalendar.
+- Month, week, day, and infinitely-scrolling agenda views, built on FullCalendar.
 - Multiple CalDAV accounts per user; pick which calendars from each account to display.
 - Per-calendar colors taken from the server's `calendar-color` property, with user override.
 - All-day, multi-day, and recurring events; recurring events can be edited with "this event", "this and future", or "all events" scope.
-- Event reminders (VALARM) with optional browser notifications, fired at each reminder and at event start (see [Browser notifications](#browser-notifications)).
+- Event reminders (VALARM) anchored to event start or end, before or after, with optional browser notifications (see [Browser notifications](#browser-notifications)).
+- Task (VTODO) support: view, create, edit, complete, and recurring tasks alongside calendar events.
+- User-selectable UI theme: system (follows OS), light, or dark.
+- Internationalization with Czech translation included; locale auto-detected from the browser.
 - Per-user settings: timezone, first day of week, time and date format, default view, auto-logout.
-- No event caching — every read and write goes straight to your CalDAV server.
+- No caching — every read and write goes straight to your CalDAV server.
 
 > **Note:** FullCalendar and luxon are vendored into the container (`webcaldav/static/vendor/`) and served from the app itself — no third-party CDN, and the browser needs no internet access beyond your own server.
 
@@ -144,7 +147,7 @@ Set `BLOCK_PRIVATE_CALDAV_URLS=true` to reject any CalDAV URL whose hostname res
 
 ## Browser notifications
 
-WebCalDav can pop a desktop notification at each event's reminder (VALARM) **and** at each event's start time. They are **off by default**; turn them on per user under **Settings → Preferences → Browser notifications**. The first time you enable them the browser asks for notification permission — allow it. Each notification shows:
+WebCalDav can pop a desktop notification at each event's or task's reminder (VALARM), at each event's start time, and at each task's due time. They are **off by default**; turn them on per user under **Settings → Preferences → Browser notifications**. The first time you enable them the browser asks for notification permission — allow it. Each notification shows:
 
 ```
 WebCalDav

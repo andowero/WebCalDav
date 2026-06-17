@@ -29,12 +29,19 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 
 ### Milestones
 
-| Milestone | Scope                                                     |
-|-----------|-----------------------------------------------------------|
-| MVP       | Secure user login, read-only view of calendar events      |
-| v1        | Basic editing of calendar events -> without repetition    |
-| v2        | Editing of calendar events -> repetition                  |
-| v3        | Browser notifications                                     |
+| Milestone | Scope                                                              |
+|-----------|--------------------------------------------------------------------|
+| MVP       | Secure user login, read-only view of calendar events               |
+| v1        | Basic editing of calendar events (no recurrence)                   |
+| v2        | Editing of recurring events                                        |
+| v3        | Event reminders (VALARM) and browser notifications                 |
+| v4        | Task (VTODO) support: view, edit, complete, recurrence             |
+| v5        | Dark mode (system / light / dark theme)                            |
+| v6        | Internationalization (i18n) + Czech translation                    |
+| v7        | MCP server: calendar/task access via API token                     |
+| v8        | Configurable double-click action (event vs. task creation)         |
+| v9        | VJOURNAL support (read and write calendar journal entries)         |
+| v10       | Calendar sharing (read-only share links / per-calendar ACL)        |
 
 ## Part 2: Technical design
 
@@ -60,10 +67,10 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 
 - `users(id, email, kdf_salt, wrapped_dek, dek_nonce, password_verifier, must_change_password, created_at)`
 - `caldav_accounts(id, user_id, url, username, encrypted_password, nonce, created_at)`
-- `calendars(id, caldav_account_id, caldav_id, display_name, color, enabled)`
-- `user_settings(user_id, timezone, first_day_of_week)`
+- `calendars(id, caldav_account_id, caldav_id, display_name, color, enabled, is_default)`
+- `user_settings(user_id, timezone, first_day_of_week, time_format, date_format, default_view, auto_logout_enabled, auto_logout_timeout_seconds, notifications_enabled, completed_task_display, undated_task_display, theme, language)`
 
-No plaintext password, no plaintext DEK, and no server-held wrapping key are ever stored.
+The canonical schema is in `webcaldav/models.py`; the table above is the logical summary. No plaintext password, no plaintext DEK, and no server-held wrapping key are ever stored.
 
 ### Security — zero-knowledge design
 

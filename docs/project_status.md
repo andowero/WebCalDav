@@ -330,5 +330,9 @@ User-selectable UI theme.
 
 ## What is next
 
-- v6 scoping: TBD. Possible: task reminders in browser notifications (currently
-  events only); sub-tasks / RELATED-TO; task sort/filter in agenda.
+| Milestone | Scope | Status |
+|-----------|-------|--------|
+| v7 | MCP server: calendar/task access via API token | Planned |
+| v8 | Configurable double-click action (event vs. task creation) | Planned |
+| v9 | VJOURNAL support (read and write calendar journal entries) | Planned |
+| v10 | Calendar sharing (read-only share links / per-calendar ACL) | Planned |
