@@ -161,25 +161,53 @@ _RECUR_SCOPES = {"all", "this", "thisfuture"}
 
 
 class RecurrenceRule(BaseModel):
-    freq: str  # yearly|monthly|weekly|daily|hourly
-    interval: int = 1
-    monthly_mode: str | None = None  # "monthday" | "weekday"
-    ordinal: int | None = None  # Nth weekday of month; -1 = last
-    until: str | None = None  # ISO date/datetime; mutually exclusive with count
-    count: int | None = None
+    freq: str = Field(
+        description="How often it repeats: 'daily', 'weekly', 'monthly', 'yearly', or 'hourly'."
+    )
+    interval: int = Field(
+        default=1, description="Repeat every N units of freq (1 = every day/week/…)."
+    )
+    monthly_mode: str | None = Field(
+        default=None,
+        description=(
+            "Only for freq='monthly': 'monthday' = same day-of-month as the start; "
+            "'weekday' = the Nth weekday of the month (set ordinal)."
+        ),
+    )
+    ordinal: int | None = Field(
+        default=None,
+        description="With monthly_mode='weekday': 1-4 for the Nth weekday, -1 for the last.",
+    )
+    until: str | None = Field(
+        default=None,
+        description="ISO date/datetime of the last occurrence (inclusive). Mutually exclusive with count.",
+    )
+    count: int | None = Field(
+        default=None,
+        description="Total number of occurrences. Mutually exclusive with until.",
+    )
 
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 class Reminder(BaseModel):
-    value: int = Field(ge=0, le=10000)
-    unit: Literal["minutes", "hours", "days", "weeks"]
-    time: str | None = None  # "HH:MM"; required for all-day events
+    value: int = Field(ge=0, le=10000, description="How many units before/after the anchor.")
+    unit: Literal["minutes", "hours", "days", "weeks"] = Field(
+        description="Unit for value: 'minutes', 'hours', 'days', or 'weeks'."
+    )
+    time: str | None = Field(
+        default=None,
+        description="Clock time 'HH:MM' the reminder fires. Required for all-day items; omit otherwise.",
+    )
     # Where the offset is measured from and on which side. Defaults reproduce the
     # original "N before the start" behavior, so old payloads round-trip intact.
-    anchor: Literal["start", "end"] = "start"
-    direction: Literal["before", "after"] = "before"
+    anchor: Literal["start", "end"] = Field(
+        default="start", description="Measure the offset from the 'start' or the 'end'/'due'."
+    )
+    direction: Literal["before", "after"] = Field(
+        default="before", description="Fire 'before' or 'after' the anchor."
+    )
 
 
 class EventUpdate(BaseModel):

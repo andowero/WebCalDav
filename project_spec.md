@@ -69,8 +69,10 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 - `caldav_accounts(id, user_id, url, username, encrypted_password, nonce, created_at)`
 - `calendars(id, caldav_account_id, caldav_id, display_name, color, enabled, is_default)`
 - `user_settings(user_id, timezone, first_day_of_week, time_format, date_format, default_view, auto_logout_enabled, auto_logout_timeout_seconds, notifications_enabled, completed_task_display, undated_task_display, theme, language)`
+- `api_tokens(id, user_id, name, token_sha256, sealed_blob, blob_nonce, mode, all_calendars, expires_at, created_at, last_used_at)` — MCP API tokens. `token_sha256` is the lookup hash; `sealed_blob`/`blob_nonce` is an AES-GCM blob keyed by the token secret holding the *authoritative* `{dek, mode, all_calendars, calendar_ids, expires_at}`. The plaintext `mode`/`all_calendars`/`expires_at` columns are a display-only mirror, never trusted for authorization.
+- `api_token_calendars(id, api_token_id, calendar_id)` — display-only scope rows for a calendar-scoped token (authoritative scope is in `api_tokens.sealed_blob`).
 
-The canonical schema is in `webcaldav/models.py`; the table above is the logical summary. No plaintext password, no plaintext DEK, and no server-held wrapping key are ever stored.
+The canonical schema is in `webcaldav/models.py`; the table above is the logical summary. No plaintext password, no plaintext DEK, no server-held wrapping key, and no plaintext API-token secret are ever stored.
 
 ### Security — zero-knowledge design
 
@@ -131,6 +133,21 @@ Settings and ops:
 - `GET /health`
 - `GET /metrics`
 
+MCP API tokens (settings UI):
+
+- `GET /api-tokens` — list token metadata (never the secret)
+- `POST /api-tokens` — mint a token (requires `MCP_SERVER_ENABLED` + active session); returns the plaintext once
+- `DELETE /api-tokens/{id}` — revoke (works even when the MCP server is disabled)
+
+MCP server (only mounted when `MCP_SERVER_ENABLED`):
+
+- `/mcp` — Streamable HTTP (`mcp` SDK / `FastMCP`), authenticated by
+  `Authorization: Bearer WebCalDav…`. Tools: `list_items`, `get_item_details`,
+  `create_event`, `create_task`, `update_event`, `update_task`,
+  `set_task_status`, `delete_event`, `delete_task`. English + ISO 8601;
+  read-only tokens are rejected by mutating tools; scoped tokens are limited to
+  their calendars. See `MCP.md`.
+
 **There is no `POST /auth/signup` or equivalent.** User creation is CLI-only.
 
 ### Admin CLI
@@ -139,7 +156,7 @@ Settings and ops:
 
 - `create-user --email EMAIL` — prints one-off password
 - `list-users`
-- `reset-password --email EMAIL` — prints new one-off password, rotates DEK, wipes CalDAV credentials
+- `reset-password --email EMAIL` — prints new one-off password, rotates DEK, wipes CalDAV credentials and API tokens
 - `delete-user --email EMAIL`
 
 ### Deployment

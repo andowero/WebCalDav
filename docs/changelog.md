@@ -2,6 +2,39 @@
 
 ## Unreleased — MVP
 
+### Added — MCP server & API tokens (2026-06-17)
+- New optional **MCP server** at `/mcp` (Streamable HTTP, via the official `mcp`
+  SDK / `FastMCP`) letting AI assistants read and write the user's calendars and
+  tasks. Off by default; gated by the `MCP_SERVER_ENABLED` env var. All MCP I/O
+  is English and ISO 8601. Documented in `MCP.md` (linked from `README.md`, with
+  the feature highlighted in the intro).
+- Tools: `list_calendars`, `list_items` (events/tasks/both, agenda style),
+  `get_item_details`,
+  `create_event`, `create_task`, `update_event`, `update_task`, `set_task_status`
+  (done/undone), `delete_event`, `delete_task`. Recurring edits/deletes take a
+  `scope` of `this` / `thisfuture` / `all`. Mutating tools reuse the same
+  CalDAV/recurrence/reminder primitives as the `/events` and `/tasks` routers
+  (`webcaldav/mcp_server.py`).
+- **API tokens** (`webcaldav/tokens.py`, `routers/api_tokens.py`, new `APIToken`
+  / `APITokenCalendar` models): minted in **Settings → API Tokens**, shown once.
+  Token plaintext is `WebCalDav` + `RO`/`RW` + a random secret, so the access
+  mode is visible in the token. Tokens can be **read-only or read-write**
+  (read-only is rejected by mutating tools) and **scoped** to specific calendars
+  (unscoped tokens include calendars added later; scoped ones do not) with an
+  **optional expiry**.
+- **Security:** an API token can decrypt the user's CalDAV credentials, but the
+  zero-knowledge-at-rest property is preserved — the DEK *and* the token's
+  authoritative mode/scope/expiry are sealed in an AES-GCM blob keyed by the
+  token secret (only its SHA-256 is stored). Tampering with the plaintext mirror
+  columns / `api_token_calendars` rows cannot widen scope or flip to read-write
+  without the secret. Changing the login password keeps tokens valid (DEK
+  unchanged); admin `reset_password` rotates the DEK and now deletes the user's
+  tokens. The `/mcp` route is exempt from the CSRF header check (bearer-auth, no
+  ambient cookie); FastMCP DNS-rebinding Host validation is disabled because the
+  app runs behind a trusted reverse proxy. When `MCP_SERVER_ENABLED` is off,
+  `/mcp` is unmounted and token creation is blocked, but listing/revoking still
+  works (the UI greys out only the create form).
+
 ### Added — internationalization + Czech (2026-06-17)
 - The app is now **translatable**, shipping **English** and **Czech**. A new
   per-user **language** setting (`autodetect` / `english` / `czech`) lives on

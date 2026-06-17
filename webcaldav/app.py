@@ -18,6 +18,7 @@ from .i18n import load_catalog, resolve_language
 from .metrics import http_requests_total
 from .models import User, UserSettings
 from .routers import (
+    api_tokens,
     auth,
     caldav_accounts,
     calendars,
@@ -68,7 +69,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.login_rate_limit_window_seconds,
     )
     await create_tables()
-    yield
+    if settings.mcp_server_enabled:
+        # The MCP app is mounted as a sub-app, so its lifespan is not run by the
+        # parent; start the Streamable-HTTP session manager here instead.
+        from .mcp_server import mcp
+
+        async with mcp.session_manager.run():
+            yield
+    else:
+        yield
 
 
 app = FastAPI(title="WebCalDav", lifespan=lifespan)
@@ -82,6 +91,7 @@ app.include_router(calendars.router)
 app.include_router(events.router)
 app.include_router(tasks.router)
 app.include_router(settings_router.router)
+app.include_router(api_tokens.router)
 app.include_router(ops.router)
 
 
@@ -91,9 +101,12 @@ _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 @app.middleware("http")
 async def csrf_header_check(request: Request, call_next: RequestResponseEndpoint) -> Response:
     # CSRF defense-in-depth on top of SameSite=Lax: cross-site HTML forms
-    # cannot set custom headers, so requiring one blocks forged requests.
+    # cannot set custom headers, so requiring one blocks forged requests. The
+    # MCP endpoint uses bearer-token auth (no ambient cookie), so it is not
+    # subject to CSRF and its clients don't send the header — exempt it.
     if (
         request.method in _MUTATING_METHODS
+        and not request.url.path.startswith("/mcp")
         and request.headers.get("x-requested-with") != "fetch"
     ):
         return JSONResponse({"detail": "Missing CSRF header"}, status_code=403)
@@ -182,6 +195,7 @@ async def root(request: Request) -> HTMLResponse:
             "undated_task_display": user_settings_undated_task_display,
             "theme": user_settings_theme,
             "language": user_settings_language,
+            "mcp_enabled": settings.mcp_server_enabled,
             "lang": lang,
             "i18n": catalog,
             "notification_horizon_days": settings.notification_horizon_days,
@@ -189,3 +203,16 @@ async def root(request: Request) -> HTMLResponse:
             "static_v": STATIC_VERSION,
         },
     )
+
+
+if settings.mcp_server_enabled:
+    from starlette.routing import Mount
+
+    from .mcp_server import build_mcp_app
+
+    # Mounted at the root (not "/mcp") so the inner app's own "/mcp" route is
+    # reached with the path unstripped — avoids the trailing-slash 307 redirect
+    # that "/mcp" -> "/mcp/" would otherwise cause. Appended LAST (after every
+    # router, the /static mount, and the "/" route are registered) so it is a
+    # pure fallback: real routes match first, only /mcp falls through to it.
+    app.router.routes.append(Mount("/", app=build_mcp_app()))

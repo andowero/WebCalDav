@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 _VERIFIER_INFO = b"webcaldav:password-verifier:v1"
+_TOKEN_KEY_INFO = b"webcaldav:api-token-dek:v1"
 _NONCE_LEN = 12
 _KEY_LEN = 32
 
@@ -46,6 +47,19 @@ def verify_kek(kek: bytes, stored_verifier: bytes) -> bool:
 
 def generate_dek() -> bytes:
     return os.urandom(_KEY_LEN)
+
+
+def derive_token_key(secret: str) -> bytes:
+    """Derive the 32-byte AES-GCM key that seals an API token's blob (DEK +
+    authoritative scope/mode/expiry) from the token's random secret. The secret
+    is 256-bit random, so a fast HKDF is sufficient — no memory-hard KDF needed.
+    """
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=_KEY_LEN,
+        salt=None,
+        info=_TOKEN_KEY_INFO,
+    ).derive(secret.encode("utf-8"))
 
 
 def wrap_dek(dek: bytes, kek: bytes) -> tuple[bytes, bytes]:

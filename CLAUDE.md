@@ -4,7 +4,7 @@ Provide a self-hosted, lightweight web UI for viewing and editing events on user
 
 # Project overview
 
-Multi-user web application where each user links one or more CalDAV servers and picks which calendars from each to display. The calendar UI offers month, week, day, and agenda views. Events and tasks (VTODO) are read from and written directly to the CalDAV server with no local caching. UI theme is user-selectable (system/light/dark). The interface is internationalized; Czech translation is included and locale is auto-detected from the browser. Deployed as a single Docker container behind a reverse proxy.
+Multi-user web application where each user links one or more CalDAV servers and picks which calendars from each to display. The calendar UI offers month, week, day, and agenda views. Events and tasks (VTODO) are read from and written directly to the CalDAV server with no local caching. UI theme is user-selectable (system/light/dark). The interface is internationalized; Czech translation is included and locale is auto-detected from the browser. An optional MCP server (at `/mcp`, toggled by `MCP_SERVER_ENABLED`) lets AI assistants read and write the same calendars/tasks via per-user API tokens. Deployed as a single Docker container behind a reverse proxy.
 
 # Design style guide
 
@@ -29,6 +29,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 - **No public signup.** Users and their initial one-off passwords are created by the server administrator via an admin CLI. The user is forced to change that password on first login before any other action.
 - **Zero-knowledge at rest for CalDAV credentials.** Credentials are encrypted with a per-user key derived from the user's login password. The server cannot decrypt them without an active user session; a stolen database alone yields nothing.
 - **No event caching.** Reads and writes go straight to the CalDAV server.
+- **MCP API tokens are high-value.** A token can decrypt the user's CalDAV credentials. To preserve zero-knowledge-at-rest, the DEK and the token's authoritative mode/scope/expiry are sealed in an AES-GCM blob keyed by the token secret (only its SHA-256 is stored); plaintext token columns are display-only and must never be trusted for authorization. The MCP server is off by default. See `MCP.md`.
 - **Observability required.** Expose `/health` and `/metrics` (Prometheus).
 - **Structured logging** with levels DEBUG/INFO/WARNING/ERROR. Passwords and DEKs must never be logged.
 
@@ -37,6 +38,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 - Update files in `./docs` after major milestones or major additions to the project.
 - When commiting changes, always update files in `./docs` (if necessary)
 - When commiting changes, always check `CLAUDE.md` if it is still up to date
+- Before commiting change, check if `README.md` is up to date with newest changes
 
 # Often used commands
 
@@ -68,6 +70,7 @@ No automated browser/E2E tests (no Playwright). FullCalendar, the Service Worker
 
 # Documentation
 
+- [MCP server](MCP.md) - Enabling the MCP server, API tokens, tool list, security model
 - [Project spec](project_spec.md) - Full requirements, API specs, tech details
 - [Architecture](docs/architecture.md) - System design and data flow
 - [Changelog](docs/changelog.md) - Version history

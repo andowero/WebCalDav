@@ -623,6 +623,39 @@ body {
 }
 .btn-danger-sm:hover { background: var(--error-bg); }
 
+.token-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border-faintest);
+}
+.token-row:last-child { border-bottom: none; }
+.token-meta { flex: 1; display: flex; flex-direction: column; gap: 0.1rem; overflow: hidden; }
+.token-name { font-size: 12px; font-weight: 600; }
+.token-sub { font-size: 11px; color: var(--text-faint); }
+.token-badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 0 0.35rem;
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--bg-subtle);
+  color: var(--text-faint);
+}
+.token-rw { background: var(--accent, #3788d8); color: #fff; }
+
+#token-modal { min-width: min(92vw, 440px); }
+.token-modal-title { margin: 0 0 0.4rem; font-weight: 600; }
+.token-secret-row { display: flex; gap: 0.4rem; margin: 0.6rem 0; }
+.token-secret-row input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 11px;
+}
+
 .calendar-row {
   display: flex;
   align-items: center;
@@ -809,6 +842,19 @@ details#add-account-details summary {
 }
 
 .event-modal-body .ev-year { width: 4.6em; }
+
+/* Token expiry reuses the custom date fields inside the settings .inner-form,
+   whose inputs are otherwise full-width. Keep each box just wide enough for its
+   digits (2 for month/day, 4 for year) and match the modal's compact styling. */
+#ev-token-expires-date-fields .ev-dnum {
+  width: 2.6em;
+  text-align: center;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  background: var(--bg-control);
+  color: var(--text-strong);
+}
+#ev-token-expires-date-fields .ev-year { width: 3.6em; }
 
 .ev-dsep {
   display: flex;

@@ -2,6 +2,8 @@
 
 A lightweight, self-hosted web UI for viewing and editing calendar events on your own CalDAV server (e.g. [Radicale](https://radicale.org/)). WebCalDav fills the gap left by abandoned projects like AgenDav and InfCloud — a plain web calendar for your CalDAV data, without pulling in a heavy platform such as Nextcloud. It ships as a single Docker container intended to run behind a reverse proxy.
 
+**🤖 Built-in MCP server.** WebCalDav can expose your calendars and tasks to AI assistants over the [Model Context Protocol](https://modelcontextprotocol.io): mint a scoped, read-only or read-write API token in the UI and let an assistant list, create, edit, complete, and delete your events and tasks in natural language. It is off by default and opt-in per token — see **[MCP.md](MCP.md)**.
+
 ## Features
 
 - Month, week, day, and infinitely-scrolling agenda views, built on FullCalendar.
@@ -12,6 +14,7 @@ A lightweight, self-hosted web UI for viewing and editing calendar events on you
 - Task (VTODO) support: view, create, edit, complete, and recurring tasks alongside calendar events.
 - User-selectable UI theme: system (follows OS), light, or dark.
 - Internationalization with Czech translation included; locale auto-detected from the browser.
+- Optional MCP server: AI assistants can read and write your calendars and tasks via scoped, read-only or read-write API tokens ([MCP.md](MCP.md)).
 - Per-user settings: timezone, first day of week, time and date format, default view, auto-logout.
 - No caching — every read and write goes straight to your CalDAV server.
 
@@ -126,6 +129,7 @@ If Radicale runs as **another container**, put both on the same Docker network a
 | `BLOCK_PRIVATE_CALDAV_URLS` | `false` | Reject CalDAV server URLs that resolve to private/loopback/link-local/metadata addresses, and hide raw connection errors. The shipped `.env` sets it to `false` so a CalDAV server on a private/LAN IP can be added. |
 | `NOTIFICATION_HORIZON_DAYS` | `60` | How many days ahead the browser-notification scheduler loads events to fire reminder/start notifications for. Raise it for reminders further out (e.g. month-ahead birthdays). See [Browser notifications](#browser-notifications). |
 | `NOTIFICATION_LOOKBACK_DAYS` | `60` | How many days *behind* now the scheduler also loads events, so a reminder anchored *after* an event that has already ended still fires (e.g. "1 day after end"). Defaults to the horizon. Raise it for after-event reminders set further back. See [Browser notifications](#browser-notifications). |
+| `MCP_SERVER_ENABLED` | `false` | Enable the MCP server at `/mcp` so AI assistants can read/write calendars with an API token. Off by default. **An API token can decrypt the user's CalDAV credentials** — enable deliberately. See [MCP.md](MCP.md). |
 
 The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast). Each user's password record stores the parameters it was created with, so raising the values later is safe: existing users keep logging in with their old parameters and pick up the stronger ones the next time they change their password.
 
@@ -240,6 +244,7 @@ This issues a new one-off password, rotates the user's DEK, and deletes the now-
 
 ## More documentation
 
+- [MCP server](MCP.md) — enabling the MCP server, minting API tokens, the tool list, and the security model.
 - [Project spec](project_spec.md) — full requirements, API surface, technical details.
 - [Architecture](docs/architecture.md) — system design and data flows.
 - [Changelog](docs/changelog.md) — version history.

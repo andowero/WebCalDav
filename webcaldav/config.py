@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     argon2_memory_cost: int = 131072
     argon2_parallelism: int = 1
 
+    # Toggle the MCP server (mounted at /mcp) on or off. Off by default: when
+    # off, /mcp is not mounted and new API tokens cannot be created (existing
+    # tokens can still be listed and revoked). An API token can decrypt the
+    # user's CalDAV credentials, so this stays opt-in.
+    mcp_server_enabled: bool = False
+
     # How many days ahead the browser-notification scheduler loads events to
     # fire reminder/start notifications for. Raise it for reminders further out
     # (e.g. month-ahead birthdays).

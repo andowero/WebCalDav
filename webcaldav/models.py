@@ -32,6 +32,9 @@ class User(Base):
     settings: Mapped["UserSettings | None"] = relationship(
         back_populates="user", cascade="all, delete-orphan", uselist=False
     )
+    api_tokens: Mapped[list["APIToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class CalDAVAccount(Base):
@@ -63,6 +66,58 @@ class Calendar(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     account: Mapped["CalDAVAccount"] = relationship(back_populates="calendars")
+
+
+class APIToken(Base):
+    """An MCP API token. The token plaintext (WebCalDav{RO,RW}<secret>) is shown
+    to the user once and never stored. ``sealed_blob`` is an AES-GCM ciphertext,
+    keyed by a key derived from the secret, holding the AUTHORITATIVE
+    {dek, mode, all_calendars, calendar_ids, expires_at}. The plaintext ``mode``,
+    ``all_calendars``, ``expires_at`` columns and the ``api_token_calendars`` rows
+    are a display-only mirror for the settings UI — they are never trusted for
+    authorization, so DB tampering cannot widen a token's scope or mode without
+    the secret (which would only break the token, not escalate it)."""
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    # SHA-256 of the random secret, for O(1) lookup + constant-time compare.
+    token_sha256: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True, nullable=False)
+    # AES-GCM blob (authoritative): {dek, mode, all_calendars, calendar_ids, expires_at}.
+    sealed_blob: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    blob_nonce: Mapped[bytes] = mapped_column(LargeBinary(12), nullable=False)
+    # --- display-only mirror (never used for enforcement) ---
+    mode: Mapped[str] = mapped_column(String, nullable=False)  # "ro" | "rw"
+    all_calendars: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="api_tokens")
+    calendars: Mapped[list["APITokenCalendar"]] = relationship(
+        back_populates="token", cascade="all, delete-orphan"
+    )
+
+
+class APITokenCalendar(Base):
+    """Display-only scope rows for a calendar-scoped token (all_calendars=False).
+    Authoritative scope lives in APIToken.sealed_blob; these only render the UI."""
+
+    __tablename__ = "api_token_calendars"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    api_token_id: Mapped[int] = mapped_column(
+        ForeignKey("api_tokens.id", ondelete="CASCADE"), nullable=False
+    )
+    calendar_id: Mapped[int] = mapped_column(
+        ForeignKey("calendars.id", ondelete="CASCADE"), nullable=False
+    )
+
+    token: Mapped["APIToken"] = relationship(back_populates="calendars")
 
 
 class UserSettings(Base):

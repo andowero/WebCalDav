@@ -11,6 +11,7 @@
 | v4        | Tasks (VTODO): view, edit, complete, recurrence           | Complete |
 | v5        | Dark mode (system/light/dark theme)                       | Complete |
 | v6        | Internationalization (i18n) + Czech translation           | Complete |
+| v7        | MCP server: calendar/task access via API token            | Complete |
 
 ## Known issues
 
@@ -328,11 +329,36 @@ User-selectable UI theme.
 - 141 tests pass (3 new: theme default, round-trip, invalid-value rejection).
   Visual theming is verified manually across the supported browsers.
 
+### MCP server & API tokens (2026-06-17) — v7
+
+AI-assistant access to calendars and tasks over the Model Context Protocol.
+
+- New optional MCP server at `/mcp` (Streamable HTTP via the official `mcp`
+  SDK / `FastMCP`), gated by `MCP_SERVER_ENABLED` (off by default). Ten tools:
+  `list_calendars`, `list_items`, `get_item_details`, `create_event`/`create_task`,
+  `update_event`/`update_task`, `set_task_status`, `delete_event`/`delete_task`.
+  Recurring edits/deletes take a `this`/`thisfuture`/`all` scope. Tools delegate
+  to the same `caldav_client` primitives and `EventUpdate`/`TaskUpdate` models as
+  the web routers (`webcaldav/mcp_server.py`). MCP I/O is English + ISO 8601.
+- API tokens (`webcaldav/tokens.py`, `routers/api_tokens.py`, `APIToken` /
+  `APITokenCalendar` models) minted in Settings → API Tokens, shown once. Token
+  plaintext `WebCalDav{RO,RW}<secret>` makes the mode visible; tokens are
+  read-only or read-write, optionally calendar-scoped, with optional expiry.
+- Security: the DEK and the token's authoritative mode/scope/expiry are sealed in
+  an AES-GCM blob keyed by the token secret (only its SHA-256 is stored), so a
+  stolen DB stays zero-knowledge and DB tampering of the display-only mirror rows
+  cannot escalate a token. `/mcp` is CSRF-exempt (bearer auth); FastMCP host
+  validation is disabled (trusted reverse proxy). Admin `reset_password` now
+  deletes the user's tokens along with the DEK rotation.
+- 168 tests pass (15 new: token mint/resolve, expiry, mode-prefix binding, API
+  CRUD + toggle gating, DB-tamper-cannot-escalate, RO/RW + scope enforcement,
+  admin reset revokes tokens). The live MCP transport was verified end-to-end
+  (initialize, tools/list, RO rejection). Documented in `MCP.md`.
+
 ## What is next
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
-| v7 | MCP server: calendar/task access via API token | Planned |
 | v8 | Configurable double-click action (event vs. task creation) | Planned |
 | v9 | VJOURNAL support (read and write calendar journal entries) | Planned |
 | v10 | Calendar sharing (read-only share links / per-calendar ACL) | Planned |

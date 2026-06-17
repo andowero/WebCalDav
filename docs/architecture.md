@@ -57,6 +57,35 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 - Handles timeouts and retries.
 - Never logs credentials or the DEK.
 
+### MCP server & API tokens
+
+- Optional MCP server (`webcaldav/mcp_server.py`, official `mcp` SDK / `FastMCP`,
+  Streamable HTTP) mounted at `/mcp` only when `MCP_SERVER_ENABLED` is set. Its
+  ten tools delegate to the same CalDAV client primitives and
+  `EventUpdate`/`TaskUpdate` validation as the web routers; output is English +
+  ISO 8601.
+- Auth is per-request via `Authorization: Bearer WebCalDav…`. A pure-ASGI
+  middleware resolves the token (`webcaldav/tokens.py`) into a `TokenContext`
+  (user_id, DEK, mode, calendar scope) held in a `contextvars.ContextVar`; tools
+  read it, enforce read-only vs read-write, and reject out-of-scope calendars.
+- **Token sealing.** A token is `WebCalDav` + `RO`/`RW` + a random secret, shown
+  once. The DB stores `sha256(secret)` (lookup) and an AES-GCM blob — keyed by a
+  key derived from the secret (`derive_token_key`) — that seals the DEK together
+  with the token's *authoritative* mode/scope/expiry. So (a) a stolen DB stays
+  zero-knowledge without the token plaintext, and (b) the plaintext mirror
+  columns / `api_token_calendars` rows are display-only — editing them cannot
+  escalate a token because authorization reads the sealed blob.
+- `/mcp` is exempt from the CSRF-header middleware (bearer auth, no ambient
+  cookie). FastMCP DNS-rebinding Host validation is disabled (the app runs behind
+  a trusted, Host-controlling reverse proxy). The FastMCP session manager is
+  started inside the app lifespan (a mounted sub-app's lifespan is not run by the
+  parent); the wrapper is mounted at the root so its own `/mcp` route is reached
+  unstripped (no trailing-slash redirect).
+- Token CRUD lives at `/api-tokens` (`routers/api_tokens.py`); creation requires
+  an active session (the live DEK is sealed in) and `MCP_SERVER_ENABLED`, while
+  listing/revoking always work. Admin `reset_password` rotates the DEK and
+  deletes the user's tokens.
+
 ### Storage layer
 
 - SQLAlchemy 2.x models for `users`, `caldav_accounts`, `calendars`, `user_settings`.

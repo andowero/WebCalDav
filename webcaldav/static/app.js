@@ -258,6 +258,7 @@
   }
 
   function closeSettings() {
+    closeTokenModal();
     hide('settings-overlay');
     hide('settings-panel');
     // Calendars may have changed; drop the create-modal picker cache.
@@ -266,7 +267,157 @@
   }
 
   async function loadSettings() {
-    await Promise.all([loadAccounts(), loadCalendars(), loadPrefs()]);
+    await Promise.all([loadAccounts(), loadCalendars(), loadPrefs(), loadTokens()]);
+  }
+
+  const MCP_ENABLED = !!window.__MCP_ENABLED__;
+
+  async function loadTokens() {
+    const list = document.getElementById('tokens-list');
+    // Reflect the server toggle: disable creation, keep revoke working.
+    const disabledNote = document.getElementById('tokens-disabled-note');
+    const addDetails = document.getElementById('add-token-details');
+    if (disabledNote) disabledNote.style.display = MCP_ENABLED ? 'none' : '';
+    if (addDetails) addDetails.style.display = MCP_ENABLED ? '' : 'none';
+    // (Re)build the expiry date field each open so a date_format change (no
+    // reload) and the localized mini picker take effect. Reuses the event/task
+    // custom date field + mini calendar.
+    renderDateFields('token-expires', () => {});
+    list.innerHTML = `<p class="loading">${escHtml(tr('dyn.loading'))}</p>`;
+    try {
+      const tokens = await apiGet('/api-tokens');
+      if (tokens.length === 0) {
+        list.innerHTML = `<p class="empty-note">${escHtml(tr('dyn.no_tokens'))}</p>`;
+        return;
+      }
+      list.innerHTML = '';
+      tokens.forEach((t) => {
+        const modeLabel = t.mode === 'rw' ? tr('ui.tokens_rw') : tr('ui.tokens_ro');
+        const scope = t.all_calendars
+          ? tr('dyn.token_all_calendars')
+          : tr('dyn.token_scoped', { n: t.calendar_ids.length });
+        const expires = t.expires_at
+          ? tr('dyn.token_expires', {
+              date: luxon.DateTime.fromISO(t.expires_at).toFormat(
+                luxonDateFmt(dateFormatKey())),
+            })
+          : tr('dyn.token_no_expiry');
+        const row = document.createElement('div');
+        row.className = 'token-row';
+        row.innerHTML =
+          `<div class="token-meta">` +
+            `<span class="token-name">${escHtml(t.name)}</span>` +
+            `<span class="token-badge token-${t.mode}">${escHtml(modeLabel)}</span>` +
+            `<span class="token-sub">${escHtml(scope)} · ${escHtml(expires)}</span>` +
+          `</div>` +
+          `<button class="btn-danger-sm" data-id="${t.id}">${escHtml(tr('dyn.revoke'))}</button>`;
+        row.querySelector('button').addEventListener('click', async () => {
+          if (!confirm(tr('dyn.revoke_token', { name: t.name }))) return;
+          try {
+            await apiDelete(`/api-tokens/${t.id}`);
+            await loadTokens();
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+        list.appendChild(row);
+      });
+    } catch (err) {
+      list.innerHTML = `<p class="error-note">${escHtml(err.message)}</p>`;
+    }
+  }
+
+  async function renderTokenCalendarPicker() {
+    const picker = document.getElementById('token-cal-picker');
+    picker.innerHTML = '';
+    try {
+      const cals = await apiGet('/calendars');
+      cals.forEach((c) => {
+        const label = document.createElement('label');
+        label.className = 'ev-check';
+        label.innerHTML =
+          `<input type="checkbox" class="token-cal" value="${c.id}">` +
+          ` <span>${escHtml(c.display_name)}</span>`;
+        picker.appendChild(label);
+      });
+    } catch (_) {}
+  }
+
+  // Show the freshly minted token once, in a modal. The plaintext lives only in
+  // the input's value while the modal is open; closing it wipes the value so the
+  // secret is not recoverable from the DOM afterwards.
+  function openTokenModal(secret) {
+    document.getElementById('token-secret').value = secret;
+    show('token-overlay');
+    show('token-modal');
+  }
+
+  function closeTokenModal() {
+    const input = document.getElementById('token-secret');
+    if (input) input.value = '';
+    hide('token-modal');
+    hide('token-overlay');
+  }
+
+  function initTokenForm() {
+    const form = document.getElementById('add-token-form');
+    if (!form) return;
+    const allCals = document.getElementById('token-all-cals');
+    const picker = document.getElementById('token-cal-picker');
+    allCals.addEventListener('change', async () => {
+      if (allCals.checked) {
+        picker.style.display = 'none';
+      } else {
+        await renderTokenCalendarPicker();
+        picker.style.display = '';
+      }
+    });
+
+    document.getElementById('token-copy').addEventListener('click', async () => {
+      const secret = document.getElementById('token-secret');
+      try {
+        await navigator.clipboard.writeText(secret.value);
+      } catch (_) {
+        secret.select();
+        document.execCommand('copy');
+      }
+    });
+    document.getElementById('token-modal-close').addEventListener('click', closeTokenModal);
+    document.getElementById('token-overlay').addEventListener('click', closeTokenModal);
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideError('add-token-error');
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      try {
+        const all = allCals.checked;
+        const calendar_ids = all
+          ? null
+          : Array.from(document.querySelectorAll('.token-cal:checked')).map((el) =>
+              parseInt(el.value, 10));
+        const expRaw = getDateFieldValue('token-expires'); // canonical yyyy-MM-dd or ''
+        const body = {
+          name: document.getElementById('token-name').value.trim(),
+          mode: document.getElementById('token-mode').value,
+          all_calendars: all,
+          calendar_ids,
+          expires_at: expRaw ? `${expRaw}T23:59:59` : null,
+        };
+        const res = await apiPost('/api-tokens', body);
+        form.reset();
+        setDateFieldValue('token-expires', '');
+        allCals.checked = true;
+        picker.style.display = 'none';
+        document.getElementById('add-token-details').open = false;
+        await loadTokens();
+        openTokenModal(res.token);
+      } catch (err) {
+        showError('add-token-error', err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
   }
 
   async function loadAccounts() {
@@ -400,6 +551,7 @@
     document.getElementById('btn-settings').addEventListener('click', openSettings);
     document.getElementById('btn-settings-close').addEventListener('click', closeSettings);
     document.getElementById('settings-overlay').addEventListener('click', closeSettings);
+    initTokenForm();
 
     // Add account form
     const addForm = document.getElementById('add-account-form');
@@ -1153,6 +1305,17 @@
   // the user's first-day-of-week setting, so the 📅 button pops this custom
   // calendar instead. first_day_of_week: 0=Sun … 6=Sat (matches FullCalendar).
   const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+  // Localized Sun-indexed short weekday labels (luxon follows the UI language,
+  // see luxon.Settings.defaultLocale). Falls back to the English abbreviations.
+  function weekdayLabels() {
+    if (window.luxon && luxon.Info) {
+      const wd = luxon.Info.weekdays('short'); // [Mon … Sun]
+      return [wd[6], wd[0], wd[1], wd[2], wd[3], wd[4], wd[5]];
+    }
+    return WEEKDAY_LABELS;
+  }
+
   let _calPop = null;
   let _calState = null; // { prefix, onChange, view: luxon DateTime (month) }
 
@@ -1205,8 +1368,9 @@
     pop.querySelector('.ev-cal-grid').classList.remove('months');
     pop.querySelector('.ev-cal-title').textContent = view.toFormat('LLLL yyyy');
     const fdow = firstDayOfWeek();
+    const labels = weekdayLabels();
     const header = Array.from({ length: 7 }, (_, i) =>
-      `<span class="ev-cal-dow">${WEEKDAY_LABELS[(fdow + i) % 7]}</span>`).join('');
+      `<span class="ev-cal-dow">${escHtml(labels[(fdow + i) % 7])}</span>`).join('');
     const monthStart = view.startOf('month');
     // luxon weekday: 1=Mon … 7=Sun → 0=Sun … 6=Sat.
     const startDow = monthStart.weekday % 7;

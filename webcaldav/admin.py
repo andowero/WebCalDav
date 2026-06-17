@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import settings
 from .crypto import derive_kek, generate_dek, make_verifier, wrap_dek
 from .db import create_tables, init_engine, get_session_factory
-from .models import CalDAVAccount, User
+from .models import APIToken, CalDAVAccount, User
 
 cli = typer.Typer(help="WebCalDav admin CLI")
 
@@ -95,6 +95,55 @@ def list_users() -> None:
         typer.echo(f"{u.id:<6} {u.email:<40} {u.must_change_password}")
 
 
+async def _reset_user(email: str, db: AsyncSession) -> str | None:
+    """Rotate a user's DEK and issue a new one-off password, wiping the data the
+    old DEK protected. Returns the new password, or None if the user is unknown.
+    Shared by the CLI command and the test suite."""
+    user = (
+        await db.execute(select(User).where(User.email == email))
+    ).scalar_one_or_none()
+    if user is None:
+        return None
+
+    # Wipe CalDAV credentials (DEK rotation makes them unrecoverable)
+    result = await db.execute(
+        select(CalDAVAccount).where(CalDAVAccount.user_id == user.id)
+    )
+    for account in result.scalars().all():
+        await db.delete(account)
+
+    # Revoke API tokens: their sealed blobs hold the OLD DEK, which the rotation
+    # below makes unrecoverable, so they can never decrypt the (also-deleted)
+    # CalDAV credentials again.
+    tokens = await db.execute(select(APIToken).where(APIToken.user_id == user.id))
+    for token in tokens.scalars().all():
+        await db.delete(token)
+
+    password = _rand_password()
+    kdf_salt = os.urandom(32)
+    dek = generate_dek()
+    kek = derive_kek(
+        password,
+        kdf_salt,
+        time_cost=settings.argon2_time_cost,
+        memory_cost=settings.argon2_memory_cost,
+        parallelism=settings.argon2_parallelism,
+    )
+    wrapped_dek, dek_nonce = wrap_dek(dek, kek)
+    verifier = make_verifier(kek)
+
+    user.kdf_salt = kdf_salt
+    user.kdf_time_cost = settings.argon2_time_cost
+    user.kdf_memory_cost = settings.argon2_memory_cost
+    user.kdf_parallelism = settings.argon2_parallelism
+    user.wrapped_dek = wrapped_dek
+    user.dek_nonce = dek_nonce
+    user.password_verifier = verifier
+    user.must_change_password = True
+    await db.commit()
+    return password
+
+
 @cli.command()
 def reset_password(email: str = typer.Option(..., help="User email address")) -> None:
     """Issue new one-off password and rotate DEK (invalidates stored CalDAV credentials)."""
@@ -102,48 +151,16 @@ def reset_password(email: str = typer.Option(..., help="User email address")) ->
 
     async def _run() -> str:
         async with get_session_factory()() as db:
-            user = (
-                await db.execute(select(User).where(User.email == email))
-            ).scalar_one_or_none()
-            if user is None:
+            password = await _reset_user(email, db)
+            if password is None:
                 typer.echo(f"Error: user {email} not found", err=True)
                 raise typer.Exit(1)
-
-            # Wipe CalDAV credentials (DEK rotation makes them unrecoverable)
-            result = await db.execute(
-                select(CalDAVAccount).where(CalDAVAccount.user_id == user.id)
-            )
-            for account in result.scalars().all():
-                await db.delete(account)
-
-            password = _rand_password()
-            kdf_salt = os.urandom(32)
-            dek = generate_dek()
-            kek = derive_kek(
-                password,
-                kdf_salt,
-                time_cost=settings.argon2_time_cost,
-                memory_cost=settings.argon2_memory_cost,
-                parallelism=settings.argon2_parallelism,
-            )
-            wrapped_dek, dek_nonce = wrap_dek(dek, kek)
-            verifier = make_verifier(kek)
-
-            user.kdf_salt = kdf_salt
-            user.kdf_time_cost = settings.argon2_time_cost
-            user.kdf_memory_cost = settings.argon2_memory_cost
-            user.kdf_parallelism = settings.argon2_parallelism
-            user.wrapped_dek = wrapped_dek
-            user.dek_nonce = dek_nonce
-            user.password_verifier = verifier
-            user.must_change_password = True
-            await db.commit()
             return password
 
     password = asyncio.run(_run())
     typer.echo(f"Password reset for: {email}")
     typer.echo(f"New one-off password: {password}")
-    typer.echo("WARNING: all stored CalDAV credentials have been deleted.")
+    typer.echo("WARNING: all stored CalDAV credentials and API tokens have been deleted.")
 
 
 @cli.command()
