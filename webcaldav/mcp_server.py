@@ -17,13 +17,17 @@ from sqlalchemy import select
 
 from .caldav_client import (
     create_event,
+    create_journal,
     create_task,
     delete_event,
+    delete_journal,
     delete_task,
     fetch_events,
+    fetch_journals,
     fetch_tasks,
     set_task_status,
     update_event,
+    update_journal,
     update_task,
 )
 from .crypto import decrypt_bytes
@@ -38,6 +42,7 @@ from .routers.events import (
     _reminder_deltas,
     _resolve_span,
 )
+from .routers.journals import JournalUpdate, _resolve_journal_start
 from .routers.tasks import TaskUpdate, _resolve_task_span
 from .session import SessionEntry
 from .tokens import TokenContext, resolve_token
@@ -245,17 +250,17 @@ async def list_items(
 
 @mcp.tool(
     description=(
-        "Get the full detail of one event or task by uid and calendar_id: "
+        "Get the full detail of one event, task or journal by uid and calendar_id: "
         "description, location, recurrence rule, reminders, priority, status, and "
-        "raw start/end/due. item_type is 'event' or 'task'. recurrence and "
-        "reminders come back under extendedProps in the same shape the create/"
-        "update tools accept."
+        "raw start/end/due. item_type is 'event', 'task' or 'journal'. recurrence "
+        "and reminders come back under extendedProps in the same shape the create/"
+        "update tools accept. For a journal the description is the Markdown body."
     )
 )
 async def get_item_details(
     uid: str,
     calendar_id: int,
-    item_type: Literal["event", "task"],
+    item_type: Literal["event", "task", "journal"],
 ) -> dict[str, Any]:
     ctx = _ctx()
     _check_scope(ctx, calendar_id)
@@ -265,7 +270,11 @@ async def get_item_details(
         # Wide window so a single recurring master/override is captured.
         from_dt = datetime.now(UTC) - timedelta(days=3650)
         to_dt = datetime.now(UTC) + timedelta(days=3650)
-        fetch = fetch_events if item_type == "event" else fetch_tasks
+        fetch = {
+            "event": fetch_events,
+            "task": fetch_tasks,
+            "journal": fetch_journals,
+        }[item_type]
         items = await fetch(
             account_url=account.url,
             username=account.username,
@@ -304,6 +313,58 @@ async def list_calendars() -> list[dict[str, Any]]:
         }
         for cal, account in cals
     ]
+
+
+@mcp.tool(
+    description=(
+        "List journal entries (VJOURNAL) between two instants. Journals are dated "
+        "notes and are primarily backward in time, so time_min/time_max default to "
+        "30 days ago through now (the reverse of list_items's forward window). "
+        "time_min/time_max are ISO 8601 datetimes. Optionally restrict to specific "
+        "calendar_ids. Returns a flat list: each item has 'id' (the uid), title, "
+        "start, allDay, and an extendedProps object with calendarId. The Markdown "
+        "body is NOT included here (entries can be long) — call get_item_details "
+        "with item_type='journal' for one entry's full description."
+    )
+)
+async def list_journals(
+    time_min: str | None = None,
+    time_max: str | None = None,
+    calendar_ids: list[int] | None = None,
+) -> list[dict[str, Any]]:
+    ctx = _ctx()
+    to_dt = _parse_dt(time_max) or datetime.now(UTC).replace(microsecond=0)
+    from_dt = _parse_dt(time_min) or (to_dt - timedelta(days=30))
+
+    async with get_session_factory()() as db:
+        cals = await _scoped_calendars(ctx, db)
+        if calendar_ids is not None:
+            wanted = set(calendar_ids)
+            cals = [(c, a) for c, a in cals if c.id in wanted]
+
+        results: list[dict[str, Any]] = []
+        for cal, account in cals:
+            pw = _password(account, ctx)
+            try:
+                for j in await fetch_journals(
+                    account_url=account.url,
+                    username=account.username,
+                    password=pw,
+                    calendar_url=cal.caldav_id,
+                    from_dt=from_dt,
+                    to_dt=to_dt,
+                    color=cal.color,
+                    calendar_id=cal.id,
+                ):
+                    # Drop the (potentially long) Markdown body from the listing;
+                    # get_item_details(item_type='journal') returns it per entry.
+                    ep = j.get("extendedProps")
+                    if isinstance(ep, dict) and "description" in ep:
+                        j = {**j, "extendedProps": {k: v for k, v in ep.items() if k != "description"}}
+                    results.append(j)
+            except Exception as e:
+                logger.warning("mcp_list_journals_failed", calendar_id=cal.id, error=repr(e))
+        return results
 
 
 # --------------------------------------------------------------------------- #
@@ -605,6 +666,117 @@ async def delete_task_tool(
         )
     except Exception as e:
         raise ToolError(f"Failed to delete task: {e}")
+    return {"status": "ok"}
+
+
+# --------------------------------------------------------------------------- #
+# Write tools — journals
+# --------------------------------------------------------------------------- #
+@mcp.tool(
+    name="create_journal",
+    description=(
+        "Create a journal entry (VJOURNAL): a dated note with a Markdown body. For "
+        "an all-day entry set all_day=true (the default) and pass a date "
+        "(YYYY-MM-DD); for a timed entry set all_day=false and pass an ISO 8601 "
+        "datetime plus timezone (IANA name, e.g. 'Europe/Prague'). description is "
+        "the Markdown body. calendar_id comes from list_calendars / list_journals. "
+        "Journals have no end, recurrence or reminders. Requires a read-write token."
+    )
+)
+async def create_journal_tool(
+    calendar_id: int,
+    title: str,
+    start: str,
+    all_day: bool = True,
+    description: str | None = None,
+    timezone: str | None = None,
+) -> dict[str, Any]:
+    ctx = _ctx()
+    _require_rw(ctx)
+    _check_scope(ctx, calendar_id)
+    body = JournalUpdate(
+        calendar_id=calendar_id, title=title, start=start, all_day=all_day,
+        description=description, timezone=timezone,
+    )
+    start_v = _resolve_journal_start(body)
+    async with get_session_factory()() as db:
+        cal, account = await _calendar_for(calendar_id, _entry(ctx), db)
+        pw = _password(account, ctx)
+    uid = f"{uuid.uuid4()}@webcaldav"
+    try:
+        await create_journal(
+            account_url=account.url, username=account.username, password=pw,
+            calendar_url=cal.caldav_id, uid=uid, title=body.title, start=start_v,
+            description=body.description,
+        )
+    except Exception as e:
+        raise ToolError(f"Failed to create journal: {e}")
+    return {"status": "ok", "id": uid}
+
+
+@mcp.tool(
+    name="update_journal",
+    description=(
+        "Update a journal entry by uid (from list_journals). Pass the full desired "
+        "field set — provided fields replace the current ones. start is an ISO 8601 "
+        "date (all_day=true) or datetime (all_day=false, with timezone); description "
+        "is the Markdown body. Requires a read-write token."
+    )
+)
+async def update_journal_tool(
+    uid: str,
+    calendar_id: int,
+    title: str,
+    start: str,
+    all_day: bool = True,
+    description: str | None = None,
+    timezone: str | None = None,
+) -> dict[str, Any]:
+    ctx = _ctx()
+    _require_rw(ctx)
+    _check_scope(ctx, calendar_id)
+    body = JournalUpdate(
+        calendar_id=calendar_id, title=title, start=start, all_day=all_day,
+        description=description, timezone=timezone,
+    )
+    start_v = _resolve_journal_start(body)
+    async with get_session_factory()() as db:
+        cal, account = await _calendar_for(calendar_id, _entry(ctx), db)
+        pw = _password(account, ctx)
+    try:
+        await update_journal(
+            account_url=account.url, username=account.username, password=pw,
+            calendar_url=cal.caldav_id, uid=uid, title=body.title, start=start_v,
+            description=body.description,
+        )
+    except Exception as e:
+        raise ToolError(f"Failed to update journal: {e}")
+    return {"status": "ok"}
+
+
+@mcp.tool(
+    name="delete_journal",
+    description=(
+        "Delete a journal entry by uid. Requires a read-write token."
+    )
+)
+async def delete_journal_tool(
+    uid: str,
+    calendar_id: int,
+) -> dict[str, Any]:
+    ctx = _ctx()
+    _require_rw(ctx)
+    _check_scope(ctx, calendar_id)
+    async with get_session_factory()() as db:
+        cal, account = await _calendar_for(calendar_id, _entry(ctx), db)
+        pw = _password(account, ctx)
+    try:
+        await delete_journal(
+            account_url=account.url, username=account.username, password=pw,
+            calendar_url=cal.caldav_id, uid=uid,
+        )
+    except Exception as e:
+        raise ToolError(f"Failed to delete journal: {e}")
     return {"status": "ok"}
 
 

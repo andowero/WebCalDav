@@ -1343,6 +1343,223 @@ details#add-account-details summary {
 .agenda-row.is-task-done { opacity: 0.55; }
 .agenda-row.is-task-done .agenda-title { text-decoration: line-through; }
 
+/* Journal marker: a downward-pointing triangle (pencil tip), filled with the
+   per-calendar colour. Mirrors the event dot / task box markers. */
+.fc-journal-tri {
+  box-sizing: border-box;
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 0.7em;
+  height: 0.7em;
+  margin: 0 0.4em 0 0.1em;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  vertical-align: 0;
+}
+.fc-event .fc-journal-tri { color: inherit; }
+.agenda-tri {
+  box-sizing: border-box;
+  flex: 0 0 0.7rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  align-self: center;
+}
+
+/* Journal body: a two-tab editor (raw-Markdown "Edit" textarea + rendered,
+   read-only "Display" pane). */
+.ev-journal-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 0.4rem;
+}
+.ev-journal-tab {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-control);
+  color: var(--text-body);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.ev-journal-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.event-modal-body textarea.ev-journal-edit {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 14rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ev-journal-display {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 14rem;
+  max-height: 28rem;
+  overflow-y: auto;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-control);
+  color: var(--text-strong);
+  font-size: 13px;
+}
+/* Tame the rendered Markdown's vertical rhythm inside the modal. */
+.ev-journal-display > :first-child { margin-top: 0; }
+.ev-journal-display > :last-child { margin-bottom: 0; }
+.ev-journal-display pre {
+  overflow-x: auto;
+  padding: 0.5rem;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+}
+.ev-journal-display code {
+  background: var(--bg-subtle);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+.ev-journal-display pre code { background: none; padding: 0; }
+
+/* The global `* { margin:0; padding:0 }` reset strips list indents/markers and
+   table borders; restore them inside the rendered Markdown only. */
+.ev-journal-display ul,
+.ev-journal-display ol { padding-left: 1.6em; margin: 0.4em 0; }
+.ev-journal-display ul { list-style: disc; }
+.ev-journal-display ol { list-style: decimal; }
+.ev-journal-display ul ul { list-style: circle; }
+.ev-journal-display ul ul ul { list-style: square; }
+.ev-journal-display li { margin: 0.15em 0; }
+.ev-journal-display li > ul,
+.ev-journal-display li > ol { margin: 0.15em 0; }
+.ev-journal-display p { margin: 0.5em 0; }
+.ev-journal-display h1,
+.ev-journal-display h2,
+.ev-journal-display h3,
+.ev-journal-display h4 { margin: 0.7em 0 0.3em; line-height: 1.25; }
+.ev-journal-display blockquote {
+  margin: 0.6em 0;
+  padding: 0.1em 0.9em;
+  border-left: 3px solid var(--border-input);
+  color: var(--text-dim);
+}
+.ev-journal-display a { color: var(--accent); }
+.ev-journal-display hr { border: none; border-top: 1px solid var(--border-faint); margin: 0.8em 0; }
+.ev-journal-display img { max-width: 100%; }
+
+/* Tables: the reset removes borders, leaving text-only; restore them. */
+.ev-journal-display table { border-collapse: collapse; margin: 0.6em 0; }
+.ev-journal-display th,
+.ev-journal-display td { border: 1px solid var(--border-input); padding: 0.3em 0.6em; }
+.ev-journal-display th { background: var(--bg-subtle); text-align: left; }
+
+/* Task-list checkboxes (markdown-it-task-lists): no bullet, aligned box. */
+.ev-journal-display ul.contains-task-list { list-style: none; padding-left: 0.6em; }
+.ev-journal-display .task-list-item { list-style: none; }
+.ev-journal-display .task-list-item-checkbox { margin-right: 0.45em; }
+
+/* Custom containers (`::: name`). A neutral default plus a few named accents. */
+.ev-journal-display .md-container {
+  margin: 0.7em 0;
+  padding: 0.5em 0.9em;
+  border-left: 4px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-subtle);
+}
+.ev-journal-display .md-container > :first-child { margin-top: 0; }
+.ev-journal-display .md-container > :last-child { margin-bottom: 0; }
+.ev-journal-display .md-warning { border-left-color: var(--warn); }
+.ev-journal-display .md-danger { border-left-color: var(--danger-border); }
+.ev-journal-display .md-tip,
+.ev-journal-display .md-success { border-left-color: var(--today); }
+
+/* Footnotes (markdown-it-footnote). */
+.ev-journal-display .footnotes {
+  font-size: 0.9em;
+  border-top: 1px solid var(--border-faint);
+  margin-top: 1em;
+  padding-top: 0.4em;
+  color: var(--text-dim);
+}
+.ev-journal-display mark { background: #fde68a; color: #000; padding: 0 0.15em; }
+
+/* highlight.js tokens, themed (GitHub-ish), light by default. */
+.ev-journal-display .hljs { display: block; }
+.ev-journal-display .hljs-comment,
+.ev-journal-display .hljs-quote { color: #6a737d; font-style: italic; }
+.ev-journal-display .hljs-keyword,
+.ev-journal-display .hljs-selector-tag,
+.ev-journal-display .hljs-literal,
+.ev-journal-display .hljs-type,
+.ev-journal-display .hljs-built_in { color: #d73a49; }
+.ev-journal-display .hljs-string,
+.ev-journal-display .hljs-regexp,
+.ev-journal-display .hljs-meta-string { color: #032f62; }
+.ev-journal-display .hljs-number,
+.ev-journal-display .hljs-symbol,
+.ev-journal-display .hljs-bullet,
+.ev-journal-display .hljs-link { color: #005cc5; }
+.ev-journal-display .hljs-title,
+.ev-journal-display .hljs-section,
+.ev-journal-display .hljs-name { color: #6f42c1; }
+.ev-journal-display .hljs-attr,
+.ev-journal-display .hljs-attribute,
+.ev-journal-display .hljs-variable,
+.ev-journal-display .hljs-tag { color: #22863a; }
+.ev-journal-display .hljs-meta { color: #6a737d; }
+.ev-journal-display .hljs-emphasis { font-style: italic; }
+.ev-journal-display .hljs-strong { font-weight: 600; }
+
+/* highlight.js dark tokens — explicit dark theme and system-prefers-dark. */
+:root[data-theme="dark"] .ev-journal-display .hljs-comment,
+:root[data-theme="dark"] .ev-journal-display .hljs-quote { color: #8b949e; }
+:root[data-theme="dark"] .ev-journal-display .hljs-keyword,
+:root[data-theme="dark"] .ev-journal-display .hljs-selector-tag,
+:root[data-theme="dark"] .ev-journal-display .hljs-literal,
+:root[data-theme="dark"] .ev-journal-display .hljs-type,
+:root[data-theme="dark"] .ev-journal-display .hljs-built_in { color: #ff7b72; }
+:root[data-theme="dark"] .ev-journal-display .hljs-string,
+:root[data-theme="dark"] .ev-journal-display .hljs-regexp { color: #a5d6ff; }
+:root[data-theme="dark"] .ev-journal-display .hljs-number,
+:root[data-theme="dark"] .ev-journal-display .hljs-symbol,
+:root[data-theme="dark"] .ev-journal-display .hljs-bullet,
+:root[data-theme="dark"] .ev-journal-display .hljs-link { color: #79c0ff; }
+:root[data-theme="dark"] .ev-journal-display .hljs-title,
+:root[data-theme="dark"] .ev-journal-display .hljs-section,
+:root[data-theme="dark"] .ev-journal-display .hljs-name { color: #d2a8ff; }
+:root[data-theme="dark"] .ev-journal-display .hljs-attr,
+:root[data-theme="dark"] .ev-journal-display .hljs-attribute,
+:root[data-theme="dark"] .ev-journal-display .hljs-variable,
+:root[data-theme="dark"] .ev-journal-display .hljs-tag { color: #7ee787; }
+:root[data-theme="dark"] .ev-journal-display .hljs-meta { color: #8b949e; }
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] .ev-journal-display .hljs-comment,
+  :root[data-theme="system"] .ev-journal-display .hljs-quote { color: #8b949e; }
+  :root[data-theme="system"] .ev-journal-display .hljs-keyword,
+  :root[data-theme="system"] .ev-journal-display .hljs-selector-tag,
+  :root[data-theme="system"] .ev-journal-display .hljs-literal,
+  :root[data-theme="system"] .ev-journal-display .hljs-type,
+  :root[data-theme="system"] .ev-journal-display .hljs-built_in { color: #ff7b72; }
+  :root[data-theme="system"] .ev-journal-display .hljs-string,
+  :root[data-theme="system"] .ev-journal-display .hljs-regexp { color: #a5d6ff; }
+  :root[data-theme="system"] .ev-journal-display .hljs-number,
+  :root[data-theme="system"] .ev-journal-display .hljs-symbol,
+  :root[data-theme="system"] .ev-journal-display .hljs-bullet,
+  :root[data-theme="system"] .ev-journal-display .hljs-link { color: #79c0ff; }
+  :root[data-theme="system"] .ev-journal-display .hljs-title,
+  :root[data-theme="system"] .ev-journal-display .hljs-section,
+  :root[data-theme="system"] .ev-journal-display .hljs-name { color: #d2a8ff; }
+  :root[data-theme="system"] .ev-journal-display .hljs-attr,
+  :root[data-theme="system"] .ev-journal-display .hljs-attribute,
+  :root[data-theme="system"] .ev-journal-display .hljs-variable,
+  :root[data-theme="system"] .ev-journal-display .hljs-tag { color: #7ee787; }
+  :root[data-theme="system"] .ev-journal-display .hljs-meta { color: #8b949e; }
+}
+
 .ev-task-hint {
   margin: 0.4rem 0 0;
   font-size: 12px;

@@ -12,13 +12,14 @@ A lightweight, self-hosted web UI for viewing and editing calendar events on you
 - All-day, multi-day, and recurring events; recurring events can be edited with "this event", "this and future", or "all events" scope.
 - Event reminders (VALARM) anchored to event start or end, before or after, with optional browser notifications (see [Browser notifications](#browser-notifications)).
 - Task (VTODO) support: view, create, edit, complete, and recurring tasks alongside calendar events.
+- Journal (VJOURNAL) support: dated notes with a Markdown body edited in a two-tab editor (an "Edit" tab with raw Markdown and a rendered, read-only "Display" tab — tables, syntax-highlighted code, task lists, footnotes, and custom containers; images disabled), shown with a distinct downward-triangle marker.
 - User-selectable UI theme: system (follows OS), light, or dark.
 - Internationalization with Czech translation included; locale auto-detected from the browser.
-- Optional MCP server: AI assistants can read and write your calendars and tasks via scoped, read-only or read-write API tokens ([MCP.md](MCP.md)).
+- Optional MCP server: AI assistants can read and write your events, tasks, and journals via scoped, read-only or read-write API tokens ([MCP.md](MCP.md)).
 - Per-user settings: timezone, first day of week, time and date format, default view, auto-logout, double-click to create events.
 - No caching — every read and write goes straight to your CalDAV server.
 
-> **Note:** FullCalendar and luxon are vendored into the container (`webcaldav/static/vendor/`) and served from the app itself — no third-party CDN, and the browser needs no internet access beyond your own server.
+> **Note:** FullCalendar, luxon, and the journal Markdown stack (markdown-it + plugins and highlight.js) are vendored into the container (`webcaldav/static/vendor/`) and served from the app itself — no third-party CDN, and the browser needs no internet access beyond your own server.
 
 ## Who is this for
 

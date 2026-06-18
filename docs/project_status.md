@@ -12,6 +12,8 @@
 | v5        | Dark mode (system/light/dark theme)                       | Complete |
 | v6        | Internationalization (i18n) + Czech translation           | Complete |
 | v7        | MCP server: calendar/task access via API token            | Complete |
+| v8        | Configurable double-click to create events                | Complete |
+| v9        | Journals (VJOURNAL): view, create, edit, delete           | Complete |
 
 ## Known issues
 
@@ -370,10 +372,36 @@ Optional calmer click behavior on empty calendar space.
 - 170 tests pass (2 new: setting default-off and round-trip). The click/highlight
   interaction is verified manually.
 
+### Journals — VJOURNAL (2026-06-18) — v9
+
+A third CalDAV item kind alongside events and tasks: dated free-text notes.
+
+- A journal is a SUMMARY (title) + a Markdown DESCRIPTION body anchored on a
+  single DTSTART (date or datetime). No end, recurrence or alarms. Multiple
+  journals per day are supported (independent VJOURNAL resources).
+- CalDAV layer adds a `_JOURNAL` `_Kind` (empty end-key) and
+  `fetch_journals`/`create_journal`/`update_journal`/`delete_journal`; the shared
+  field/series helpers were guarded to skip the end property when a kind has none.
+  New `/journals` router (`GET/POST/PUT/DELETE`), a trimmed mirror of `/events`,
+  with calendar-move on edit.
+- Frontend: journals merge into the FullCalendar source and the agenda, render a
+  **downward-pointing triangle** marker (events use a dot, tasks a checkbox), and
+  reuse the editing modal via a new Journal type. The body uses a **two-tab editor**:
+  an "Edit" tab (raw-Markdown textarea) and a read-only "Display" tab rendered via
+  vendored **markdown-it** (MIT, `static/vendor/`; images disabled, raw HTML
+  escaped). New journals default to Edit, existing ones to Display. One date(time)
+  picker; the event/task-only fields are hidden.
+- MCP: dedicated `list_journals` (backward default window — 30 days ago → now),
+  `create_journal`/`update_journal`/`delete_journal`, and a `journal` item_type
+  for `get_item_details`. Write tools require an RW token and respect scope.
+- i18n strings added in English and Czech.
+- 186 tests pass (16 new: radicale round-trip CRUD + Markdown-body persistence +
+  multiple-per-day, router validation/auth, MCP journal tools incl. the backward
+  window). The Markdown editor, triangle marker, and agenda rendering are verified
+  manually.
+
 ## What is next
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
-| v8 | Configurable double-click action (event vs. task creation) | Planned |
-| v9 | VJOURNAL support (read and write calendar journal entries) | Planned |
 | v10 | Calendar sharing (read-only share links / per-calendar ACL) | Planned |

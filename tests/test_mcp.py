@@ -261,8 +261,102 @@ async def test_ro_token_rejects_write_tools():
             await mcp_server.set_task_done(uid="x", calendar_id=1, completed=True)
         with pytest.raises(ToolError):
             await mcp_server.delete_event_tool(uid="x", calendar_id=1)
+        with pytest.raises(ToolError):
+            await mcp_server.create_journal_tool(calendar_id=1, title="x", start="2026-06-18")
+        with pytest.raises(ToolError):
+            await mcp_server.delete_journal_tool(uid="x", calendar_id=1)
     finally:
         _current.reset(reset)
+
+
+@pytest.mark.asyncio
+async def test_list_journals_backward_default_window(db_engine, monkeypatch):
+    """list_journals defaults to a backward window (30 days ago -> now), the
+    reverse of list_items, and only queries in-scope calendars."""
+    uid = await _create_user("mcp-journals@example.com")
+    dek = generate_dek()
+    cal_ids = await _add_account_with_calendars(uid, dek, n=2)
+
+    seen: list[dict] = []
+
+    async def fake_fetch_journals(**kwargs):
+        seen.append(kwargs)
+        return [{"id": f"j{kwargs['calendar_id']}",
+                 "extendedProps": {"isJournal": True, "calendarId": kwargs["calendar_id"],
+                                   "description": "# long body"}}]
+
+    monkeypatch.setattr(mcp_server, "fetch_journals", fake_fetch_journals)
+
+    ctx = TokenContext(user_id=uid, dek=dek, mode="ro", all_calendars=False,
+                       calendar_ids=[cal_ids[0]], token_id=1)
+    reset = _current.set(ctx)
+    try:
+        out = await mcp_server.list_journals()
+    finally:
+        _current.reset(reset)
+
+    assert [k["calendar_id"] for k in seen] == [cal_ids[0]]
+    assert len(out) == 1 and out[0]["extendedProps"]["isJournal"] is True
+    # The listing omits the (potentially long) Markdown body.
+    assert "description" not in out[0]["extendedProps"]
+    # Default window points into the past.
+    assert seen[0]["from_dt"] < seen[0]["to_dt"]
+    assert (seen[0]["to_dt"] - seen[0]["from_dt"]) == timedelta(days=30)
+
+
+@pytest.mark.asyncio
+async def test_get_item_details_journal_returns_description(db_engine, monkeypatch):
+    """get_item_details(item_type='journal') returns the full Markdown body that
+    list_journals omits."""
+    uid = await _create_user("mcp-journal-detail@example.com")
+    dek = generate_dek()
+    cal_ids = await _add_account_with_calendars(uid, dek, n=1)
+
+    async def fake_fetch_journals(**kwargs):
+        return [{"id": "jx", "title": "Log",
+                 "extendedProps": {"isJournal": True, "calendarId": kwargs["calendar_id"],
+                                   "description": "# full body"}}]
+
+    monkeypatch.setattr(mcp_server, "fetch_journals", fake_fetch_journals)
+
+    ctx = TokenContext(user_id=uid, dek=dek, mode="ro", all_calendars=True,
+                       calendar_ids=None, token_id=1)
+    reset = _current.set(ctx)
+    try:
+        out = await mcp_server.get_item_details(uid="jx", calendar_id=cal_ids[0], item_type="journal")
+    finally:
+        _current.reset(reset)
+    assert out["extendedProps"]["description"] == "# full body"
+
+
+@pytest.mark.asyncio
+async def test_create_journal_tool_writes(db_engine, monkeypatch):
+    uid = await _create_user("mcp-journal-create@example.com")
+    dek = generate_dek()
+    cal_ids = await _add_account_with_calendars(uid, dek, n=1)
+
+    captured: dict = {}
+
+    async def fake_create_journal(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(mcp_server, "create_journal", fake_create_journal)
+
+    ctx = TokenContext(user_id=uid, dek=dek, mode="rw", all_calendars=True,
+                       calendar_ids=None, token_id=1)
+    reset = _current.set(ctx)
+    try:
+        out = await mcp_server.create_journal_tool(
+            calendar_id=cal_ids[0], title="Log", start="2026-06-18",
+            description="# notes",
+        )
+    finally:
+        _current.reset(reset)
+    assert out["status"] == "ok" and out["id"].endswith("@webcaldav")
+    assert captured["title"] == "Log"
+    assert captured["description"] == "# notes"
+    # all_day defaults true -> stored as a date.
+    assert str(captured["start"]) == "2026-06-18"
 
 
 @pytest.mark.asyncio

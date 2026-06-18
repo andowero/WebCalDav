@@ -46,14 +46,20 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 
 - Wraps the `caldav` library.
 - For each outbound request, looks up the current session's DEK, decrypts the relevant `caldav_accounts.encrypted_password`, and uses the plaintext credential only for the duration of that HTTP call.
-- Handles both **VEVENT** (events) and **VTODO** (tasks). The recurrence,
-  scoped-override, EXDATE/UNTIL, and VALARM helpers are generalised over a
-  component `_Kind` (component name, end property `dtend`/`due`, icalendar class,
-  caldav search flag) so events and tasks share one implementation; tasks add
+- Handles **VEVENT** (events), **VTODO** (tasks), and **VJOURNAL** (journals).
+  The recurrence, scoped-override, EXDATE/UNTIL, and VALARM helpers are
+  generalised over a component `_Kind` (component name, end property
+  `dtend`/`due`/none, icalendar class, caldav search flag) so the kinds share one
+  implementation; tasks add
   `fetch_tasks`/`create_task`/`update_task`/`delete_task`/`set_task_status`.
   Tasks anchor on DUE (else DTSTART), both optional (undated tasks), and carry
   STATUS/COMPLETED/PERCENT-COMPLETE/PRIORITY; completing a recurring task writes
   a per-occurrence COMPLETED override (RFC advance).
+- **Journals** (`_JOURNAL` kind, empty end-key) are the simplest: a SUMMARY +
+  Markdown DESCRIPTION anchored on a single DTSTART (date or datetime), with no
+  end, recurrence or alarms. `fetch_journals`/`create_journal`/`update_journal`/
+  `delete_journal` write whole resources; the shared field helpers skip the end
+  property when the kind has no end-key.
 - Handles timeouts and retries.
 - Never logs credentials or the DEK.
 
@@ -98,8 +104,9 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 
 ### API layer
 
-- FastAPI routers per resource: `auth`, `caldav_accounts`, `calendars`, `events`, `tasks`, `settings`, `ops` (`/health`, `/metrics`).
+- FastAPI routers per resource: `auth`, `caldav_accounts`, `calendars`, `events`, `tasks`, `journals`, `settings`, `ops` (`/health`, `/metrics`).
 - `tasks` mirrors `events` for VTODO: `GET/POST /tasks`, `PUT/DELETE /tasks/{uid}`, and `POST /tasks/{uid}/status` (done/undone). It reuses the events router's recurrence/reminder models and helpers.
+- `journals` is a trimmed mirror for VJOURNAL: `GET/POST /journals`, `PUT/DELETE /journals/{uid}`. No recurrence/reminders/end — just title, a single start (date or datetime), and a Markdown `description` body; calendar move on edit works as for events.
 - `calendars` also serves `GET /calendars/ctags` — a per-calendar change token (the caldav lib's sync-token, falling back to an etag-hash on Radicale) used by the notification scheduler to skip redundant event refetches.
 - `settings` carries `notifications_enabled`; enabling it forces `auto_logout_enabled` off (the two are mutually exclusive — notifications need a live session).
 - Dependency injection resolves the current session and DEK; protected endpoints require an unrestricted session.
@@ -316,6 +323,23 @@ Tasks follow the same scope/recurrence rules as events (shared CalDAV helpers).
 The frontend merges `/tasks` into the FullCalendar source and the agenda,
 applying the `completed_task_display` (hidden/grayed) and `undated_task_display`
 (agenda/today) settings client-side. No local task cache.
+
+### View / create / edit / delete journals
+
+```
+view:    GET    /journals?from=…&to=…        ──► CalDAV REPORT (VJOURNAL)
+create:  POST   /journals                    ──► CalDAV PUT (new UID, VJOURNAL)
+edit:    PUT    /journals/{uid}              ──► CalDAV PUT (in place / move)
+delete:  DELETE /journals/{uid}?calendar_id=… ──► CalDAV DELETE
+```
+
+Journals are dated notes: SUMMARY + Markdown DESCRIPTION on a single DTSTART, no
+end/recurrence/alarms. The frontend merges `/journals` into the FullCalendar
+source and the agenda, rendering each with a downward-triangle marker and editing
+the body in a two-tab editor — an "Edit" tab (a plain textarea of raw Markdown)
+and a read-only "Display" tab that renders it via vendored markdown-it + plugins
+(container, task-lists, footnote, deflist, sub/sup, mark) with highlight.js for
+fenced code (images disabled, raw HTML escaped). No local journal cache.
 
 ### Logout or expiry
 

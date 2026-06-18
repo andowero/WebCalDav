@@ -768,31 +768,136 @@
 
   // ── Event / Task type toggle ─────────────────────────────────────────────────
 
+  // The modal serves three kinds: 'event', 'task', 'journal' (the #ev-type value).
+  function modalKind() {
+    return document.getElementById('ev-type').value;
+  }
   function modalIsTask() {
-    return document.getElementById('ev-type').value === 'task';
+    return modalKind() === 'task';
+  }
+  function modalIsJournal() {
+    return modalKind() === 'journal';
   }
 
-  // Point the shared modal at one kind. `locked` disables the switch (existing
-  // items can't change kind).
-  function setModalType(isTask, locked) {
+  // The journal body uses a two-tab editor: an "Edit" tab (a plain textarea of raw
+  // Markdown) and a read-only "Display" tab that renders the Markdown. The body is
+  // stored in the textarea; the display pane is re-rendered on each switch to it.
+  // Images are disabled and raw HTML escaped, so rendering via innerHTML is safe
+  // (CalDAV can't store images anyway).
+  let _journalMd = null;
+  function journalRenderer() {
+    if (_journalMd) return _journalMd;
+    if (!window.markdownit) return null;
+    const hl = window.hljs;
+    const md = window.markdownit({
+      html: false,
+      linkify: true,
+      breaks: true,
+      // Syntax-highlight fenced code via highlight.js (the language hint when
+      // valid, else auto-detect); fall back to escaped plain text.
+      highlight: function (str, lang) {
+        const esc = (s) => _journalMd.utils.escapeHtml(s);
+        if (hl) {
+          try {
+            const out = lang && hl.getLanguage(lang)
+              ? hl.highlight(str, { language: lang, ignoreIllegals: true })
+              : hl.highlightAuto(str);
+            return '<pre class="hljs"><code>' + out.value + '</code></pre>';
+          } catch (_) { /* fall through */ }
+        }
+        return '<pre class="hljs"><code>' + esc(str) + '</code></pre>';
+      },
+    });
+    md.disable('image');
+
+    // Generic custom containers: `::: name` … `:::` → <div class="md-container
+    // md-<name>">. validate→true accepts any name (defaults to "note").
+    if (window.markdownitContainer) {
+      md.use(window.markdownitContainer, 'generic', {
+        validate: function () { return true; },
+        render: function (tokens, idx) {
+          if (tokens[idx].nesting !== 1) return '</div>\n';
+          const name = (tokens[idx].info.trim().split(/\s+/)[0] || 'note');
+          return '<div class="md-container md-' + md.utils.escapeHtml(name) + '">\n';
+        },
+      });
+    }
+    // Remaining plugins (each guarded — a missing vendor file just disables it).
+    [
+      window.markdownitFootnote,
+      window.markdownitDeflist,
+      window.markdownitSub,
+      window.markdownitSup,
+      window.markdownitMark,
+      window.markdownitTaskLists,
+    ].forEach((p) => { if (p) md.use(p); });
+
+    _journalMd = md;
+    return _journalMd;
+  }
+  function renderJournalDisplay() {
+    const el = document.getElementById('ev-journal-display');
+    const src = document.getElementById('ev-journal-edit').value || '';
+    const md = journalRenderer();
+    el.innerHTML = md ? md.render(src) : escHtml(src);
+  }
+  function setJournalTab(tab) {
+    const edit = tab !== 'display';
+    document.getElementById('ev-journal-edit').style.display = edit ? '' : 'none';
+    document.getElementById('ev-journal-display').style.display = edit ? 'none' : '';
+    document.getElementById('ev-journal-tab-edit').classList.toggle('active', edit);
+    document.getElementById('ev-journal-tab-display').classList.toggle('active', !edit);
+    if (!edit) renderJournalDisplay();
+  }
+  function setJournalBody(md) {
+    document.getElementById('ev-journal-edit').value = md || '';
+  }
+  function getJournalBody() {
+    return document.getElementById('ev-journal-edit').value;
+  }
+
+  // Point the shared modal at one kind ('event' | 'task' | 'journal'). `locked`
+  // disables the switch (existing items can't change kind).
+  function setModalType(kind, locked) {
     const sel = document.getElementById('ev-type');
-    sel.value = isTask ? 'task' : 'event';
+    sel.value = kind;
     sel.disabled = !!locked;
     applyTypeToggle();
   }
 
   function applyTypeToggle() {
-    const isTask = modalIsTask();
-    document.getElementById('ev-duration-legend').textContent = isTask ? tr('dyn.schedule') : tr('dyn.duration');
-    document.getElementById('ev-from-label').textContent = isTask ? tr('dyn.start') : tr('dyn.from');
+    const kind = modalKind();
+    const isTask = kind === 'task';
+    const isJournal = kind === 'journal';
+    document.getElementById('ev-duration-legend').textContent =
+      isJournal ? tr('dyn.date') : (isTask ? tr('dyn.schedule') : tr('dyn.duration'));
+    document.getElementById('ev-from-label').textContent =
+      isJournal ? tr('dyn.date') : (isTask ? tr('dyn.start') : tr('dyn.from'));
     document.getElementById('ev-to-label').textContent = isTask ? tr('dyn.due') : tr('dyn.to');
+    // Journals anchor on a single date; hide the "To" row entirely.
+    document.getElementById('ev-to-row').style.display = isJournal ? 'none' : '';
     document.getElementById('ev-priority-field').style.display = isTask ? '' : 'none';
     document.getElementById('ev-undated-hint').style.display = isTask ? '' : 'none';
     const isNew = _currentEvent && _currentEvent.isNew;
     document.getElementById('ev-done-field').style.display = isTask && !isNew ? '' : 'none';
+    // Journals carry no recurrence, reminders or location; they swap the plain
+    // notes textarea for the Markdown body editor.
+    document.getElementById('ev-repeat-fieldset').style.display = isJournal ? 'none' : '';
+    document.getElementById('ev-location-field').style.display = isJournal ? 'none' : '';
+    document.getElementById('ev-reminders-field').style.display = isJournal ? 'none' : '';
+    document.getElementById('ev-notes-field').style.display = isJournal ? 'none' : '';
+    document.getElementById('ev-journal-field').style.display = isJournal ? '' : 'none';
+    // New journals default to all-day (a diary entry is a date, not a time);
+    // existing items keep their stored all-day flag.
+    if (isJournal && _currentEvent && _currentEvent.isNew) {
+      document.getElementById('ev-allday').checked = true;
+      applyAllDayToggle();
+    }
     if (_currentEvent && _currentEvent.isNew) {
       _currentEvent.isTask = isTask;
-      document.getElementById('ev-title-text').textContent = isTask ? tr('dyn.new_task') : tr('dyn.new_event');
+      _currentEvent.isJournal = isJournal;
+      document.getElementById('ev-title-text').textContent =
+        isJournal ? tr('dyn.new_journal') : (isTask ? tr('dyn.new_task') : tr('dyn.new_event'));
     }
     // Relabel reminder anchors (before/after due vs end) for the new type.
     renderReminders();
@@ -1694,11 +1799,13 @@
     hideError('ev-error');
 
     const isTask = !!props.isTask;
+    const isJournal = !!props.isJournal;
+    const kind = isJournal ? 'journal' : (isTask ? 'task' : 'event');
     document.getElementById('ev-title-text').textContent =
-      event.title || (isTask ? tr('dyn.task') : tr('dyn.event'));
+      event.title || (isJournal ? tr('dyn.journal') : (isTask ? tr('dyn.task') : tr('dyn.event')));
     document.getElementById('ev-name').value = event.title || '';
     document.getElementById('ev-allday').checked = !!event.allDay;
-    setModalType(isTask, true);
+    setModalType(kind, true);
     document.getElementById('ev-priority').value = String(props.priority || 0);
     document.getElementById('ev-done').checked = !!props.completed;
 
@@ -1756,6 +1863,7 @@
 
     document.getElementById('ev-location').value = props.location || '';
     document.getElementById('ev-notes').value = props.description || '';
+    if (isJournal) { setJournalBody(props.description || ''); setJournalTab('display'); }
 
     resetReminders(props.reminders);
 
@@ -1806,6 +1914,7 @@
       originalCalendarId: props.calendarId,
       editable,
       isTask,
+      isJournal,
       recurring: !!recurrence,
       rawStart: props.rawStart || (event.start ? event.start.toISOString() : null),
       // Stable pivot for scoped edits: an already-detached override keeps its
@@ -1863,7 +1972,9 @@
     document.getElementById('ev-recur-summary').style.display = 'none';
     resetRecurEditorDefaults();
     resetReminders([]);
-    setModalType(false, false);
+    setJournalBody('');
+    setJournalTab('edit');
+    setModalType('event', false);
 
     // Populate the calendar picker (create-only).
     const calField = document.getElementById('ev-calendar-field');
@@ -1939,6 +2050,7 @@
       return `${pad(h24)}:${pad(m)}`;
     };
 
+    if (modalIsJournal()) { await saveJournal(name, allDay, startDate, timeStr); return; }
     if (modalIsTask()) { await saveTask(name, allDay, startDate, endDate, timeStr); return; }
 
     if (!startDate) { showError('ev-error', tr('dyn.start_required')); return; }
@@ -2057,6 +2169,38 @@
     }
   }
 
+  // Save the modal as a VJOURNAL. A single date (or datetime), a Markdown body,
+  // and no recurrence / reminders / end. Writes target /journals.
+  async function saveJournal(name, allDay, startDate, timeStr) {
+    if (!startDate) { showError('ev-error', tr('dyn.start_required')); return; }
+    const body = {
+      calendar_id: _currentEvent.calendarId,
+      title: name,
+      all_day: allDay,
+      description: getJournalBody(),
+      timezone: effectiveTz(),
+      start: allDay ? startDate : `${startDate}T${timeStr('start')}:00`,
+    };
+    const btn = document.getElementById('btn-event-save');
+    btn.disabled = true;
+    btn.textContent = tr('dyn.saving');
+    try {
+      if (_currentEvent.isNew) {
+        await apiPost('/journals', body);
+      } else {
+        body.original_calendar_id = _currentEvent.originalCalendarId;
+        await apiPut(`/journals/${encodeURIComponent(_currentEvent.id)}`, body);
+      }
+      closeEventModal();
+      refreshViews();
+    } catch (err) {
+      showError('ev-error', err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = tr('dyn.save');
+    }
+  }
+
   // Delete the event currently open in the modal (Delete button). No confirm
   // here — the spec reserves the "are you sure" prompt for the right-click menu.
   async function deleteCurrentEvent() {
@@ -2072,7 +2216,7 @@
         qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
       }
     }
-    const base = _currentEvent.isTask ? '/tasks' : '/events';
+    const base = _currentEvent.isJournal ? '/journals' : (_currentEvent.isTask ? '/tasks' : '/events');
     const btn = document.getElementById('btn-event-delete');
     btn.disabled = true;
     try {
@@ -2103,6 +2247,8 @@
     });
     document.getElementById('ev-repeats').addEventListener('change', applyRepeatsToggle);
     document.getElementById('ev-type').addEventListener('change', applyTypeToggle);
+    document.getElementById('ev-journal-tab-edit').addEventListener('click', () => setJournalTab('edit'));
+    document.getElementById('ev-journal-tab-display').addEventListener('click', () => setJournalTab('display'));
     document.getElementById('ev-reminder-add').addEventListener('click', addReminderRow);
     initRecurEditor();
     // Date-field and time-field listeners/steppers are bound per-open inside
@@ -2164,7 +2310,8 @@
       const props = ev.extendedProps || {};
       if (props.calendarId == null) return;
       const isTask = !!props.isTask;
-      const noun = tr(isTask ? 'dyn.noun_task' : 'dyn.noun_event');
+      const isJournal = !!props.isJournal;
+      const noun = tr(isJournal ? 'dyn.noun_journal' : (isTask ? 'dyn.noun_task' : 'dyn.noun_event'));
       let qs = `calendar_id=${props.calendarId}`;
       if (props.recurrence) {
         // Recurring: a scope choice replaces the plain yes/no confirm.
@@ -2175,11 +2322,12 @@
           props.recurrenceId || props.rawStart || (ev.start ? ev.start.toISOString() : null);
         if (pivot) qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
       } else {
-        const ok = await confirmDialog(tr('dyn.confirm_delete', { title: ev.title || tr(isTask ? 'dyn.this_task' : 'dyn.this_event') }));
+        const ok = await confirmDialog(tr('dyn.confirm_delete', { title: ev.title || tr(isJournal ? 'dyn.this_journal' : (isTask ? 'dyn.this_task' : 'dyn.this_event')) }));
         if (!ok) return;
       }
       try {
-        await apiDelete(`/${isTask ? 'tasks' : 'events'}/${encodeURIComponent(ev.id)}?${qs}`);
+        const base = isJournal ? 'journals' : (isTask ? 'tasks' : 'events');
+        await apiDelete(`/${base}/${encodeURIComponent(ev.id)}?${qs}`);
         refreshViews();
       } catch (err) {
         alert(err.message);
@@ -2489,9 +2637,10 @@
     const to = from.plus({ days: AGENDA_CHUNK_DAYS });
     try {
       const params = new URLSearchParams({ from: from.toISO(), to: to.toISO() });
-      const [evR, tkR] = await Promise.all([
+      const [evR, tkR, jrR] = await Promise.all([
         fetch('/events?' + params.toString()),
         fetch('/tasks?' + params.toString()),
+        fetch('/journals?' + params.toString()),
       ]);
       if (!evR.ok) throw new Error('Failed to fetch events');
       const data = await evR.json();
@@ -2504,6 +2653,7 @@
           data.push(e);
         });
       }
+      if (jrR.ok) (await jrR.json()).forEach((e) => data.push(e));
 
       const fresh = [];
       for (const e of data) {
@@ -2563,6 +2713,7 @@
     const timeFmt = timeFormatKey() === '12h' ? 'h:mm a' : 'HH:mm';
     const p = e.extendedProps || {};
     const isTask = !!p.isTask;
+    const isJournal = !!p.isJournal;
     const completedMode = (window.__SETTINGS__ || {}).completed_task_display || 'hidden';
 
     const row = document.createElement('div');
@@ -2575,7 +2726,9 @@
       timeTxt = e.allDay ? tr('ui.modal_allday') : start.toFormat(timeFmt);
     }
     const loc = p.location ? `<div class="agenda-loc">${escHtml(p.location)}</div>` : '';
-    const marker = isTask
+    const marker = isJournal
+      ? `<span class="agenda-tri" style="color:${escHtml(e.color || '#3788d8')}"></span>`
+      : isTask
       ? `<span class="agenda-box${p.completed ? ' done' : ''}" style="color:${escHtml(e.color || '#3788d8')}" role="checkbox"></span>`
       : `<span class="agenda-dot" style="background:${escHtml(e.color || '#3788d8')}"></span>`;
     row.innerHTML =
@@ -2765,7 +2918,9 @@
     document.getElementById('ev-recur-summary').style.display = 'none';
     resetRecurEditorDefaults();
     resetReminders([]);
-    setModalType(false, false);
+    setJournalBody('');
+    setJournalTab('edit');
+    setModalType('event', false);
 
     const calField = document.getElementById('ev-calendar-field');
     const calSel = document.getElementById('ev-calendar');
@@ -2863,6 +3018,22 @@
       const titleEl = info.el.querySelector('.fc-event-title, .fc-list-event-title');
       if (titleEl && titleEl.parentNode) titleEl.parentNode.insertBefore(box, titleEl);
       else info.el.prepend(box);
+    }
+  }
+
+  // Swap FullCalendar's round dot for a downward-pointing triangle (a pencil
+  // tip) so journals read distinctly from events (dot) and tasks (checkbox).
+  function decorateJournalEl(info) {
+    const tri = document.createElement('span');
+    tri.className = 'fc-journal-tri';
+    const dot = info.el.querySelector('.fc-daygrid-event-dot');
+    if (dot) {
+      tri.style.color = dot.style.borderColor || getComputedStyle(dot).borderColor;
+      dot.replaceWith(tri);
+    } else {
+      const titleEl = info.el.querySelector('.fc-event-title, .fc-list-event-title');
+      if (titleEl && titleEl.parentNode) titleEl.parentNode.insertBefore(tri, titleEl);
+      else info.el.prepend(tri);
     }
   }
 
@@ -2975,9 +3146,10 @@
       events: async function (fetchInfo, successCallback, failureCallback) {
         try {
           const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr });
-          const [evR, tkR] = await Promise.all([
+          const [evR, tkR, jrR] = await Promise.all([
             fetch('/events?' + params.toString()),
             fetch('/tasks?' + params.toString()),
+            fetch('/journals?' + params.toString()),
           ]);
           if (!evR.ok) throw new Error('Failed to fetch events');
           const data = await evR.json();
@@ -2989,7 +3161,16 @@
           });
           let tasks = [];
           if (tkR.ok) tasks = prepTasksForGrid(await tkR.json());
-          successCallback(data.concat(tasks));
+          let journals = [];
+          if (jrR.ok) {
+            // Journals aren't drag/resize editable; left-click opens the modal.
+            journals = (await jrR.json()).map((e) => {
+              e.editable = false;
+              e.classNames = ['fc-journal'];
+              return e;
+            });
+          }
+          successCallback(data.concat(tasks).concat(journals));
         } catch (err) {
           failureCallback(err);
         }
@@ -3054,7 +3235,8 @@
         const props = info.event.extendedProps || {};
         // Demo events have no calendar; skip the right-click menu for them.
         if (props.calendarId == null) return;
-        if (props.isTask) decorateTaskEl(info);
+        if (props.isJournal) decorateJournalEl(info);
+        else if (props.isTask) decorateTaskEl(info);
         info.el.addEventListener('contextmenu', function (e) {
           e.preventDefault();
           showContextMenu(e.pageX, e.pageY, info.event);

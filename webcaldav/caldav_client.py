@@ -14,6 +14,7 @@ from dateutil.rrule import rrulestr
 from icalendar import Alarm as IAlarm
 from icalendar import Calendar as ICalendar
 from icalendar import Event as IEvent
+from icalendar import Journal as IJournal
 from icalendar import Todo as ITodo
 from icalendar.prop import vRecur
 
@@ -433,14 +434,18 @@ class _Kind(NamedTuple):
     the "end" property, the icalendar class, and the caldav search flag) are
     captured here so the shared helpers can serve both."""
 
-    name: str  # "VEVENT" / "VTODO"
-    end_key: str  # "dtend" / "due"
-    make: Callable[[], Any]  # IEvent / ITodo
-    search_kw: str  # "event" / "todo"
+    name: str  # "VEVENT" / "VTODO" / "VJOURNAL"
+    end_key: str  # "dtend" / "due" / "" (journals have no end)
+    make: Callable[[], Any]  # IEvent / ITodo / IJournal
+    search_kw: str  # "event" / "todo" / "journal"
 
 
 _EVENT = _Kind("VEVENT", "dtend", IEvent, "event")
 _TODO = _Kind("VTODO", "due", ITodo, "todo")
+# Journals (VJOURNAL) anchor on DTSTART only: no end property, no recurrence /
+# alarm / status machinery in our model. The empty end_key short-circuits the
+# end-property handling in the shared helpers.
+_JOURNAL = _Kind("VJOURNAL", "", IJournal, "journal")
 
 
 def _master_meta(
@@ -712,11 +717,12 @@ def _apply_fields(
     _replace("location", location)
     _replace("description", description)
     vevent.pop("dtstart", None)
-    vevent.pop(kind.end_key, None)
+    if kind.end_key:
+        vevent.pop(kind.end_key, None)
     vevent.pop("duration", None)
     if start is not None:
         vevent.add("dtstart", start)
-    if end is not None:
+    if end is not None and kind.end_key:
         vevent.add(kind.end_key, end)
     try:
         seq = int(vevent.get("sequence", 0)) + 1
@@ -847,7 +853,7 @@ def _series_ical(
         ve.add("summary", title)
     if start is not None:
         ve.add("dtstart", start)
-    if end is not None:
+    if end is not None and kind.end_key:
         ve.add(kind.end_key, end)
     if location:
         ve.add("location", location)
@@ -1877,4 +1883,206 @@ async def set_task_status(
             raise
         except Exception:
             caldav_request_errors_total.labels(operation="set_task_status").inc()
+            raise
+
+
+# ── Journals (VJOURNAL) ───────────────────────────────────────────────────────
+#
+# Journals are dated free-text notes: a SUMMARY (title) + a Markdown DESCRIPTION
+# body anchored on a single DTSTART (date or datetime). VJOURNAL has no end, no
+# recurrence and no alarms in our model, so the orchestration below is far
+# simpler than events/tasks — a whole-resource create/update/delete via the
+# _JOURNAL kind and the caldav lib's save_journal/journal_by_uid.
+
+
+def _sync_fetch_journals(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    from_dt: datetime,
+    to_dt: datetime,
+    color: str,
+    calendar_id: int,
+) -> list[dict[str, Any]]:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        journals = cal.search(start=from_dt, end=to_dt, journal=True, expand=False)
+        logger.info(
+            "caldav_search_journals done url=%s from=%s to=%s raw_count=%d",
+            calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(journals),
+        )
+        result: list[dict[str, Any]] = []
+        for journal in journals:
+            try:
+                for vj in journal.icalendar_instance.walk("VJOURNAL"):
+                    if "dtstart" not in vj:
+                        continue
+                    uid = str(vj.get("uid")) if vj.get("uid") else str(journal.url)
+                    summary = vj.get("summary")
+                    title = str(summary) if summary else "(No title)"
+                    dtstart = vj.decoded("dtstart")
+                    all_day = _is_all_day(dtstart)
+                    ev: dict[str, Any] = {
+                        "id": uid,
+                        "title": title,
+                        "start": _dt_to_iso(dtstart),
+                        "allDay": all_day,
+                        "color": color,
+                    }
+                    extended: dict[str, Any] = {
+                        "isJournal": True,
+                        "calendarId": calendar_id,
+                        "rawStart": ev["start"],
+                    }
+                    desc = vj.get("description")
+                    if desc:
+                        extended["description"] = str(desc)
+                    ev["extendedProps"] = extended
+                    result.append(ev)
+            except Exception as e:
+                logger.warning("Failed to parse journal: %s", e)
+        return result
+
+
+async def fetch_journals(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    from_dt: datetime,
+    to_dt: datetime,
+    color: str,
+    calendar_id: int,
+) -> list[dict[str, Any]]:
+    with caldav_request_duration_seconds.labels(operation="fetch_journals").time():
+        try:
+            return await asyncio.to_thread(
+                _sync_fetch_journals, account_url, username, password, calendar_url,
+                from_dt, to_dt, color, calendar_id,
+            )
+        except Exception:
+            caldav_request_errors_total.labels(operation="fetch_journals").inc()
+            raise
+
+
+def _sync_create_journal(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    start: date | datetime,
+    description: str | None,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        cal.save_journal(_series_ical(
+            uid, title, start, None, None, description, None, kind=_JOURNAL,
+        ))
+
+
+async def create_journal(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    start: date | datetime,
+    description: str | None,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="create_journal").time():
+        try:
+            await asyncio.to_thread(
+                _sync_create_journal, account_url, username, password, calendar_url,
+                uid, title, start, description,
+            )
+        except Exception:
+            caldav_request_errors_total.labels(operation="create_journal").inc()
+            raise
+
+
+def _sync_update_journal(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    start: date | datetime,
+    description: str | None,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        try:
+            journal = cal.journal_by_uid(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+
+        ical = journal.icalendar_instance
+        master = _master_vevent(ical, "VJOURNAL")
+        if master is None:
+            raise EventNotFoundError(uid)
+        _apply_fields(master, title, start, None, None, description, kind=_JOURNAL)
+        journal.data = ical.to_ical().decode("utf-8")
+        journal.save()
+
+
+async def update_journal(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    title: str,
+    start: date | datetime,
+    description: str | None,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="update_journal").time():
+        try:
+            await asyncio.to_thread(
+                _sync_update_journal, account_url, username, password, calendar_url,
+                uid, title, start, description,
+            )
+        except EventNotFoundError:
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="update_journal").inc()
+            raise
+
+
+def _sync_delete_journal(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+) -> None:
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        try:
+            journal = cal.journal_by_uid(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+        journal.delete()
+
+
+async def delete_journal(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+) -> None:
+    with caldav_request_duration_seconds.labels(operation="delete_journal").time():
+        try:
+            await asyncio.to_thread(
+                _sync_delete_journal, account_url, username, password, calendar_url, uid,
+            )
+        except EventNotFoundError:
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="delete_journal").inc()
             raise

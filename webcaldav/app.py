@@ -23,6 +23,7 @@ from .routers import (
     caldav_accounts,
     calendars,
     events,
+    journals,
     ops,
     settings as settings_router,
     tasks,
@@ -90,6 +91,7 @@ app.include_router(caldav_accounts.router)
 app.include_router(calendars.router)
 app.include_router(events.router)
 app.include_router(tasks.router)
+app.include_router(journals.router)
 app.include_router(settings_router.router)
 app.include_router(api_tokens.router)
 app.include_router(ops.router)

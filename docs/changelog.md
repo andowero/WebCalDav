@@ -2,6 +2,47 @@
 
 ## Unreleased — MVP
 
+### Added — journals (VJOURNAL) (2026-06-18)
+- Full CalDAV **journal** support alongside events and tasks. Journals are dated
+  free-text notes (a SUMMARY title + a Markdown DESCRIPTION body anchored on a
+  single DTSTART, date or datetime); they have **no end, recurrence or alarms**.
+  Shown in every view (month, week, day, agenda) on their DTSTART day, visually
+  distinct via a **downward-pointing triangle** marker (events use a dot, tasks a
+  checkbox square), sharing the per-calendar colour. Multiple journals per day are
+  supported (independent VJOURNAL resources).
+- New `/journals` API: `GET /journals`, `POST /journals`, `PUT /journals/{uid}`,
+  `DELETE /journals/{uid}` (`webcaldav/routers/journals.py`). The CalDAV layer
+  gains `fetch_journals` / `create_journal` / `update_journal` / `delete_journal`
+  via a new `_JOURNAL` `_Kind` (empty end-key; the shared field helpers skip the
+  end property). Calendar move on edit works as for events (recreate + delete).
+- The editing modal gains a **Journal** type with a **two-tab Markdown editor**
+  for the body: an **"Edit"** tab (a plain textarea of raw Markdown) and a
+  read-only **"Display"** tab that renders it via vendored
+  [markdown-it](https://github.com/markdown-it/markdown-it) 14.1.0 (MIT, under
+  `static/vendor/`). New journals default to the Edit tab; existing ones open on
+  Display. **Images are disabled** (CalDAV can't store them) and raw HTML is
+  escaped. Journals use one date(time) picker and hide the event/task-only fields
+  (recurrence, reminders, priority, location, end).
+- The Display tab supports **GFM tables, nested/ordered lists, blockquotes**
+  (CSS restored inside the rendered region — the global reset had stripped list
+  markers/indents and table borders), **syntax-highlighted** fenced code
+  ([highlight.js](https://highlightjs.org) 11.10, themed for light/dark), and the
+  plugins **task-lists** (`- [x]`), **custom containers** (`::: name` →
+  `div.md-container.md-<name>`, any name; `warning`/`danger`/`tip` get accent
+  colours), **footnotes**, **definition lists**, **sub/superscript**, and
+  **`==mark==`** — all vendored under `static/vendor/`, no CDN.
+- **MCP tools** for journals: `list_journals` (dedicated, with a **backward**
+  default window — 30 days ago through now, the reverse of `list_items`; returns
+  title/date/uid only, **not** the Markdown body), `create_journal`,
+  `update_journal`, `delete_journal`, plus a `journal` item_type for
+  `get_item_details` (which returns the full body). Write tools require a
+  read-write token and respect scope.
+- i18n strings added in English and Czech (`opt_journal`, `journal`,
+  `new_journal`, `noun_journal`, `this_journal`, `date`, `modal_journal_body`).
+- Tests: radicale round-trip CRUD + Markdown-body persistence + multiple-per-day
+  (`tests/test_journals.py`), router validation/auth (`tests/test_journals_api.py`),
+  and MCP journal tools incl. the backward listing window (`tests/test_mcp.py`).
+
 ### Added — Double-click to create events (2026-06-18)
 - New per-user setting **`double_click_to_create_events`** (Settings → Preferences,
   off by default). When off, a single click on empty calendar space opens the

@@ -4,7 +4,7 @@ Provide a self-hosted, lightweight web UI for viewing and editing events on user
 
 # Project overview
 
-Multi-user web application where each user links one or more CalDAV servers and picks which calendars from each to display. The calendar UI offers month, week, day, and agenda views. Events and tasks (VTODO) are read from and written directly to the CalDAV server with no local caching. UI theme is user-selectable (system/light/dark). The interface is internationalized; Czech translation is included and locale is auto-detected from the browser. An optional MCP server (at `/mcp`, toggled by `MCP_SERVER_ENABLED`) lets AI assistants read and write the same calendars/tasks via per-user API tokens. Deployed as a single Docker container behind a reverse proxy.
+Multi-user web application where each user links one or more CalDAV servers and picks which calendars from each to display. The calendar UI offers month, week, day, and agenda views. Events (VEVENT), tasks (VTODO), and journals (VJOURNAL) are read from and written directly to the CalDAV server with no local caching; journals are dated Markdown notes edited in a two-tab editor (raw-Markdown "Edit" + rendered read-only "Display"). UI theme is user-selectable (system/light/dark). The interface is internationalized; Czech translation is included and locale is auto-detected from the browser. An optional MCP server (at `/mcp`, toggled by `MCP_SERVER_ENABLED`) lets AI assistants read and write the same calendars/tasks/journals via per-user API tokens. Deployed as a single Docker container behind a reverse proxy.
 
 # Design style guide
 
@@ -14,6 +14,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 
 - Four calendar views: month, week, day, and agenda (infinitely scrolling).
 - Tasks (VTODO): view, create, edit, complete, and set recurrence alongside calendar events.
+- Journals (VJOURNAL): view, create, edit, and delete dated notes with a Markdown body (no recurrence/reminders); shown with a downward-triangle marker.
 - First day of the week is a user setting.
 - Timezone is a user setting; default from the browser.
 - UI theme is a user setting: system (follows OS), light, or dark.

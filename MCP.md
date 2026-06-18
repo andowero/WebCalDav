@@ -107,14 +107,18 @@ read-write (`WebCalDavRW…`) token.
 |------|--------|---------|
 | `list_calendars` | read | List the calendars the token can access (id, name, color, default, account). Use the returned `calendar_id` with the other tools. |
 | `list_items` | read | List events and/or tasks between two instants (`item_type` = `events`/`tasks`/`both`). Optional `time_min`/`time_max` (default: now → +30 days) and `calendar_ids`. |
-| `get_item_details` | read | Full detail of one event/task: description, location, recurrence, reminders, priority, status, raw start/end/due. |
+| `list_journals` | read | List journal entries (VJOURNAL) between two instants — title/date/uid only, **not** the Markdown body (use `get_item_details` for that). Journals are dated notes and are primarily *backward* in time, so `time_min`/`time_max` default to 30 days ago → now (the reverse of `list_items`). Optional `calendar_ids`. |
+| `get_item_details` | read | Full detail of one event/task/journal (`item_type` = `event`/`task`/`journal`): description (the Markdown body for journals), location, recurrence, reminders, priority, status, raw start/end/due. |
 | `create_event` | write | Create a calendar event (timed or all-day), optionally recurring, with reminders. |
 | `create_task` | write | Create a task (VTODO) with optional start/due, priority (0–9), recurrence, reminders. |
+| `create_journal` | write | Create a journal entry: a dated note with a Markdown `description` body. `all_day` (default true) + a date, or a datetime + timezone. No end/recurrence/reminders. |
 | `update_event` | write | Edit an event by `uid`; `scope` selects which occurrences of a recurring series. |
 | `update_task` | write | Edit a task by `uid`; same `scope` semantics. |
+| `update_journal` | write | Edit a journal entry by `uid` (title, start, Markdown body). |
 | `set_task_status` | write | Mark a task done/undone (`completed` true/false); `recurrence_id` toggles a single occurrence. |
 | `delete_event` | write | Delete an event by `uid`; `scope` selects single occurrence / future / whole series. |
 | `delete_task` | write | Delete a task by `uid`; same `scope` semantics. |
+| `delete_journal` | write | Delete a journal entry by `uid`. |
 
 A token scoped to specific calendars cannot see or modify items in any other
 calendar; out-of-scope `calendar_id` values are rejected.

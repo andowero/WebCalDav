@@ -54,6 +54,7 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 - SQLAlchemy 2.x + SQLite (WAL mode)
 - Jinja2 for the single server-rendered host page
 - FullCalendar.js for the calendar widget
+- markdown-it (vendored, MIT) + plugins (container, task-lists, footnote, deflist, sub, sup, mark) and highlight.js to render the journal Markdown body; the "Edit" tab is a plain textarea, the "Display" tab is read-only rendered output (images disabled)
 - Vanilla JavaScript for glue — no React, Vue, or Svelte
 - `argon2-cffi` for argon2id
 - `cryptography` for AES-GCM
@@ -127,6 +128,18 @@ Events (proxy to CalDAV, no local cache):
 - `PUT /events/{uid}`
 - `DELETE /events/{uid}`
 
+Tasks — VTODO (proxy to CalDAV, no local cache):
+
+- `GET /tasks?from=&to=`
+- `POST /tasks`, `PUT /tasks/{uid}`, `DELETE /tasks/{uid}`
+- `POST /tasks/{uid}/status` — mark done/undone
+
+Journals — VJOURNAL (proxy to CalDAV, no local cache):
+
+- `GET /journals?from=&to=&calendar_ids=`
+- `POST /journals`, `PUT /journals/{uid}`, `DELETE /journals/{uid}`
+- A journal is a title + a Markdown body anchored on a single date(time); no end, recurrence or reminders.
+
 Settings and ops:
 
 - `GET /settings`, `PUT /settings`
@@ -142,11 +155,13 @@ MCP API tokens (settings UI):
 MCP server (only mounted when `MCP_SERVER_ENABLED`):
 
 - `/mcp` — Streamable HTTP (`mcp` SDK / `FastMCP`), authenticated by
-  `Authorization: Bearer WebCalDav…`. Tools: `list_items`, `get_item_details`,
-  `create_event`, `create_task`, `update_event`, `update_task`,
-  `set_task_status`, `delete_event`, `delete_task`. English + ISO 8601;
+  `Authorization: Bearer WebCalDav…`. Tools: `list_items`, `list_journals`,
+  `get_item_details`, `create_event`, `create_task`, `create_journal`,
+  `update_event`, `update_task`, `update_journal`, `set_task_status`,
+  `delete_event`, `delete_task`, `delete_journal`. English + ISO 8601;
   read-only tokens are rejected by mutating tools; scoped tokens are limited to
-  their calendars. See `MCP.md`.
+  their calendars. `list_journals` defaults to a backward time window (journals
+  are mostly in the past). See `MCP.md`.
 
 **There is no `POST /auth/signup` or equivalent.** User creation is CLI-only.
 

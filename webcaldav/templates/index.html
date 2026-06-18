@@ -14,6 +14,21 @@
   <!-- luxon + plugin: required for named IANA timezones (e.g. Europe/Prague) -->
   <script src="/static/vendor/luxon.min.js?v={{ static_v }}"></script>
   <script src="/static/vendor/fullcalendar-luxon3.min.js?v={{ static_v }}"></script>
+  <!-- Journal "Display" tab: markdown-it + plugins render the body; highlight.js
+       colours fenced code. Images are disabled and raw HTML escaped (see app.js);
+       the "Edit" tab is a plain textarea of raw Markdown. All vendored, no CDN. -->
+  <script src="/static/vendor/highlight.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/markdown-it.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/markdown-it-container.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/markdown-it-footnote.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/markdown-it-deflist.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/markdown-it-sub.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/markdown-it-sup.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/markdown-it-mark.min.js?v={{ static_v }}"></script>
+  <script src="/static/vendor/markdown-it-task-lists.min.js?v={{ static_v }}"></script>
+  <!-- markdown-it-task-lists 2.x has a broken UMD that exports to window.exports;
+       capture it under a clean global before any other script can clobber it. -->
+  <script>window.markdownitTaskLists=window.markdownitTaskLists||window.exports;try{delete window.exports;}catch(e){}</script>
   <link rel="stylesheet" href="/static/app.css?v={{ static_v }}">
 </head>
 <body>
@@ -102,6 +117,7 @@
       <select id="ev-type">
         <option value="event" data-i18n="ui.opt_event">Event</option>
         <option value="task" data-i18n="ui.opt_task">Task</option>
+        <option value="journal" data-i18n="ui.opt_journal">Journal</option>
       </select>
     </label>
 
@@ -123,7 +139,7 @@
         <span class="ev-date-fields" id="ev-start-date-fields"></span>
         <span class="ev-time ev-time-fields" id="ev-start-time-fields"></span>
       </div>
-      <div class="ev-dt-row">
+      <div class="ev-dt-row" id="ev-to-row">
         <span class="ev-label" id="ev-to-label">To</span>
         <span class="ev-date-fields" id="ev-end-date-fields"></span>
         <span class="ev-time ev-time-fields" id="ev-end-time-fields"></span>
@@ -131,7 +147,7 @@
       <p class="ev-task-hint" id="ev-undated-hint" style="display:none" data-i18n="ui.modal_undated_hint">Leave dates empty for an undated task.</p>
     </fieldset>
 
-    <fieldset class="ev-group">
+    <fieldset class="ev-group" id="ev-repeat-fieldset">
       <legend data-i18n="ui.modal_repetition">Repetition</legend>
       <label class="ev-check"><input type="checkbox" id="ev-repeats"> <span data-i18n="ui.modal_repeats">Repeats</span></label>
       <div id="ev-repeat-details" class="ev-repeat-details" style="display:none">
@@ -176,7 +192,7 @@
       </div>
     </fieldset>
 
-    <label class="ev-field">
+    <label class="ev-field" id="ev-location-field">
       <span class="ev-label" data-i18n="ui.modal_location">Location</span>
       <input id="ev-location" type="text" placeholder="—">
     </label>
@@ -195,12 +211,22 @@
       <input type="checkbox" id="ev-done"> <span data-i18n="ui.modal_task_done">Task done</span>
     </label>
 
-    <label class="ev-field">
+    <label class="ev-field" id="ev-notes-field">
       <span class="ev-label" data-i18n="ui.modal_notes">Notes</span>
       <textarea id="ev-notes" rows="3" placeholder="—"></textarea>
     </label>
 
-    <div class="ev-field">
+    <div class="ev-field" id="ev-journal-field" style="display:none">
+      <span class="ev-label" data-i18n="ui.modal_journal_body">Entry</span>
+      <div class="ev-journal-tabs" role="tablist">
+        <button type="button" id="ev-journal-tab-edit" class="ev-journal-tab" role="tab" data-i18n="ui.journal_tab_edit">Edit</button>
+        <button type="button" id="ev-journal-tab-display" class="ev-journal-tab" role="tab" data-i18n="ui.journal_tab_display">Display</button>
+      </div>
+      <textarea id="ev-journal-edit" class="ev-journal-edit" rows="12" placeholder="—"></textarea>
+      <div id="ev-journal-display" class="ev-journal-display" style="display:none"></div>
+    </div>
+
+    <div class="ev-field" id="ev-reminders-field">
       <span class="ev-label" data-i18n="ui.modal_reminders">Reminders</span>
       <div class="ev-reminders-box">
         <div id="ev-reminders" class="ev-reminders"></div>
