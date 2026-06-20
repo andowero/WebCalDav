@@ -35,6 +35,9 @@ class User(Base):
     api_tokens: Mapped[list["APIToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    shares: Mapped[list["Share"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class CalDAVAccount(Base):
@@ -118,6 +121,73 @@ class APITokenCalendar(Base):
     )
 
     token: Mapped["APIToken"] = relationship(back_populates="calendars")
+
+
+class Share(Base):
+    """A share link for an item, a grid period, or an agenda slice. The URL
+    carries only a random secret in its fragment (``/s/<id>#<secret>``), shown to
+    the sharer once and never stored. ``sealed_blob`` is an AES-GCM ciphertext,
+    keyed by a key derived from the secret, holding the AUTHORITATIVE
+    {dek, kind, mode, scope, bounds, expires_at}. All plaintext columns below and
+    the ``share_calendars`` rows are a display-only mirror for the settings UI —
+    never trusted for authorization, so DB tampering cannot widen a share's scope
+    or mode without the secret (which would only break the share, not escalate
+    it). Mirrors the APIToken design."""
+
+    __tablename__ = "shares"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    # SHA-256 of the random secret, for O(1) lookup + constant-time compare.
+    token_sha256: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True, nullable=False)
+    # AES-GCM blob (authoritative): {dek, kind, mode, scope, bounds, expires_at}.
+    sealed_blob: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    blob_nonce: Mapped[bytes] = mapped_column(LargeBinary(12), nullable=False)
+    # --- display-only mirror (never used for enforcement) ---
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # "item"|"grid"|"agenda"
+    mode: Mapped[str] = mapped_column(String, nullable=False)  # "ro"|"rw"
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # item-kind mirror
+    item_uid: Mapped[str | None] = mapped_column(String, nullable=True)
+    item_kind: Mapped[str | None] = mapped_column(String, nullable=True)  # event|task|journal
+    item_calendar_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # grid-kind mirror
+    grid_view: Mapped[str | None] = mapped_column(String, nullable=True)
+    grid_anchor: Mapped[str | None] = mapped_column(String, nullable=True)  # ISO date
+    # agenda-kind mirror
+    agenda_from: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    agenda_to: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # default target calendar for sharee-created items (grid/agenda RW)
+    default_calendar_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="shares")
+    calendars: Mapped[list["ShareCalendar"]] = relationship(
+        back_populates="share", cascade="all, delete-orphan"
+    )
+
+
+class ShareCalendar(Base):
+    """Display-only scope rows for a grid/agenda share. Authoritative scope lives
+    in Share.sealed_blob; these only render the UI. ``writable`` mirrors whether
+    the sharee may create/edit items on this calendar."""
+
+    __tablename__ = "share_calendars"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    share_id: Mapped[int] = mapped_column(
+        ForeignKey("shares.id", ondelete="CASCADE"), nullable=False
+    )
+    calendar_id: Mapped[int] = mapped_column(
+        ForeignKey("calendars.id", ondelete="CASCADE"), nullable=False
+    )
+    writable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    share: Mapped["Share"] = relationship(back_populates="calendars")
 
 
 class UserSettings(Base):

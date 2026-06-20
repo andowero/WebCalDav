@@ -1565,3 +1565,49 @@ details#add-account-details summary {
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* ── Sharing ──────────────────────────────────────────────────────────────── */
+.share-cal-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.2rem 0;
+}
+.share-cal-row .ev-check { margin: 0; }
+/* Read-only share: the per-calendar writable/default controls are irrelevant. */
+#share-cal-picker.share-ro .share-cal-w,
+#share-cal-picker.share-ro .share-cal-d { display: none; }
+
+#shareres-download { text-decoration: none; }
+
+/* Share-view page (share.html) */
+.page-share { display: flex; flex-direction: column; height: 100vh; }
+.share-view-title { font-weight: 600; margin-left: 0.5rem; }
+.share-spacer { flex: 1 1 auto; }
+.share-item { padding: 1.5rem; overflow: auto; }
+.share-item-card {
+  max-width: 640px;
+  margin: 0 auto;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+}
+.share-item-card h2 { margin-top: 0; }
+.share-item-when { color: var(--text-faint); }
+.share-item-notes {
+  white-space: pre-wrap;
+  font-family: inherit;
+  background: var(--surface-2, #f6f6f6);
+  padding: 0.75rem;
+  border-radius: 6px;
+}
+
+/* Item-share landing (single item opens in the normal modal). */
+.share-item-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}

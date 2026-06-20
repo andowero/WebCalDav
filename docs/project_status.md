@@ -14,6 +14,7 @@
 | v7        | MCP server: calendar/task access via API token            | Complete |
 | v8        | Configurable double-click to create events                | Complete |
 | v9        | Journals (VJOURNAL): view, create, edit, delete           | Complete |
+| v10       | Calendar sharing (links + .ics) for items/views/agenda    | Complete |
 
 ## Known issues
 
@@ -400,8 +401,38 @@ A third CalDAV item kind alongside events and tasks: dated free-text notes.
   window). The Markdown editor, triangle marker, and agenda rendering are verified
   manually.
 
+### Calendar sharing (2026-06-19) — v10
+
+- **Share links + `.ics` download** for a single item, a grid period
+  (month/week/day), or an agenda slice. A link opens a navigation-locked share
+  view bounded to the shared window; read-only shows it, read-write lets the
+  sharee add/edit within scope (recurring events included). The secret rides in
+  the URL **fragment** and is sent via the `X-Share-Secret` header, never the
+  request line.
+- The share page **reuses the main app** (`index.html` + `app.js`) in a share
+  mode: the editing/viewing modal, markdown rendering, type symbols, recurrence
+  editor, i18n and date/time formatting are identical to the normal calendar;
+  only the toolbar is locked (`validRange` = window) and CRUD reroutes to
+  `/shares/*`. The sharer's display settings are injected server-side by share id.
+- Security mirrors the MCP token exactly: DEK + authoritative
+  kind/mode/scope/window/expiry sealed in an AES-GCM blob keyed by the secret
+  (`webcaldav/shares.py`); only `SHA-256(secret)` stored; DB mirror columns are
+  display-only. Zero-knowledge at rest preserved.
+- New `Share`/`ShareCalendar` models, `/shares` router (create/list/revoke +
+  share-secret-authed resolve/items/writes/export), `webcaldav/baseurl.py`
+  reverse-proxy URL detection, `SHARING_ENABLED` / `PUBLIC_BASE_URL` config,
+  `GET /s/{id}` share-mode page, Shares settings section, share buttons (item
+  modal + grid/agenda title). English + Czech strings.
+- 210 tests pass (23 new: share mint/resolve roundtrip + tamper/expiry/mirror
+  rejection + grid-window math, the share API incl. create gating/validation,
+  resolve auth + grid anchor/window, window-clamped reads, RW scope enforcement,
+  RO rejection, item-uid limiting, `.ics` export, share-mode page render, and
+  radicale export round-trips). The share view (FullCalendar lock, RW edit via
+  the normal modal) is verified manually.
+- See [SHARING.md](../SHARING.md).
+
 ## What is next
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
-| v10 | Calendar sharing (read-only share links / per-calendar ACL) | Planned |
+| v11 | Per-calendar ACL sharing with named recipients / accounts | Planned |

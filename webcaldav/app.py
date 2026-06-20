@@ -26,6 +26,7 @@ from .routers import (
     journals,
     ops,
     settings as settings_router,
+    shares,
     tasks,
 )
 
@@ -94,6 +95,7 @@ app.include_router(tasks.router)
 app.include_router(journals.router)
 app.include_router(settings_router.router)
 app.include_router(api_tokens.router)
+app.include_router(shares.router)
 app.include_router(ops.router)
 
 
@@ -203,11 +205,90 @@ async def root(request: Request) -> HTMLResponse:
             "language": user_settings_language,
             "double_click_to_create_events": user_settings_double_click_to_create_events,
             "mcp_enabled": settings.mcp_server_enabled,
+            "sharing_enabled": settings.sharing_enabled,
             "lang": lang,
             "i18n": catalog,
             "notification_horizon_days": settings.notification_horizon_days,
             "notification_lookback_days": settings.notification_lookback_days,
             "static_v": STATIC_VERSION,
+        },
+    )
+
+
+@app.get("/s/{share_id}", response_class=HTMLResponse)
+async def share_page(request: Request, share_id: int) -> HTMLResponse:
+    """Serve the share-view page. It reuses the main app (index.html + app.js) in
+    "share mode" so the editing/viewing modal, markdown rendering, type symbols,
+    recurrence editor, i18n and date/time formatting are identical to the normal
+    calendar. The secret stays in the URL fragment (never reaches this route);
+    app.js reads it and POSTs to /shares/resolve.
+
+    The sharer's display settings (timezone, first day, formats, theme, language)
+    are looked up by share id — without the secret — so the view renders exactly
+    as the sharer sees it. These are low-sensitivity UI prefs, not the credentials
+    the secret protects."""
+    from .models import Share
+
+    tz = "UTC"
+    fdow = 1
+    timefmt = "24h"
+    datefmt = "YYYY-MM-DD"
+    completed_task_display = "hidden"
+    undated_task_display = "agenda"
+    theme = "system"
+    language = "autodetect"
+    try:
+        async with get_session_factory()() as db:
+            share = (
+                await db.execute(select(Share).where(Share.id == share_id))
+            ).scalar_one_or_none()
+            if share is not None:
+                s = (
+                    await db.execute(
+                        select(UserSettings).where(UserSettings.user_id == share.user_id)
+                    )
+                ).scalar_one_or_none()
+                if s:
+                    tz = s.timezone
+                    fdow = s.first_day_of_week
+                    timefmt = s.time_format
+                    datefmt = s.date_format
+                    completed_task_display = s.completed_task_display
+                    undated_task_display = s.undated_task_display
+                    theme = s.theme
+                    language = s.language
+    except Exception:
+        logger.warning("share_page_settings_lookup_failed", exc_info=True)
+
+    lang = resolve_language(language, request.headers.get("accept-language"))
+    catalog = load_catalog(lang)
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        context={
+            "state": "share",
+            "user_email": None,
+            "tz": tz,
+            "fdow": fdow,
+            "timefmt": timefmt,
+            "datefmt": datefmt,
+            "default_view": "dayGridMonth",
+            "auto_logout_enabled": False,
+            "auto_logout_timeout": 3600,
+            "notifications_enabled": False,
+            "completed_task_display": completed_task_display,
+            "undated_task_display": undated_task_display,
+            "theme": theme,
+            "language": language,
+            "double_click_to_create_events": False,
+            "mcp_enabled": False,
+            "sharing_enabled": settings.sharing_enabled,
+            "lang": lang,
+            "i18n": catalog,
+            "notification_horizon_days": settings.notification_horizon_days,
+            "notification_lookback_days": settings.notification_lookback_days,
+            "static_v": STATIC_VERSION,
+            "share_id": share_id,
         },
     )
 

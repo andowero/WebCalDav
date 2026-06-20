@@ -16,10 +16,65 @@
     document.getElementById(id).style.display = 'none';
   }
 
+  // ── Share mode ──────────────────────────────────────────────────────────────
+  // On the /s/<id> page app.js runs in "share mode": the same modals/renderers,
+  // but data/CRUD calls are rerouted to /shares/* and carry the URL-fragment
+  // secret in the X-Share-Secret header (never the request line). The sealed
+  // share window/scope is authoritative server-side. SHARE_CFG is filled by
+  // resolveShare() before the calendar is built.
+  const SHARE_MODE = !!window.__SHARE_MODE__;
+  const SHARE_ID = window.__SHARE_ID__;
+  let SHARE_SECRET = '';
+  let SHARE_CFG = null;
+  if (SHARE_MODE) {
+    SHARE_SECRET = (window.location.hash || '').replace(/^#/, '');
+    try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+  }
+
+  // Reroute the data/CRUD endpoints to their /shares/* equivalents in share mode.
+  function apiPath(path) {
+    if (!SHARE_MODE) return path;
+    return path.replace(/^\/(events|tasks|journals)\b/, '/shares/$1');
+  }
+
+  async function resolveShare() {
+    const r = await fetch('/shares/resolve', {
+      method: 'POST', headers: apiHeaders({ 'Content-Type': 'application/json' }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    SHARE_CFG = await r.json();
+    return SHARE_CFG;
+  }
+
+  async function fetchShareItems() {
+    const r = await fetch('/shares/items', { headers: apiHeaders() });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json(); // { events, tasks, journals }
+  }
+
+  async function downloadShareIcs() {
+    try {
+      const r = await fetch(`/shares/${SHARE_ID}/export.ics`, { headers: apiHeaders() });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `share-${SHARE_ID}.ics`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) { alert(e.message); }
+  }
+
+  function apiHeaders(base) {
+    const h = Object.assign({ 'X-Requested-With': 'fetch' }, base || {});
+    if (SHARE_MODE && SHARE_SECRET) h['X-Share-Secret'] = SHARE_SECRET;
+    return h;
+  }
+
   async function apiPost(path, body) {
-    const r = await fetch(path, {
+    const r = await fetch(apiPath(path), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
@@ -28,9 +83,9 @@
   }
 
   async function apiPatch(path, body) {
-    const r = await fetch(path, {
+    const r = await fetch(apiPath(path), {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
@@ -39,7 +94,7 @@
   }
 
   async function apiDelete(path) {
-    const r = await fetch(path, { method: 'DELETE', headers: { 'X-Requested-With': 'fetch' } });
+    const r = await fetch(apiPath(path), { method: 'DELETE', headers: apiHeaders() });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
       throw new Error(errMsg(data.detail) || `HTTP ${r.status}`);
@@ -47,16 +102,16 @@
   }
 
   async function apiGet(path) {
-    const r = await fetch(path);
+    const r = await fetch(apiPath(path), { headers: apiHeaders() });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(errMsg(data.detail) || `HTTP ${r.status}`);
     return data;
   }
 
   async function apiPut(path, body) {
-    const r = await fetch(path, {
+    const r = await fetch(apiPath(path), {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'fetch' },
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     const data = await r.json().catch(() => ({}));
@@ -273,10 +328,293 @@
   }
 
   async function loadSettings() {
-    await Promise.all([loadAccounts(), loadCalendars(), loadPrefs(), loadTokens()]);
+    await Promise.all([loadAccounts(), loadCalendars(), loadPrefs(), loadTokens(), loadShares()]);
   }
 
   const MCP_ENABLED = !!window.__MCP_ENABLED__;
+  const SHARING_ENABLED = window.__SHARING_ENABLED__ !== false;
+
+  // ── Sharing ─────────────────────────────────────────────────────────────────
+  // A share's secret rides in the URL fragment only. Creating one seals the
+  // session DEK + scope server-side (see routers/shares.py); the link is shown
+  // once. _shareDraft holds the pending spec while the modal is open.
+  let _shareDraft = null;
+
+  function shareExpiryISO() {
+    const v = document.getElementById('share-expiry').value;
+    if (v === 'never') return null;
+    return luxon.DateTime.now().plus({ days: parseInt(v, 10) }).toISO();
+  }
+
+  async function renderShareCalPicker(selectedIds) {
+    const picker = document.getElementById('share-cal-picker');
+    picker.innerHTML = '';
+    const rw = document.getElementById('share-mode').value === 'rw';
+    let cals = [];
+    try { cals = await apiGet('/calendars'); } catch (_) {}
+    cals.forEach((c, i) => {
+      const checked = !selectedIds || selectedIds.includes(c.id);
+      const row = document.createElement('div');
+      row.className = 'share-cal-row';
+      row.innerHTML =
+        `<label class="ev-check"><input type="checkbox" class="share-cal" value="${c.id}"${checked ? ' checked' : ''}> ` +
+        `<span>${escHtml(c.display_name)}</span></label>` +
+        `<label class="ev-check share-cal-w"><input type="checkbox" class="share-cal-writable" value="${c.id}"> ` +
+        `<span data-i18n="ui.share_writable">writable</span></label>` +
+        `<label class="ev-check share-cal-d"><input type="radio" name="share-default" class="share-cal-default" value="${c.id}"> ` +
+        `<span data-i18n="ui.share_default">default</span></label>`;
+      picker.appendChild(row);
+    });
+    applyTranslations(picker);
+    picker.classList.toggle('share-ro', !rw);
+  }
+
+  function collectShareCalendars() {
+    const rw = document.getElementById('share-mode').value === 'rw';
+    const writableIds = new Set(
+      Array.from(document.querySelectorAll('.share-cal-writable'))
+        .filter((c) => c.checked).map((c) => parseInt(c.value, 10)),
+    );
+    const def = document.querySelector('.share-cal-default:checked');
+    const calendars = Array.from(document.querySelectorAll('.share-cal'))
+      .filter((c) => c.checked)
+      .map((c) => {
+        const id = parseInt(c.value, 10);
+        return { id, writable: rw && writableIds.has(id) };
+      });
+    const defaultId = rw && def ? parseInt(def.value, 10) : null;
+    return { calendars, defaultId };
+  }
+
+  function openItemShare() {
+    if (!SHARING_ENABLED || !_currentEvent || _currentEvent.calendarId == null
+        || _currentEvent.isNew) return;
+    const kind = _currentEvent.isJournal ? 'journal' : (_currentEvent.isTask ? 'task' : 'event');
+    _shareDraft = {
+      kind: 'item',
+      item: { uid: _currentEvent.id, item_kind: kind, calendar_id: _currentEvent.calendarId },
+    };
+    document.getElementById('share-scope-desc').textContent = tr('dyn.share_item_desc');
+    document.getElementById('share-agenda-range').style.display = 'none';
+    document.getElementById('share-cal-scope').style.display = 'none';
+    openShareModal();
+  }
+
+  async function openGridShare() {
+    if (!SHARING_ENABLED || !_fcCalendar) return;
+    const view = _fcCalendar.view.type;
+    const anchor = luxon.DateTime.fromJSDate(_fcCalendar.getDate())
+      .setZone(effectiveTz()).toISODate();
+    _shareDraft = { kind: 'grid', grid: { grid_view: view, grid_anchor: anchor } };
+    document.getElementById('share-scope-desc').textContent =
+      tr('dyn.share_grid_desc', { view: tr('ui.view_' + ({
+        dayGridMonth: 'month', timeGridWeek: 'week', timeGridDay: 'day',
+      }[view] || 'month')) });
+    document.getElementById('share-agenda-range').style.display = 'none';
+    document.getElementById('share-cal-scope').style.display = '';
+    await renderShareCalPicker(null);
+    openShareModal();
+  }
+
+  async function openAgendaShare() {
+    if (!SHARING_ENABLED) return;
+    const tz = effectiveTz();
+    // Default range from the currently rendered agenda rows.
+    const span = agendaVisibleSpan();
+    _shareDraft = { kind: 'agenda' };
+    document.getElementById('share-scope-desc').textContent = tr('dyn.share_agenda_desc');
+    document.getElementById('share-agenda-range').style.display = '';
+    document.getElementById('share-cal-scope').style.display = '';
+    renderDateFields('share-from', () => {});
+    renderDateFields('share-to', () => {});
+    renderTimeFields('share-from', () => {});
+    renderTimeFields('share-to', () => {});
+    const from = span.from || luxon.DateTime.now().setZone(tz).startOf('day');
+    const to = span.to || from.plus({ days: 7 });
+    setDateFieldValue('share-from', from.toISODate());
+    setTimeParts('share-from', from.hour, from.minute);
+    setDateFieldValue('share-to', to.toISODate());
+    setTimeParts('share-to', to.hour, to.minute);
+    document.getElementById('share-cal-scope').style.display = '';
+    await renderShareCalPicker(null);
+    openShareModal();
+  }
+
+  function agendaVisibleSpan() {
+    const tz = effectiveTz();
+    const rows = document.querySelectorAll('#agenda-list [data-start]');
+    let from = null, to = null;
+    rows.forEach((r) => {
+      const s = luxon.DateTime.fromISO(r.getAttribute('data-start'), { setZone: true }).setZone(tz);
+      if (!from || s < from) from = s;
+      if (!to || s > to) to = s;
+    });
+    return { from, to: to ? to.plus({ days: 1 }) : null };
+  }
+
+  function openShareModal() {
+    hideError('share-error');
+    document.getElementById('share-mode').value = 'ro';
+    document.getElementById('share-expiry').value = '30';
+    show('share-overlay');
+    show('share-modal');
+  }
+
+  function closeShareModal() {
+    hide('share-modal');
+    hide('share-overlay');
+    _shareDraft = null;
+  }
+
+  async function submitShare() {
+    if (!_shareDraft) return;
+    hideError('share-error');
+    const btn = document.getElementById('btn-share-create');
+    btn.disabled = true;
+    try {
+      const body = {
+        kind: _shareDraft.kind,
+        mode: document.getElementById('share-mode').value,
+        expires_at: shareExpiryISO(),
+      };
+      if (_shareDraft.kind === 'item') {
+        body.item = _shareDraft.item;
+      } else if (_shareDraft.kind === 'grid') {
+        body.grid = _shareDraft.grid;
+        const sc = collectShareCalendars();
+        body.calendars = sc.calendars;
+        body.default_calendar_id = sc.defaultId;
+      } else {
+        const tz = effectiveTz();
+        const f = getDateFieldValue('share-from');
+        const t = getDateFieldValue('share-to');
+        const ft = getTimeParts('share-from');
+        const tt = getTimeParts('share-to');
+        body.agenda = {
+          agenda_from: luxon.DateTime.fromObject(
+            { year: +f.slice(0, 4), month: +f.slice(5, 7), day: +f.slice(8, 10),
+              hour: ft.h24, minute: ft.m }, { zone: tz }).toISO(),
+          agenda_to: luxon.DateTime.fromObject(
+            { year: +t.slice(0, 4), month: +t.slice(5, 7), day: +t.slice(8, 10),
+              hour: tt.h24, minute: tt.m }, { zone: tz }).toISO(),
+        };
+        const sc = collectShareCalendars();
+        body.calendars = sc.calendars;
+        body.default_calendar_id = sc.defaultId;
+      }
+      if ((_shareDraft.kind === 'grid' || _shareDraft.kind === 'agenda')
+          && (!body.calendars || body.calendars.length === 0)) {
+        throw new Error(tr('dyn.share_need_calendar'));
+      }
+      const res = await apiPost('/shares', body);
+      closeShareModal();
+      showShareResult(res.url, res.info.id);
+    } catch (err) {
+      showError('share-error', err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function showShareResult(url, shareId) {
+    document.getElementById('shareres-url').value = url;
+    const dl = document.getElementById('shareres-download');
+    dl.style.display = '';
+    // The export endpoint is share-secret authed; the secret is in the URL
+    // fragment. Fetch with the X-Share-Secret header and download the blob so the
+    // secret never enters the request line.
+    dl.onclick = async (e) => {
+      e.preventDefault();
+      const secret = url.split('#', 2)[1] || '';
+      try {
+        const r = await fetch(`/shares/${shareId}/export.ics`, {
+          headers: { 'X-Share-Secret': secret },
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const blob = await r.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `share-${shareId}.ics`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    show('shareres-overlay');
+    show('shareres-modal');
+  }
+
+  function closeShareResult() {
+    document.getElementById('shareres-url').value = '';
+    hide('shareres-modal');
+    hide('shareres-overlay');
+  }
+
+  async function loadShares() {
+    const list = document.getElementById('shares-list');
+    const note = document.getElementById('shares-disabled-note');
+    if (note) note.style.display = SHARING_ENABLED ? 'none' : '';
+    if (!list) return;
+    list.innerHTML = `<p class="loading">${escHtml(tr('dyn.loading'))}</p>`;
+    try {
+      const shares = await apiGet('/shares');
+      if (shares.length === 0) {
+        list.innerHTML = `<p class="empty-note">${escHtml(tr('dyn.no_shares'))}</p>`;
+        return;
+      }
+      list.innerHTML = '';
+      shares.forEach((s) => {
+        const modeLabel = s.mode === 'rw' ? tr('ui.share_rw') : tr('ui.share_ro');
+        const kindLabel = tr('dyn.share_kind_' + s.kind);
+        const expires = s.expires_at
+          ? tr('dyn.token_expires', {
+              date: luxon.DateTime.fromISO(s.expires_at).toFormat(luxonDateFmt(dateFormatKey())),
+            })
+          : tr('dyn.token_no_expiry');
+        const row = document.createElement('div');
+        row.className = 'token-row';
+        row.innerHTML =
+          `<div class="token-meta">` +
+            `<span class="token-name">${escHtml(s.name)}</span>` +
+            `<span class="token-badge token-${s.mode}">${escHtml(modeLabel)}</span>` +
+            `<span class="token-sub">${escHtml(kindLabel)} · ${escHtml(expires)}</span>` +
+          `</div>` +
+          `<button class="btn-danger-sm" data-id="${s.id}">${escHtml(tr('dyn.revoke'))}</button>`;
+        row.querySelector('button').addEventListener('click', async () => {
+          if (!confirm(tr('dyn.revoke_share', { name: s.name }))) return;
+          try { await apiDelete(`/shares/${s.id}`); await loadShares(); }
+          catch (err) { alert(err.message); }
+        });
+        list.appendChild(row);
+      });
+    } catch (err) {
+      list.innerHTML = `<p class="error-note">${escHtml(err.message)}</p>`;
+    }
+  }
+
+  function initShareUI() {
+    const btnItem = document.getElementById('btn-event-share');
+    if (btnItem) btnItem.addEventListener('click', openItemShare);
+    document.getElementById('btn-share-close').addEventListener('click', closeShareModal);
+    document.getElementById('btn-share-cancel').addEventListener('click', closeShareModal);
+    document.getElementById('share-overlay').addEventListener('click', closeShareModal);
+    document.getElementById('btn-share-create').addEventListener('click', submitShare);
+    document.getElementById('share-mode').addEventListener('change', () => {
+      if (document.getElementById('share-cal-scope').style.display !== 'none') {
+        const sel = Array.from(document.querySelectorAll('.share-cal'))
+          .filter((c) => c.checked).map((c) => parseInt(c.value, 10));
+        renderShareCalPicker(sel);
+      }
+    });
+    document.getElementById('shareres-copy').addEventListener('click', async () => {
+      const u = document.getElementById('shareres-url');
+      try { await navigator.clipboard.writeText(u.value); }
+      catch (_) { u.select(); document.execCommand('copy'); }
+    });
+    document.getElementById('shareres-close').addEventListener('click', closeShareResult);
+    document.getElementById('shareres-overlay').addEventListener('click', closeShareResult);
+  }
 
   async function loadTokens() {
     const list = document.getElementById('tokens-list');
@@ -914,6 +1252,9 @@
   let _reminders = [];
   let _remindersReadonly = [];
   let _remindersEditable = false;
+  // True while the event modal is in read-only mode (demo event, or a read-only
+  // share). Recurrence UI consults it so it won't re-enable its own fields.
+  let _editLocked = false;
 
   const REMINDER_UNIT_MIN = { minutes: 1, hours: 60, days: 1440, weeks: 10080 };
 
@@ -1197,6 +1538,9 @@
     const freq = document.getElementById('ev-recur-freq').value;
     document.getElementById('ev-recur-monthly').style.display = freq === 'monthly' ? '' : 'none';
     recurDescriptions();
+    // Read-only (e.g. a read-only share): keep every recurrence control locked
+    // so the rule can't be cosmetically edited.
+    if (_editLocked) return;
     const endCount = document.getElementById('ev-recur-end-count').checked;
     const endDate = document.getElementById('ev-recur-end-date').checked;
     document.getElementById('ev-recur-count').disabled = !endCount;
@@ -1779,16 +2123,29 @@
   }
 
   function setEditable(on) {
+    _editLocked = !on;
     ['ev-name', 'ev-calendar', 'ev-allday', 'ev-start-hh', 'ev-start-mm',
-     'ev-end-hh', 'ev-end-mm', 'ev-location', 'ev-notes'].forEach((id) => {
+     'ev-end-hh', 'ev-end-mm', 'ev-location', 'ev-notes',
+     'ev-priority', 'ev-done'].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.disabled = !on;
     });
+    // The repeats toggle keeps its own lock when editable (a recurring series
+    // can't be un-recurred), so only force it off when read-only.
+    if (!on) document.getElementById('ev-repeats').disabled = true;
     document.querySelectorAll(
       '.ev-date-fields input, .ev-date-fields button, .ev-time-fields input, .ev-ampm',
     ).forEach((el) => {
       el.disabled = !on;
     });
+    // Lock the entire recurrence editor when read-only; updateRecurUI also
+    // early-returns so it won't re-enable count/until fields by radio state.
+    document.querySelectorAll(
+      '#ev-recur-editor input, #ev-recur-editor select, #ev-recur-editor button',
+    ).forEach((el) => { el.disabled = !on; });
+    // Journal Markdown body: lock the raw editor so it can't be typed into.
+    const jbody = document.getElementById('ev-journal-edit');
+    if (jbody) jbody.readOnly = !on;
     document.getElementById('btn-event-save').style.display = on ? '' : 'none';
     _remindersEditable = on;
     renderReminders();
@@ -1902,9 +2259,17 @@
     } else {
       calField.style.display = 'none';
     }
+    // In a share: a read-only share makes everything view-only; a read-write
+    // share allows editing only on its writable calendars.
+    if (SHARE_MODE) {
+      const writable = (SHARE_CFG && SHARE_CFG.mode === 'rw'
+        && (SHARE_CFG.calendars || []).some((c) => c.writable && c.id === props.calendarId));
+      if (!writable) { editable = false; note = ''; noteEl.style.display = 'none'; }
+    }
+
     // Recurring events are editable and deletable by scope, so offer Delete
-    // whenever the event is calendar-backed.
-    const deletable = props.calendarId != null;
+    // whenever the event is calendar-backed (and, in a share, writable).
+    const deletable = props.calendarId != null && editable;
     document.getElementById('btn-event-delete').style.display = deletable ? '' : 'none';
     setEditable(editable);
 
@@ -1925,6 +2290,14 @@
       isNew: false,
     };
 
+    // Share button: only for an existing, calendar-backed item, when enabled and
+    // not already inside a share view.
+    const shareBtn = document.getElementById('btn-event-share');
+    if (shareBtn) {
+      shareBtn.style.display =
+        !SHARE_MODE && SHARING_ENABLED && props.calendarId != null ? '' : 'none';
+    }
+
     refreshPrevBoundaries();
     applyAllDayToggle();
     applyRepeatsToggle();
@@ -1941,6 +2314,16 @@
 
   async function getEnabledCalendars(force) {
     if (_calendarsCache && !force) return _calendarsCache;
+    if (SHARE_MODE) {
+      // The sharee can only write to the share's writable calendars; map the
+      // resolve metadata into the {id, display_name, enabled} shape the modal
+      // calendar picker expects.
+      const cals = (SHARE_CFG && SHARE_CFG.calendars) || [];
+      _calendarsCache = cals
+        .filter((c) => c.writable)
+        .map((c) => ({ id: c.id, display_name: c.name, color: c.color, enabled: true }));
+      return _calendarsCache;
+    }
     try {
       const cals = await apiGet('/calendars');
       _calendarsCache = cals.filter((c) => c.enabled);
@@ -2016,6 +2399,10 @@
       editable: hasCal,
       isNew: true,
     };
+
+    // No sharing a not-yet-saved item.
+    const shareBtnNew = document.getElementById('btn-event-share');
+    if (shareBtnNew) shareBtnNew.style.display = 'none';
 
     refreshPrevBoundaries();
     applyAllDayToggle();
@@ -2597,7 +2984,12 @@
 
   function agendaReset() {
     const tz = effectiveTz();
-    _agendaCursor = luxon.DateTime.now().setZone(tz).startOf('day');
+    // In an agenda share the slice is fixed: start at the sealed window and let
+    // agendaLoadMore pull the single clamped page (no infinite scroll, no
+    // pinned-undated section that would reach outside the slice).
+    _agendaCursor = SHARE_MODE && SHARE_CFG && SHARE_CFG.window_from
+      ? luxon.DateTime.fromISO(SHARE_CFG.window_from, { setZone: true }).setZone(tz)
+      : luxon.DateTime.now().setZone(tz).startOf('day');
     _agendaEmptyRuns = 0;
     _agendaLoading = false;
     _agendaDone = false;
@@ -2605,7 +2997,7 @@
     _agendaLastDayKey = null;
     document.getElementById('agenda-list').innerHTML = '';
     agendaSetStatus('');
-    renderAgendaPinned();
+    if (!SHARE_MODE) renderAgendaPinned();
     agendaObserve();
   }
 
@@ -2634,26 +3026,42 @@
     _agendaLoading = true;
     agendaSetStatus('loading');
     const from = _agendaCursor;
-    const to = from.plus({ days: AGENDA_CHUNK_DAYS });
+    // The share slice is a single fixed window; everything else tiles forward.
+    const to = SHARE_MODE && SHARE_CFG && SHARE_CFG.window_to
+      ? luxon.DateTime.fromISO(SHARE_CFG.window_to, { setZone: true }).setZone(effectiveTz())
+      : from.plus({ days: AGENDA_CHUNK_DAYS });
     try {
-      const params = new URLSearchParams({ from: from.toISO(), to: to.toISO() });
-      const [evR, tkR, jrR] = await Promise.all([
-        fetch('/events?' + params.toString()),
-        fetch('/tasks?' + params.toString()),
-        fetch('/journals?' + params.toString()),
-      ]);
-      if (!evR.ok) throw new Error('Failed to fetch events');
-      const data = await evR.json();
-      if (tkR.ok) {
-        const completedMode = (window.__SETTINGS__ || {}).completed_task_display || 'hidden';
-        (await tkR.json()).forEach((e) => {
+      const data = [];
+      const completedMode = (window.__SETTINGS__ || {}).completed_task_display || 'hidden';
+      if (SHARE_MODE) {
+        const items = await fetchShareItems();
+        (items.events || []).forEach((e) => data.push(e));
+        (items.tasks || []).forEach((e) => {
           const p = e.extendedProps || {};
-          if (p.undated) return; // shown in the pinned "Tasks" section
+          if (p.undated) return; // no date → not part of a bounded slice
           if (p.completed && completedMode === 'hidden') return;
           data.push(e);
         });
+        (items.journals || []).forEach((e) => data.push(e));
+      } else {
+        const params = new URLSearchParams({ from: from.toISO(), to: to.toISO() });
+        const [evR, tkR, jrR] = await Promise.all([
+          fetch('/events?' + params.toString()),
+          fetch('/tasks?' + params.toString()),
+          fetch('/journals?' + params.toString()),
+        ]);
+        if (!evR.ok) throw new Error('Failed to fetch events');
+        (await evR.json()).forEach((e) => data.push(e));
+        if (tkR.ok) {
+          (await tkR.json()).forEach((e) => {
+            const p = e.extendedProps || {};
+            if (p.undated) return; // shown in the pinned "Tasks" section
+            if (p.completed && completedMode === 'hidden') return;
+            data.push(e);
+          });
+        }
+        if (jrR.ok) (await jrR.json()).forEach((e) => data.push(e));
       }
-      if (jrR.ok) (await jrR.json()).forEach((e) => data.push(e));
 
       const fresh = [];
       for (const e of data) {
@@ -2683,6 +3091,9 @@
         agendaSetStatus('');
       }
       _agendaCursor = to; // windows tile forward regardless
+      // A share slice is one fixed page — stop after it so the sharee can't
+      // scroll outside the shared window.
+      if (SHARE_MODE) { _agendaDone = true; if (fresh.length) agendaSetStatus(''); else agendaSetStatus('end'); }
     } catch (err) {
       agendaSetStatus('error', err.message);
       _agendaDone = true;
@@ -2718,6 +3129,9 @@
 
     const row = document.createElement('div');
     row.className = 'agenda-row';
+    // Expose the occurrence start so the agenda-share modal can infer a default
+    // from/to from what's currently on screen.
+    row.setAttribute('data-start', p.rawStart || e.start || '');
     if (isTask && p.completed && completedMode === 'grayed') row.classList.add('is-task-done');
 
     let timeTxt = forcedTimeTxt;
@@ -2956,6 +3370,10 @@
       isNew: true,
     };
 
+    // No sharing a not-yet-saved item.
+    const shareBtnNew = document.getElementById('btn-event-share');
+    if (shareBtnNew) shareBtnNew.style.display = 'none';
+
     refreshPrevBoundaries();
     applyAllDayToggle();
     applyRepeatsToggle();
@@ -3040,6 +3458,12 @@
   async function toggleTaskDone(event, done) {
     const p = event.extendedProps || {};
     if (p.calendarId == null) return;
+    // A read-only share (or a calendar not writable in this share) can't toggle.
+    if (SHARE_MODE) {
+      const writable = SHARE_CFG && SHARE_CFG.mode === 'rw'
+        && (SHARE_CFG.calendars || []).some((c) => c.writable && c.id === p.calendarId);
+      if (!writable) return;
+    }
     const body = { calendar_id: p.calendarId, completed: done };
     if (p.recurrence) {
       const pivot =
@@ -3085,28 +3509,71 @@
   function initCalendar() {
     show('page-calendar');
 
-    const emailEl = document.getElementById('header-email');
-    if (window.__USER_EMAIL__) emailEl.textContent = window.__USER_EMAIL__;
+    const shareRO = SHARE_MODE && SHARE_CFG && SHARE_CFG.mode !== 'rw';
 
-    document.getElementById('btn-logout').addEventListener('click', async () => {
-      if (_logoutTick) clearInterval(_logoutTick);
-      if (_logoutPoll) clearInterval(_logoutPoll);
-      await fetch('/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'fetch' } });
-      window.location.href = '/';
-    });
+    if (SHARE_MODE) {
+      // Strip the authed chrome (settings/logout/email) and add a download
+      // button + an access-mode badge to the header.
+      ['btn-settings', 'btn-logout', 'logout-countdown', 'header-email'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+      });
+      const hdr = document.querySelector('.top-bar');
+      if (hdr) {
+        const badge = document.createElement('span');
+        badge.className = 'token-badge ' + (shareRO ? 'token-ro' : 'token-rw');
+        badge.textContent = shareRO ? tr('ui.share_ro') : tr('ui.share_rw');
+        const dl = document.createElement('button');
+        dl.className = 'btn-outline';
+        dl.textContent = tr('ui.share_download');
+        dl.addEventListener('click', downloadShareIcs);
+        hdr.appendChild(badge);
+        hdr.appendChild(dl);
+      }
+    } else {
+      const emailEl = document.getElementById('header-email');
+      if (window.__USER_EMAIL__) emailEl.textContent = window.__USER_EMAIL__;
 
-    startLogoutCountdown();
-    initSettingsPanel();
+      document.getElementById('btn-logout').addEventListener('click', async () => {
+        if (_logoutTick) clearInterval(_logoutTick);
+        if (_logoutPoll) clearInterval(_logoutPoll);
+        await fetch('/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'fetch' } });
+        window.location.href = '/';
+      });
+
+      startLogoutCountdown();
+      initSettingsPanel();
+      initShareUI();
+    }
     initEventModal();
-    if ((window.__SETTINGS__ || {}).notifications_enabled) startNotifications();
+    if (!SHARE_MODE && (window.__SETTINGS__ || {}).notifications_enabled) startNotifications();
+
+    // For an item share, the "view" is just the single item's modal.
+    if (SHARE_MODE && SHARE_CFG && SHARE_CFG.kind === 'item') {
+      openShareItem();
+      return;
+    }
 
     const calendarEl = document.getElementById('calendar');
     const s = window.__SETTINGS__ || {};
     const tf = fcTimeFormats(timeFormatKey());
     const fcCat = I18N.fc || {};
     const fcBtn = fcCat.buttonText || {};
+    // In a share the toolbar is locked: no prev/next/today, no view switcher,
+    // no agenda toggle (the kind is fixed), no share button.
+    const shareView = SHARE_MODE && SHARE_CFG
+      ? (SHARE_CFG.kind === 'agenda' ? 'dayGridMonth' : (SHARE_CFG.grid_view || 'dayGridMonth'))
+      : 'dayGridMonth';
+    // Anchor the initial date inside the target month (window_from can be in the
+    // previous month for a 6-week grid); week/day windows start on the period.
+    const shareInitialDate = SHARE_MODE && SHARE_CFG
+      ? (SHARE_CFG.grid_anchor || SHARE_CFG.window_from) : undefined;
     _fcCalendar = new FullCalendar.Calendar(calendarEl, {
-      initialView: 'dayGridMonth',
+      initialView: shareView,
+      initialDate: shareInitialDate,
+      validRange: SHARE_MODE && SHARE_CFG && SHARE_CFG.window_from
+        ? { start: SHARE_CFG.window_from, end: SHARE_CFG.window_to }
+        : undefined,
       // `locale` is the bare code so the Luxon plugin formats month/weekday
       // names (and the title range) for that language; passing a full locale
       // object instead would replace FullCalendar's range-formatting internals
@@ -3120,12 +3587,20 @@
       noEventsText: fcCat.noEventsText,
       customButtons: {
         agenda: { text: fcBtn.agenda || 'agenda', click: showAgenda },
+        share: {
+          text: '\u{1f517}',
+          click: function () { if (_agendaActive) openAgendaShare(); else openGridShare(); },
+        },
       },
-      headerToolbar: {
-        left: 'prev,next today',
-        center: 'title',
-        right: 'agenda dayGridMonth,timeGridWeek,timeGridDay',
-      },
+      headerToolbar: SHARE_MODE
+        ? { left: '', center: 'title', right: '' }
+        : {
+            left: 'prev,next today',
+            center: 'title',
+            right: SHARING_ENABLED
+              ? 'agenda dayGridMonth,timeGridWeek,timeGridDay share'
+              : 'agenda dayGridMonth,timeGridWeek,timeGridDay',
+          },
       // Clicking any built-in view button (or navigating) leaves the agenda.
       datesSet: function () {
         if (_agendaActive) hideAgenda();
@@ -3136,40 +3611,50 @@
       slotLabelFormat: tf.slotLabelFormat,
       views: fcViewFormats(dateFormatKey()),
       height: '100%',
-      // Enable drag-to-move and edge-resize; both start and end edges.
-      editable: true,
+      // Enable drag-to-move and edge-resize; both start and end edges. A
+      // read-only share disables all editing/creation.
+      editable: !shareRO,
       eventResizableFromStart: true,
       // Click vs drag for event creation: a pixel threshold keeps a plain click
       // out of `select` (→ dateClick) while a real drag fires `select`.
-      selectable: true,
+      selectable: !shareRO,
       selectMinDistance: 5,
       events: async function (fetchInfo, successCallback, failureCallback) {
         try {
-          const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr });
-          const [evR, tkR, jrR] = await Promise.all([
-            fetch('/events?' + params.toString()),
-            fetch('/tasks?' + params.toString()),
-            fetch('/journals?' + params.toString()),
-          ]);
-          if (!evR.ok) throw new Error('Failed to fetch events');
-          const data = await evR.json();
+          let data, rawTasks, rawJournals;
+          if (SHARE_MODE) {
+            // One clamped call; the server bounds it to the sealed window/scope.
+            const items = await fetchShareItems();
+            data = items.events || [];
+            rawTasks = items.tasks || [];
+            rawJournals = items.journals || [];
+          } else {
+            const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr });
+            const [evR, tkR, jrR] = await Promise.all([
+              fetch('/events?' + params.toString()),
+              fetch('/tasks?' + params.toString()),
+              fetch('/journals?' + params.toString()),
+            ]);
+            if (!evR.ok) throw new Error('Failed to fetch events');
+            data = await evR.json();
+            rawTasks = tkR.ok ? await tkR.json() : [];
+            rawJournals = jrR.ok ? await jrR.json() : [];
+          }
           // Only real (calendar-backed) events are editable; recurring ones
-          // prompt for occurrence scope on drop (see onEventChange).
+          // prompt for occurrence scope on drop (see onEventChange). In a
+          // read-only share nothing is drag/resize editable.
+          const shareRO = SHARE_MODE && SHARE_CFG && SHARE_CFG.mode !== 'rw';
           data.forEach((e) => {
             const p = e.extendedProps || {};
-            e.editable = p.calendarId != null;
+            e.editable = !shareRO && p.calendarId != null;
           });
-          let tasks = [];
-          if (tkR.ok) tasks = prepTasksForGrid(await tkR.json());
-          let journals = [];
-          if (jrR.ok) {
-            // Journals aren't drag/resize editable; left-click opens the modal.
-            journals = (await jrR.json()).map((e) => {
-              e.editable = false;
-              e.classNames = ['fc-journal'];
-              return e;
-            });
-          }
+          const tasks = prepTasksForGrid(rawTasks);
+          // Journals aren't drag/resize editable; left-click opens the modal.
+          const journals = rawJournals.map((e) => {
+            e.editable = false;
+            e.classNames = ['fc-journal'];
+            return e;
+          });
           successCallback(data.concat(tasks).concat(journals));
         } catch (err) {
           failureCallback(err);
@@ -3247,7 +3732,10 @@
     });
     _fcCalendar.render();
 
-    document.getElementById('btn-create-fab').addEventListener('click', openCreateModalBlank);
+    const fab = document.getElementById('btn-create-fab');
+    fab.addEventListener('click', openCreateModalBlank);
+    // The create FAB only makes sense when the viewer can write somewhere.
+    if (shareRO || (SHARE_MODE && getShareWritableCount() === 0)) fab.style.display = 'none';
 
     // datesSet only fires when the view/range actually changes, so clicking the
     // button of the view FC is already on (e.g. "month" while month sits under
@@ -3256,9 +3744,17 @@
     if (toolbarEl) {
       toolbarEl.addEventListener('click', (e) => {
         const b = e.target.closest('button');
-        if (!b || b.classList.contains('fc-agenda-button')) return;
+        if (!b || b.classList.contains('fc-agenda-button')
+            || b.classList.contains('fc-share-button')) return;
         hideAgenda();
       });
+    }
+
+    if (SHARE_MODE) {
+      // The kind fixes the view. Agenda shares open the bounded agenda slice;
+      // grid shares are already on their locked view + window.
+      if (SHARE_CFG && SHARE_CFG.kind === 'agenda') showAgenda();
+      return;
     }
 
     // Apply the user's default view (month is already the FC initialView).
@@ -3277,6 +3773,38 @@
       if (_calPop && !_calPop.hidden) { closeDatePicker(); return; } // toggle
       openCalTitlePicker(t);
     });
+  }
+
+  function getShareWritableCount() {
+    return ((SHARE_CFG && SHARE_CFG.calendars) || []).filter((c) => c.writable).length;
+  }
+
+  // Open the single shared item directly in the normal event modal (so a journal
+  // renders its markdown, a task shows its done state, etc.). A "Reopen" button
+  // is shown behind it since there is nothing else on the page.
+  async function openShareItem() {
+    document.getElementById('calendar').style.display = 'none';
+    let item = null;
+    try {
+      const items = await fetchShareItems();
+      const all = (items.events || []).concat(items.tasks || []).concat(items.journals || []);
+      item = all[0] || null;
+    } catch (e) { /* fall through to the empty state */ }
+    const body = document.querySelector('.calendar-body');
+    if (body && !document.getElementById('share-item-reopen')) {
+      const wrap = document.createElement('div');
+      wrap.className = 'share-item-empty';
+      wrap.innerHTML = item
+        ? `<button id="share-item-reopen" class="btn-primary"></button>`
+        : `<p class="empty-note">${escHtml(tr('dyn.share_empty'))}</p>`;
+      body.appendChild(wrap);
+      const btn = document.getElementById('share-item-reopen');
+      if (btn) {
+        btn.textContent = tr('ui.ctx_edit');
+        btn.addEventListener('click', () => openEventModal(agendaToFcShim(item)));
+      }
+    }
+    if (item) await openEventModal(agendaToFcShim(item));
   }
 
   // ── Browser reminder notifications ──────────────────────────────────────────
@@ -3492,5 +4020,20 @@
     if (state === 'anonymous') initLogin();
     else if (state === 'restricted') initChangePassword();
     else if (state === 'authenticated') initCalendar();
+    else if (state === 'share') {
+      // Resolve the share (secret in the X-Share-Secret header) before building
+      // the calendar, then reuse the normal calendar in share mode.
+      resolveShare()
+        .then(() => initCalendar())
+        .catch(() => {
+          show('page-calendar');
+          const body = document.querySelector('.calendar-body') || document.body;
+          const p = document.createElement('p');
+          p.className = 'error-msg';
+          p.style.margin = '2rem';
+          p.textContent = tr(SHARE_SECRET ? 'dyn.share_invalid' : 'dyn.share_no_secret');
+          body.appendChild(p);
+        });
+    }
   });
 })();

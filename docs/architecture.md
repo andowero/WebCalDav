@@ -92,9 +92,47 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   listing/revoking always work. Admin `reset_password` rotates the DEK and
   deletes the user's tokens.
 
+### Calendar sharing
+
+- Share links and `.ics` export for a single item, a grid period
+  (month/week/day), or an agenda slice (`webcaldav/routers/shares.py`,
+  `webcaldav/shares.py`). The design mirrors MCP tokens exactly: the URL carries
+  a random secret in its **fragment** (`/s/<id>#<secret>`); the DB stores
+  `sha256(secret)` plus an AES-GCM blob — keyed by `derive_token_key(secret)` —
+  sealing the DEK together with the share's *authoritative*
+  kind/mode/scope/window/expiry. The `Share` mirror columns and `ShareCalendar`
+  rows are display-only, never trusted for authorization.
+- The share page (`GET /s/{id}`) **reuses the main app** (`index.html` +
+  `app.js`) in a "share mode" (`window.__SHARE_MODE__`) so the editing/viewing
+  modal, markdown rendering, type symbols, recurrence editor, i18n and date/time
+  formatting match the normal calendar exactly; only the FullCalendar toolbar is
+  locked (no nav/view switch, `validRange` = the sealed window) and the api*
+  helpers reroute `/events|tasks|journals` to `/shares/*`. The sharer's display
+  settings (timezone, first day, formats, theme, language) are looked up by share
+  id and injected server-side, so the view renders as the sharer sees it. app.js
+  reads the fragment secret and sends it as the `X-Share-Secret` header (never
+  the request line, so it stays out of access/proxy logs and the Referer).
+  `get_share_context`
+  (`webcaldav/deps.py`) resolves it into a `ShareContext` (user_id, DEK, mode,
+  readable/writable calendar sets, window). The share-view endpoints
+  (`/shares/resolve`, `/shares/items`, the `/shares/{events,tasks,journals}`
+  writers, `/shares/{id}/export.ics`) build a fake `SessionEntry` from the
+  context and reuse the existing event/task/journal route handlers, enforcing
+  read-only vs read-write and clamping reads to the sealed window. Writes are
+  scope-checked against the writable calendar set (a single-item share only to
+  its own uid). The window is re-derived server-side from the blob, so request
+  params can only narrow, never widen.
+- Grid windows are computed from the view + anchor date + the sharer's
+  first-day-of-week (month = a fixed 6-week grid). Base URL for links is detected
+  from `X-Forwarded-Proto`/`X-Forwarded-Host` (`webcaldav/baseurl.py`), override
+  via `PUBLIC_BASE_URL`. Share CRUD at `/shares` requires a session (DEK sealed
+  in) + `SHARING_ENABLED`; list/revoke always work. The `.ics` export serializes
+  *unexpanded* components so RRULE/VALARM survive; a single VCALENDAR holds many.
+
 ### Storage layer
 
-- SQLAlchemy 2.x models for `users`, `caldav_accounts`, `calendars`, `user_settings`.
+- SQLAlchemy 2.x models for `users`, `caldav_accounts`, `calendars`,
+  `user_settings`, `api_tokens`, `shares`/`share_calendars`.
 - `calendars.is_default` marks the per-user calendar pre-selected for new events
   (at most one, enforced at the API layer).
 - `user_settings` carries the task display prefs `completed_task_display`

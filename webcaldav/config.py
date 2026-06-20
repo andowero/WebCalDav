@@ -34,6 +34,19 @@ class Settings(BaseSettings):
     # user's CalDAV credentials, so this stays opt-in.
     mcp_server_enabled: bool = False
 
+    # Toggle calendar sharing (the share buttons + POST /shares). On by default.
+    # When off, new shares cannot be created (existing shares can still be
+    # listed and revoked). A share secret can decrypt the user's CalDAV
+    # credentials, same as an API token, so it can be disabled per deployment.
+    sharing_enabled: bool = True
+
+    # Public base URL used to build share links, e.g.
+    # "https://calendar.zdeneknovak.one". When unset, the URL is derived from
+    # the X-Forwarded-Proto / X-Forwarded-Host headers the reverse proxy sets
+    # (falling back to the request Host). Set this when those headers are
+    # unreliable.
+    public_base_url: str | None = None
+
     # How many days ahead the browser-notification scheduler loads events to
     # fire reminder/start notifications for. Raise it for reminders further out
     # (e.g. month-ahead birthdays).

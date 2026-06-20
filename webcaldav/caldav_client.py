@@ -2086,3 +2086,120 @@ async def delete_journal(
         except Exception:
             caldav_request_errors_total.labels(operation="delete_journal").inc()
             raise
+
+
+# --------------------------------------------------------------------------- #
+# .ics export (for share download). Returns the raw, *unexpanded* components so
+# RRULE / VALARM / overrides survive — these are real iCalendar files for import.
+# --------------------------------------------------------------------------- #
+_COMPONENT_NAMES = ("VEVENT", "VTODO", "VJOURNAL")
+
+
+def _sync_collect_components(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    from_dt: datetime,
+    to_dt: datetime,
+) -> list[Any]:
+    """Collect the VEVENT/VTODO/VJOURNAL (+ VTIMEZONE) components in a window,
+    unexpanded, from one calendar."""
+    out: list[Any] = []
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        objects = cal.search(start=from_dt, end=to_dt, expand=False)
+        for obj in objects:
+            try:
+                ical = obj.icalendar_instance
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("export collect failed: %s", e)
+                continue
+            for comp in ical.subcomponents:
+                if comp.name in _COMPONENT_NAMES or comp.name == "VTIMEZONE":
+                    out.append(comp)
+    return out
+
+
+def _sync_export_item(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    item_kind: str,
+) -> str:
+    """Serialize a single item (by uid) to a standalone .ics string."""
+    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        lookup = {
+            "event": cal.event_by_uid,
+            "task": cal.todo_by_uid,
+            "journal": cal.journal_by_uid,
+        }[item_kind]
+        try:
+            obj = lookup(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+        return str(obj.icalendar_instance.to_ical().decode("utf-8"))
+
+
+async def export_item_ics(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    item_kind: str,
+) -> str:
+    with caldav_request_duration_seconds.labels(operation="export_item").time():
+        try:
+            return await asyncio.to_thread(
+                _sync_export_item,
+                account_url, username, password, calendar_url, uid, item_kind,
+            )
+        except EventNotFoundError:
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="export_item").inc()
+            raise
+
+
+async def export_range_ics(
+    sources: list[dict[str, Any]],
+    from_dt: datetime,
+    to_dt: datetime,
+) -> str:
+    """Merge the components from several calendars/windows into one VCALENDAR.
+
+    ``sources`` is a list of {account_url, username, password, calendar_url}.
+    A single VCALENDAR can hold many components, which is the standard way to
+    export multiple events in one importable file.
+    """
+    merged = ICalendar()
+    merged.add("prodid", "-//WebCalDav//EN")
+    merged.add("version", "2.0")
+    seen_tz: set[str] = set()
+    for src in sources:
+        with caldav_request_duration_seconds.labels(operation="export_range").time():
+            try:
+                comps = await asyncio.to_thread(
+                    _sync_collect_components,
+                    src["account_url"],
+                    src["username"],
+                    src["password"],
+                    src["calendar_url"],
+                    from_dt,
+                    to_dt,
+                )
+            except Exception:
+                caldav_request_errors_total.labels(operation="export_range").inc()
+                raise
+        for comp in comps:
+            if comp.name == "VTIMEZONE":
+                tzid = str(comp.get("tzid", ""))
+                if tzid in seen_tz:
+                    continue
+                seen_tz.add(tzid)
+            merged.add_component(comp)
+    return str(merged.to_ical().decode("utf-8"))

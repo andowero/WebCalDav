@@ -2,6 +2,42 @@
 
 ## Unreleased — MVP
 
+### Added — calendar sharing (2026-06-19)
+- **Share links and `.ics` export** for three scopes: a **single item**
+  (event/task/journal), a **grid period** (month/week/day), and an **agenda
+  slice** (explicit from/to). A share link opens a navigation- and
+  settings-locked view of exactly the shared window; **read-only** shows it,
+  **read & write** lets the sharee add/edit within scope (including recurring
+  events that extend past the window).
+- **Security model mirrors the MCP API token** (`webcaldav/shares.py`): the URL
+  carries a random secret in its **fragment only** (`/s/<id>#<secret>`); the
+  session DEK plus the authoritative kind/mode/scope/window/expiry are sealed in
+  an AES-GCM blob keyed by a key derived from the secret. Only `SHA-256(secret)`
+  is stored; the DB mirror columns are display-only and never trusted for
+  authorization. Zero-knowledge at rest is preserved (a stolen DB without the
+  secret, or a URL without the DB blob, yields nothing). The secret travels in
+  the `X-Share-Secret` header, never the request line, so it stays out of
+  access/proxy logs and the `Referer`.
+- New `Share` / `ShareCalendar` models; new `/shares` API
+  (`webcaldav/routers/shares.py`): session-authed create/list/revoke, plus the
+  share-secret-authed `resolve`, `items`, the `events|tasks|journals` write
+  endpoints (which reuse the existing recurrence/reminder code paths), and
+  `{id}/export.ics`. Multi-calendar grid/agenda shares mark which calendars are
+  writable and a default target for sharee-created items.
+- Reverse-proxy-aware base URL detection (`webcaldav/baseurl.py`, reads
+  `X-Forwarded-Proto` / `X-Forwarded-Host`, override via `PUBLIC_BASE_URL`).
+- New config: `SHARING_ENABLED` (default on; gates link creation, revoke always
+  works), `PUBLIC_BASE_URL`. The share-view page (`GET /s/{id}`) **reuses the main
+  app** (`index.html` + `app.js`) in a "share mode" so the editing/viewing modal,
+  markdown rendering, type symbols, recurrence editor, i18n and date/time
+  formatting are identical to the normal calendar — only the toolbar is locked to
+  the shared window and data/CRUD calls reroute to `/shares/*` with the
+  `X-Share-Secret` header. The sharer's display settings (timezone, language,
+  formats, theme) are injected server-side by share id so the view renders as the
+  sharer sees it. Share buttons in the item modal header and next to the
+  grid/agenda title; a **Shares** section in Settings (list + revoke). English
+  and Czech strings added. See [SHARING.md](../SHARING.md).
+
 ### Added — journals (VJOURNAL) (2026-06-18)
 - Full CalDAV **journal** support alongside events and tasks. Journals are dated
   free-text notes (a SUMMARY title + a Markdown DESCRIPTION body anchored on a

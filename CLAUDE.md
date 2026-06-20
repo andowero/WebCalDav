@@ -4,7 +4,7 @@ Provide a self-hosted, lightweight web UI for viewing and editing events on user
 
 # Project overview
 
-Multi-user web application where each user links one or more CalDAV servers and picks which calendars from each to display. The calendar UI offers month, week, day, and agenda views. Events (VEVENT), tasks (VTODO), and journals (VJOURNAL) are read from and written directly to the CalDAV server with no local caching; journals are dated Markdown notes edited in a two-tab editor (raw-Markdown "Edit" + rendered read-only "Display"). UI theme is user-selectable (system/light/dark). The interface is internationalized; Czech translation is included and locale is auto-detected from the browser. An optional MCP server (at `/mcp`, toggled by `MCP_SERVER_ENABLED`) lets AI assistants read and write the same calendars/tasks/journals via per-user API tokens. Deployed as a single Docker container behind a reverse proxy.
+Multi-user web application where each user links one or more CalDAV servers and picks which calendars from each to display. The calendar UI offers month, week, day, and agenda views. Events (VEVENT), tasks (VTODO), and journals (VJOURNAL) are read from and written directly to the CalDAV server with no local caching; journals are dated Markdown notes edited in a two-tab editor (raw-Markdown "Edit" + rendered read-only "Display"). UI theme is user-selectable (system/light/dark). The interface is internationalized; Czech translation is included and locale is auto-detected from the browser. An optional MCP server (at `/mcp`, toggled by `MCP_SERVER_ENABLED`) lets AI assistants read and write the same calendars/tasks/journals via per-user API tokens. Users can also share a single item, a month/week/day, or an agenda slice as a read-only or read-write link (secret in the URL fragment) or a downloadable `.ics`; the share view is navigation-locked to the shared window (toggled by `SHARING_ENABLED`). Deployed as a single Docker container behind a reverse proxy.
 
 # Design style guide
 
@@ -31,6 +31,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 - **Zero-knowledge at rest for CalDAV credentials.** Credentials are encrypted with a per-user key derived from the user's login password. The server cannot decrypt them without an active user session; a stolen database alone yields nothing.
 - **No event caching.** Reads and writes go straight to the CalDAV server.
 - **MCP API tokens are high-value.** A token can decrypt the user's CalDAV credentials. To preserve zero-knowledge-at-rest, the DEK and the token's authoritative mode/scope/expiry are sealed in an AES-GCM blob keyed by the token secret (only its SHA-256 is stored); plaintext token columns are display-only and must never be trusted for authorization. The MCP server is off by default. See `MCP.md`.
+- **Share links are high-value.** Same model as MCP tokens: a share secret can decrypt the user's CalDAV credentials. The DEK and the share's authoritative kind/mode/scope/window/expiry are sealed in an AES-GCM blob keyed by the secret (only its SHA-256 is stored); the DB mirror columns are display-only and must never be trusted for authorization. The secret rides only in the URL fragment and is sent via the `X-Share-Secret` header, never the request line, so it stays out of access/proxy logs and the Referer. Sharing is gated by `SHARING_ENABLED` (default on). See `SHARING.md`.
 - **Observability required.** Expose `/health` and `/metrics` (Prometheus).
 - **Structured logging** with levels DEBUG/INFO/WARNING/ERROR. Passwords and DEKs must never be logged.
 
@@ -72,6 +73,7 @@ No automated browser/E2E tests (no Playwright). FullCalendar, the Service Worker
 # Documentation
 
 - [MCP server](MCP.md) - Enabling the MCP server, API tokens, tool list, security model
+- [Sharing](SHARING.md) - Share links + .ics export for items/views/agenda, the fragment-secret security model
 - [Project spec](project_spec.md) - Full requirements, API specs, tech details
 - [Architecture](docs/architecture.md) - System design and data flow
 - [Changelog](docs/changelog.md) - Version history

@@ -1,11 +1,12 @@
 from typing import AsyncGenerator
 
-from fastapi import Cookie, Depends, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session_factory
 from .ratelimit import LoginRateLimiter
 from .session import SessionEntry, SessionStore
+from .shares import ShareContext, resolve_share
 
 _store: SessionStore | None = None
 _login_rate_limiter: LoginRateLimiter | None = None
@@ -56,3 +57,18 @@ async def get_unrestricted_session(
     if entry.restricted:
         raise HTTPException(status_code=403, detail="Password change required")
     return entry
+
+
+async def get_share_context(
+    x_share_secret: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ShareContext:
+    """Resolve a share from the ``X-Share-Secret`` header (the URL-fragment
+    secret the share page sends). The secret never appears in the request line,
+    so it stays out of access/proxy logs and the Referer."""
+    if not x_share_secret:
+        raise HTTPException(status_code=401, detail="Missing share secret")
+    ctx = await resolve_share(x_share_secret, db)
+    if ctx is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired share")
+    return ctx

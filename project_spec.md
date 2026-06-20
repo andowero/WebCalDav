@@ -41,7 +41,7 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 | v7        | MCP server: calendar/task access via API token                     |
 | v8        | Configurable double-click action (event vs. task creation)         |
 | v9        | VJOURNAL support (read and write calendar journal entries)         |
-| v10       | Calendar sharing (read-only share links / per-calendar ACL)        |
+| v10       | Calendar sharing: read-only/read-write share links + `.ics` for a single item, a grid period, or an agenda slice |
 
 ## Part 2: Technical design
 
@@ -72,6 +72,8 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 - `user_settings(user_id, timezone, first_day_of_week, time_format, date_format, default_view, auto_logout_enabled, auto_logout_timeout_seconds, notifications_enabled, completed_task_display, undated_task_display, theme, language)`
 - `api_tokens(id, user_id, name, token_sha256, sealed_blob, blob_nonce, mode, all_calendars, expires_at, created_at, last_used_at)` — MCP API tokens. `token_sha256` is the lookup hash; `sealed_blob`/`blob_nonce` is an AES-GCM blob keyed by the token secret holding the *authoritative* `{dek, mode, all_calendars, calendar_ids, expires_at}`. The plaintext `mode`/`all_calendars`/`expires_at` columns are a display-only mirror, never trusted for authorization.
 - `api_token_calendars(id, api_token_id, calendar_id)` — display-only scope rows for a calendar-scoped token (authoritative scope is in `api_tokens.sealed_blob`).
+- `shares(id, user_id, name, token_sha256, sealed_blob, blob_nonce, kind, mode, expires_at, item_uid, item_kind, item_calendar_id, grid_view, grid_anchor, agenda_from, agenda_to, default_calendar_id, created_at, last_used_at)` — share links. `kind` is `item`/`grid`/`agenda`. `token_sha256` is the lookup hash; `sealed_blob`/`blob_nonce` is an AES-GCM blob keyed by the URL-fragment secret holding the *authoritative* `{dek, kind, mode, scope, window, expires_at}`. All other columns are a display-only mirror, never trusted for authorization. Same sealing design as `api_tokens`.
+- `share_calendars(id, share_id, calendar_id, writable)` — display-only calendar scope (and per-calendar write flag) for a grid/agenda share (authoritative scope is in `shares.sealed_blob`).
 
 The canonical schema is in `webcaldav/models.py`; the table above is the logical summary. No plaintext password, no plaintext DEK, no server-held wrapping key, and no plaintext API-token secret are ever stored.
 
@@ -104,6 +106,8 @@ The CLI generates a random one-off password, generates a random DEK, derives KEK
 **Threat model NOT covered.** A compromised running server can read in-memory DEKs for currently logged-in users. The server sees the user's password transiently during login (TLS is terminated by the reverse proxy, so the password arrives in plaintext at the app). Clients must trust the running server; zero-knowledge applies to data at rest, not during active use.
 
 **Session cookie.** `HttpOnly`, `SameSite=Lax`, `Secure` (the latter set by the reverse proxy).
+
+**Share links.** Same sealing design as MCP API tokens. A share's URL carries a random secret in its **fragment** (`/s/<id>#<secret>`); the DEK and the share's authoritative kind/mode/scope/window/expiry are sealed in an AES-GCM blob keyed by `derive_token_key(secret)`. Only `sha256(secret)` is stored; the `shares`/`share_calendars` mirror columns are display-only and never trusted for authorization. The secret is sent in the `X-Share-Secret` header (never the request line), keeping it out of access/proxy logs and the Referer. A stolen DB without the secret, or a leaked URL without the DB row, yields nothing — both are needed. Expiry is enforced from the sealed blob; reads are clamped to the sealed window and writes to the sealed writable-calendar set. Anyone holding a link has the granted access, so links expire (default 30 days) and are revocable. Gated by `SHARING_ENABLED`. See `SHARING.md`.
 
 **No TLS termination in the app.**
 
@@ -162,6 +166,24 @@ MCP server (only mounted when `MCP_SERVER_ENABLED`):
   read-only tokens are rejected by mutating tools; scoped tokens are limited to
   their calendars. `list_journals` defaults to a backward time window (journals
   are mostly in the past). See `MCP.md`.
+
+Calendar sharing:
+
+- `GET /shares` — list the user's share links (metadata only, never the secret)
+- `POST /shares` — create a share of kind `item`/`grid`/`agenda` (requires
+  `SHARING_ENABLED` + active session; DEK + scope sealed in); returns the URL
+  with its fragment secret once
+- `DELETE /shares/{id}` — revoke (works even when `SHARING_ENABLED` is off)
+- `GET /s/{id}` — the share-view page; reuses the main app (`index.html` +
+  `app.js`) in a navigation-locked share mode (the secret rides in the fragment
+  and is never sent to this route). The sharer's display settings are injected
+  server-side by share id.
+- Share-secret-authed (the `X-Share-Secret` header carries the fragment secret):
+  `POST /shares/resolve` (view config, no DEK), `GET /shares/items` (events/tasks/
+  journals clamped to the sealed window/scope), `POST|PUT|DELETE
+  /shares/{events,tasks,journals}[/{uid}]` (read-write shares only; scope-checked
+  against the writable calendars), `GET /shares/{id}/export.ics` (a single
+  VCALENDAR; `text/calendar`). See `SHARING.md`.
 
 **There is no `POST /auth/signup` or equivalent.** User creation is CLI-only.
 

@@ -16,6 +16,7 @@ A lightweight, self-hosted web UI for viewing and editing calendar events on you
 - User-selectable UI theme: system (follows OS), light, or dark.
 - Internationalization with Czech translation included; locale auto-detected from the browser.
 - Optional MCP server: AI assistants can read and write your events, tasks, and journals via scoped, read-only or read-write API tokens ([MCP.md](MCP.md)).
+- Calendar sharing: hand a single item, a month/week/day, or an agenda slice to someone via a read-only or read-write link (the secret rides in the URL fragment, never the server logs) or a downloadable `.ics`; links expire and can be revoked ([SHARING.md](SHARING.md)).
 - Per-user settings: timezone, first day of week, time and date format, default view, auto-logout, double-click to create events.
 - No caching — every read and write goes straight to your CalDAV server.
 
@@ -131,6 +132,8 @@ If Radicale runs as **another container**, put both on the same Docker network a
 | `NOTIFICATION_HORIZON_DAYS` | `60` | How many days ahead the browser-notification scheduler loads events to fire reminder/start notifications for. Raise it for reminders further out (e.g. month-ahead birthdays). See [Browser notifications](#browser-notifications). |
 | `NOTIFICATION_LOOKBACK_DAYS` | `60` | How many days *behind* now the scheduler also loads events, so a reminder anchored *after* an event that has already ended still fires (e.g. "1 day after end"). Defaults to the horizon. Raise it for after-event reminders set further back. See [Browser notifications](#browser-notifications). |
 | `MCP_SERVER_ENABLED` | `false` | Enable the MCP server at `/mcp` so AI assistants can read/write calendars with an API token. Off by default. **An API token can decrypt the user's CalDAV credentials** — enable deliberately. See [MCP.md](MCP.md). |
+| `SHARING_ENABLED` | `true` | Allow users to create share links (single item, grid period, agenda slice) and `.ics` downloads. When `false`, new links can't be created but existing ones can still be listed and revoked. **A share link can decrypt the user's CalDAV credentials** — same model as an API token. See [SHARING.md](SHARING.md). |
+| `PUBLIC_BASE_URL` | _(unset)_ | External origin used to build share links, e.g. `https://calendar.zdeneknovak.one`. When unset it is derived from the reverse proxy's `X-Forwarded-Proto` / `X-Forwarded-Host` headers. Set it if those are unreliable. |
 
 The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast). Each user's password record stores the parameters it was created with, so raising the values later is safe: existing users keep logging in with their old parameters and pick up the stronger ones the next time they change their password.
 
@@ -246,6 +249,7 @@ This issues a new one-off password, rotates the user's DEK, and deletes the now-
 ## More documentation
 
 - [MCP server](MCP.md) — enabling the MCP server, minting API tokens, the tool list, and the security model.
+- [Sharing](SHARING.md) — share links and `.ics` export for items, views, and agenda slices; the fragment-secret security model.
 - [Project spec](project_spec.md) — full requirements, API surface, technical details.
 - [Architecture](docs/architecture.md) — system design and data flows.
 - [Changelog](docs/changelog.md) — version history.

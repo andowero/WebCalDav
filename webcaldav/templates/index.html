@@ -39,6 +39,9 @@
   window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }}, completed_task_display: {{ completed_task_display | tojson }}, undated_task_display: {{ undated_task_display | tojson }}, theme: {{ theme | tojson }}, language: {{ language | tojson }}, double_click_to_create_events: {{ double_click_to_create_events | tojson }} };
   window.__CONFIG__ = { notification_horizon_days: {{ notification_horizon_days }}, notification_lookback_days: {{ notification_lookback_days }}, static_v: {{ static_v | tojson }} };
   window.__MCP_ENABLED__ = {{ mcp_enabled | tojson }};
+  window.__SHARING_ENABLED__ = {{ sharing_enabled | tojson }};
+  window.__SHARE_MODE__ = {{ (state == 'share') | tojson }};
+  window.__SHARE_ID__ = {{ share_id | default(None) | tojson }};
   window.__LANG__ = {{ lang | tojson }};
   window.__I18N__ = {{ i18n | tojson }};
 </script>
@@ -106,6 +109,7 @@
 <div id="event-modal" class="event-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="ev-title-text">
   <div class="event-modal-header">
     <span id="ev-title-text">Event</span>
+    <button id="btn-event-share" class="btn-icon" style="display:none" data-i18n-aria-label="ui.share_open" data-i18n-title="ui.share_open" aria-label="Share" title="Share">&#x1f517;</button>
     <button id="btn-event-close" class="btn-icon" data-i18n-aria-label="ui.modal_close" aria-label="Close">&#x2715;</button>
   </div>
   <div class="event-modal-body">
@@ -286,6 +290,78 @@
   </div>
 </div>
 
+<!-- ── Share creation modal ── -->
+<div id="share-overlay" class="event-overlay" style="display:none"></div>
+<div id="share-modal" class="event-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="share-title-text">
+  <div class="event-modal-header">
+    <span id="share-title-text" data-i18n="ui.share_title">Share</span>
+    <button id="btn-share-close" class="btn-icon" data-i18n-aria-label="ui.modal_close" aria-label="Close">&#x2715;</button>
+  </div>
+  <div class="event-modal-body">
+    <div id="share-error" class="error-msg" style="display:none"></div>
+    <p id="share-scope-desc" class="pref-note"></p>
+    <p class="pref-note" data-i18n="ui.share_warn">Anyone with the link gets this access. For read &amp; write they can edit your events. The link can decrypt your CalDAV credentials — treat it like a password.</p>
+
+    <label class="ev-field">
+      <span class="ev-label" data-i18n="ui.share_access">Access</span>
+      <select id="share-mode">
+        <option value="ro" data-i18n="ui.share_ro">Read-only</option>
+        <option value="rw" data-i18n="ui.share_rw">Read &amp; write</option>
+      </select>
+    </label>
+
+    <!-- Agenda slice only -->
+    <fieldset class="ev-group" id="share-agenda-range" style="display:none">
+      <legend data-i18n="ui.share_range">Range</legend>
+      <div class="ev-dt-row">
+        <span class="ev-label" data-i18n="ui.share_from">From</span>
+        <span class="ev-date-fields" id="share-from-date-fields"></span>
+        <span class="ev-time ev-time-fields" id="share-from-time-fields"></span>
+      </div>
+      <div class="ev-dt-row">
+        <span class="ev-label" data-i18n="ui.share_to">To</span>
+        <span class="ev-date-fields" id="share-to-date-fields"></span>
+        <span class="ev-time ev-time-fields" id="share-to-time-fields"></span>
+      </div>
+    </fieldset>
+
+    <!-- Grid/agenda calendar scope -->
+    <div class="ev-field" id="share-cal-scope" style="display:none">
+      <span class="ev-label" data-i18n="ui.share_calendars">Calendars</span>
+      <div id="share-cal-picker"></div>
+    </div>
+
+    <label class="ev-field">
+      <span class="ev-label" data-i18n="ui.share_expires">Expires</span>
+      <select id="share-expiry">
+        <option value="1" data-i18n="ui.share_exp_1d">1 day</option>
+        <option value="7" data-i18n="ui.share_exp_7d">7 days</option>
+        <option value="30" selected data-i18n="ui.share_exp_30d">30 days</option>
+        <option value="never" data-i18n="ui.share_exp_never">Never</option>
+      </select>
+    </label>
+  </div>
+  <div class="event-modal-footer">
+    <button id="btn-share-cancel" class="btn-outline" data-i18n="ui.modal_cancel">Cancel</button>
+    <button id="btn-share-create" class="btn-primary" data-i18n="ui.share_create">Create link</button>
+  </div>
+</div>
+
+<!-- ── Share result (link + download, shown once) ── -->
+<div id="shareres-overlay" class="event-overlay" style="display:none"></div>
+<div id="shareres-modal" class="confirm-modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="shareres-title">
+  <p id="shareres-title" class="token-modal-title" data-i18n="ui.share_created_title">Share link created</p>
+  <p class="pref-note" data-i18n="ui.share_copy_once">Copy this link now — the secret is not stored and won't be shown again.</p>
+  <div class="token-secret-row">
+    <input id="shareres-url" type="text" readonly>
+    <button type="button" id="shareres-copy" class="btn-outline" data-i18n="ui.tokens_copy">Copy</button>
+  </div>
+  <div class="confirm-footer">
+    <a id="shareres-download" class="btn-outline" download>.ics</a>
+    <button id="shareres-close" class="btn-primary" data-i18n="ui.tokens_done">Done</button>
+  </div>
+</div>
+
 <!-- ── Settings panel ── -->
 <div id="settings-overlay" class="settings-overlay" style="display:none"></div>
 <aside id="settings-panel" class="settings-panel" style="display:none">
@@ -344,6 +420,13 @@
         <button type="submit" data-i18n="ui.tokens_create">Create token</button>
       </form>
     </details>
+  </section>
+
+  <section class="settings-section" id="shares-section">
+    <h2 data-i18n="ui.settings_shares">Shares</h2>
+    <p class="pref-note" data-i18n="ui.shares_intro">Links you created to share events or views. A link grants access to the shared data and can decrypt your CalDAV credentials — revoke any you no longer need.</p>
+    <p id="shares-disabled-note" class="pref-note" style="display:none" data-i18n="ui.shares_disabled">Sharing is disabled. You can revoke existing links but cannot create new ones.</p>
+    <div id="shares-list"></div>
   </section>
 
   <section class="settings-section">
