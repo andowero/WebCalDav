@@ -3241,6 +3241,23 @@
     agendaLoadMore();
   }
 
+  // Agenda's "Agenda" label is a separate overlay element, never FC's own
+  // .fc-toolbar-title. Mutating FC's title node detaches the text node preact
+  // holds a reference to, so FC's next reconciliation diffs against a stale
+  // vnode and prepends leftover text (see weekTitleFormat note). CSS hides the
+  // real title and shows this overlay while .agenda-mode is set.
+  function agendaTitleEl() {
+    let el = document.querySelector('.agenda-toolbar-title');
+    if (!el) {
+      const fcTitle = document.querySelector('.calendar-body .fc-toolbar-title');
+      if (!fcTitle) return null;
+      el = document.createElement('h2');
+      el.className = 'agenda-toolbar-title';
+      fcTitle.parentNode.insertBefore(el, fcTitle.nextSibling);
+    }
+    return el;
+  }
+
   function showAgenda() {
     if (_agendaActive) return;
     _agendaActive = true;
@@ -3248,7 +3265,7 @@
     // .agenda-mode collapses just the FC view area below the toolbar.
     document.querySelector('.calendar-body').classList.add('agenda-mode');
     show('agenda');
-    const titleEl = document.querySelector('.fc-toolbar-title');
+    const titleEl = agendaTitleEl();
     if (titleEl) titleEl.textContent = tr('dyn.agenda');
     const btn = agendaBtnEl();
     if (btn) btn.classList.add('fc-button-active');
@@ -3267,10 +3284,8 @@
     _agendaActive = false;
     hide('agenda');
     document.querySelector('.calendar-body').classList.remove('agenda-mode');
-    // Restore the date title we replaced with "Agenda". FC only rewrites it on
-    // navigation/view change, which may not happen on the way out.
-    const titleEl = document.querySelector('.fc-toolbar-title');
-    if (titleEl && _fcCalendar) titleEl.textContent = _fcCalendar.view.title;
+    // Removing .agenda-mode re-shows FC's own title (CSS); the overlay hides
+    // itself. FC's title node was never touched, so nothing to restore.
     const btn = agendaBtnEl();
     if (btn) btn.classList.remove('fc-button-active');
     // FC didn't change views while the agenda was up, so it won't re-mark the

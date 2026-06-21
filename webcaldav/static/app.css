@@ -396,6 +396,26 @@ body {
   display: none;
 }
 
+/* Agenda title overlay: shown in place of FC's own toolbar title while in
+   agenda mode. We never write FC's .fc-toolbar-title (it corrupts FC's preact
+   title reconciliation); instead hide it and reveal this sibling. */
+.agenda-toolbar-title {
+  display: none;
+  margin: 0;
+  font-size: 1.75em;
+  font-weight: inherit;
+  /* Pass clicks through so it never triggers the title's jump-to-date picker. */
+  pointer-events: none;
+}
+
+.calendar-body.agenda-mode .fc-toolbar-title {
+  display: none;
+}
+
+.calendar-body.agenda-mode .agenda-toolbar-title {
+  display: block;
+}
+
 .agenda {
   flex: 1;
   display: flex;
