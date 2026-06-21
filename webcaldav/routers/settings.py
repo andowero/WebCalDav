@@ -21,6 +21,9 @@ VALID_UNDATED_TASK = {"agenda", "today"}
 VALID_THEME = {"system", "light", "dark"}
 VALID_LANGUAGE = {"autodetect", "english", "czech"}
 
+# Upper bound on the agenda search-window day offsets (10 years).
+AGENDA_OFFSET_MAX = 3650
+
 
 class SettingsOut(BaseModel):
     timezone: str
@@ -36,6 +39,8 @@ class SettingsOut(BaseModel):
     theme: str
     language: str
     double_click_to_create_events: bool
+    agenda_search_from_days: int
+    agenda_search_to_days: int
 
 
 class SettingsIn(BaseModel):
@@ -52,6 +57,8 @@ class SettingsIn(BaseModel):
     theme: str | None = None
     language: str | None = None
     double_click_to_create_events: bool | None = None
+    agenda_search_from_days: int | None = None
+    agenda_search_to_days: int | None = None
 
 
 def _to_out(s: UserSettings) -> SettingsOut:
@@ -69,6 +76,8 @@ def _to_out(s: UserSettings) -> SettingsOut:
         theme=s.theme,
         language=s.language,
         double_click_to_create_events=s.double_click_to_create_events,
+        agenda_search_from_days=s.agenda_search_from_days,
+        agenda_search_to_days=s.agenda_search_to_days,
     )
 
 
@@ -96,6 +105,8 @@ async def get_settings(
             theme="system",
             language="autodetect",
             double_click_to_create_events=False,
+            agenda_search_from_days=0,
+            agenda_search_to_days=365,
         )
     return _to_out(s)
 
@@ -153,6 +164,14 @@ async def put_settings(
             detail=f"language must be one of {sorted(VALID_LANGUAGE)}",
         )
 
+    for field in ("agenda_search_from_days", "agenda_search_to_days"):
+        value = getattr(body, field)
+        if value is not None and not (0 <= value <= AGENDA_OFFSET_MAX):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field} must be between 0 and {AGENDA_OFFSET_MAX}",
+            )
+
     result = await db.execute(
         select(UserSettings).where(UserSettings.user_id == entry.user_id)
     )
@@ -193,6 +212,10 @@ async def put_settings(
         s.language = body.language
     if body.double_click_to_create_events is not None:
         s.double_click_to_create_events = body.double_click_to_create_events
+    if body.agenda_search_from_days is not None:
+        s.agenda_search_from_days = body.agenda_search_from_days
+    if body.agenda_search_to_days is not None:
+        s.agenda_search_to_days = body.agenda_search_to_days
 
     # Notifications only fire while a tab stays logged in, so the two are
     # mutually exclusive: enabling notifications forces auto-logout off.

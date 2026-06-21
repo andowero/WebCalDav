@@ -65,6 +65,40 @@ async def test_dblclick_create_roundtrip(client: AsyncClient, db_engine):
 
 
 @pytest.mark.asyncio
+async def test_agenda_search_days_defaults(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "ag1@example.com")
+    r = await client.get("/settings")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["agenda_search_from_days"] == 0
+    assert body["agenda_search_to_days"] == 365
+
+
+@pytest.mark.asyncio
+async def test_agenda_search_days_roundtrip(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "ag2@example.com")
+    r = await client.put(
+        "/settings",
+        json={"agenda_search_from_days": 7, "agenda_search_to_days": 30},
+    )
+    assert r.status_code == 200
+    assert r.json()["agenda_search_from_days"] == 7
+    assert r.json()["agenda_search_to_days"] == 30
+    r = await client.get("/settings")
+    assert r.json()["agenda_search_from_days"] == 7
+    assert r.json()["agenda_search_to_days"] == 30
+
+
+@pytest.mark.asyncio
+async def test_agenda_search_days_reject_out_of_range(client: AsyncClient, db_engine):
+    await _login_unrestricted(client, "ag3@example.com")
+    r = await client.put("/settings", json={"agenda_search_from_days": -1})
+    assert r.status_code == 422
+    r = await client.put("/settings", json={"agenda_search_to_days": 99999})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_notifications_default_off(client: AsyncClient, db_engine):
     await _login_unrestricted(client, "nt1@example.com")
     r = await client.get("/settings")

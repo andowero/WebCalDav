@@ -410,6 +410,81 @@ body {
   padding: 1rem 1.25rem 4rem;
 }
 
+/* Date-range pickers shown only while searching the agenda. */
+.agenda-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border-panel);
+  background: var(--bg-control);
+}
+
+.agenda-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Toolbar search box (injected after the "today" button). Input, clear button
+   and spinner sit in a flex row so the "×" and spinner never overlap. */
+.cal-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+}
+
+.cal-search-input {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-control);
+  color: var(--text);
+  font: inherit;
+}
+
+.cal-search-clear {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--text);
+  padding: 0 0.2rem;
+}
+
+/* "Search in progress" spinner — same look as the agenda loading spinner,
+   shown next to the search box while a search-driven load runs. A fixed-size
+   slot so toggling it doesn't shift the "×" button. */
+.cal-search-spinner {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--border-control);
+  border-top-color: var(--today);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Compact agenda from/to date boxes: just wide enough for their digits
+   (2 for month/day, 4 for year), like the token-expiry fields. */
+#ev-agenda-from-date-fields .ev-dnum,
+#ev-agenda-to-date-fields .ev-dnum {
+  width: 2.6em;
+  text-align: center;
+  padding: 0.4rem 0.25rem;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg-control);
+  color: var(--text-strong);
+}
+#ev-agenda-from-date-fields .ev-year,
+#ev-agenda-to-date-fields .ev-year { width: 3.6em; }
+
 .agenda-day {
   margin-top: 1.25rem;
 }

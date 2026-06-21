@@ -2,6 +2,29 @@
 
 ## Unreleased — MVP
 
+### Added — event search + agenda search-range pickers (2026-06-21)
+- **A search box in the calendar toolbar** (after the "today" button) filters
+  events, tasks, and journals by **title**, **location**, and **description**.
+  Matching is case- and accent-insensitive, needs ≥ 3 characters, and matches a
+  loose in-order subsequence (so `dbs` matches "Dog Barks"). The term persists
+  across view switches; clearing it (delete below 3 chars, or the "×" button)
+  stops filtering.
+- **Month/week/day** filter the events already fetched for the visible interval
+  (the FullCalendar `events` callback filters before `successCallback`, and a term
+  change calls `refetchEvents()`).
+- **Agenda**: with no search it behaves as before (infinite forward scroll). When
+  a search is active, two **date pickers** ("From"/"To", reusing the event date
+  widget) appear and bound the searched interval (no scroll past "To"); pinned
+  overdue/undated rows are filtered too. Defaults come from two new user settings
+  `agenda_search_from_days` (0) and `agenda_search_to_days` (365), editable in
+  Preferences. Search/pickers are owner-only (hidden in shares).
+- New i18n keys (EN + CS): `search_placeholder`, `search_clear`, `agenda_from`,
+  `agenda_to`, `pref_agenda_from`, `pref_agenda_to`.
+- The search box shows an "in progress" spinner (same look as the agenda loading
+  spinner) while a search-driven load runs — grid views drive it from the
+  FullCalendar `loading` callback, the agenda mirrors its own load state. The
+  agenda from/to date boxes are compact (digit-width).
+
 ### Changed — customized occurrences are now pinned on series edits (2026-06-20)
 - **Editing/dragging a recurring series no longer drags individually edited
   occurrences along.** Previously a whole-series ("all") or "this and future"

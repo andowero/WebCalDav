@@ -51,6 +51,8 @@ _USER_SETTINGS_MIGRATION = {
     "theme": ("TEXT", "'system'"),
     "language": ("TEXT", "'autodetect'"),
     "double_click_to_create_events": ("BOOLEAN", 0),
+    "agenda_search_from_days": ("INTEGER", 0),
+    "agenda_search_to_days": ("INTEGER", 365),
 }
 
 

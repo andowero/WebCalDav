@@ -22,6 +22,13 @@
 
 ## Recent additions
 
+### Event search + agenda search-range pickers (2026-06-21)
+- Toolbar search box filters events/tasks/journals by title/location/description
+  (case- and accent-insensitive, ≥ 3 chars, loose subsequence). Grid views filter
+  the visible interval; the agenda gains "From"/"To" date pickers (shown only
+  while searching) bounded by new `agenda_search_from_days`/`agenda_search_to_days`
+  user settings (defaults 0 / 365). Owner-only (hidden in shares).
+
 ### Reset customized occurrences on series edits (2026-06-20)
 - Editing a recurring event/task with scope "All" or "This and future" now offers
   an opt-in "Reset customized events/tasks" checkbox. When set, only the

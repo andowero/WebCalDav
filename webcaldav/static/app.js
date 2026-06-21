@@ -890,6 +890,8 @@
       document.getElementById('pref-theme').value = s.theme || 'system';
       document.getElementById('pref-language').value = s.language || 'autodetect';
       document.getElementById('pref-dblclick-create').checked = !!s.double_click_to_create_events;
+      document.getElementById('pref-agenda-from-offset').value = String(s.agenda_search_from_days ?? 0);
+      document.getElementById('pref-agenda-to-offset').value = String(s.agenda_search_to_days ?? 365);
       const enabled = s.auto_logout_enabled ?? true;
       const mins = Math.max(1, Math.round((s.auto_logout_timeout_seconds ?? 3600) / 60));
       const enEl = document.getElementById('pref-auto-logout-enabled');
@@ -1019,6 +1021,8 @@
         const theme = document.getElementById('pref-theme').value;
         const language = document.getElementById('pref-language').value;
         const dblClickCreate = document.getElementById('pref-dblclick-create').checked;
+        const agendaFromDays = Math.max(0, parseInt(document.getElementById('pref-agenda-from-offset').value, 10) || 0);
+        const agendaToDays = Math.max(0, parseInt(document.getElementById('pref-agenda-to-offset').value, 10) || 0);
         const languageChanged = language !== (window.__SETTINGS__?.language ?? 'autodetect');
         const notifEnabled = document.getElementById('pref-notifications-enabled').checked;
         // Notifications force auto-logout off (server enforces the same).
@@ -1042,6 +1046,8 @@
           theme: theme,
           language: language,
           double_click_to_create_events: dblClickCreate,
+          agenda_search_from_days: agendaFromDays,
+          agenda_search_to_days: agendaToDays,
         });
         // The active translation catalog is injected at page render, so a
         // language change only takes full effect after a reload.
@@ -1060,6 +1066,8 @@
         window.__SETTINGS__.theme = theme;
         window.__SETTINGS__.language = language;
         window.__SETTINGS__.double_click_to_create_events = dblClickCreate;
+        window.__SETTINGS__.agenda_search_from_days = agendaFromDays;
+        window.__SETTINGS__.agenda_search_to_days = agendaToDays;
         // Apply theme live; "system" tracked by CSS media query (no JS needed).
         document.documentElement.dataset.theme = theme;
         if (notifEnabled) startNotifications(); else stopNotifications();
@@ -1084,6 +1092,102 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  // ── Event search ────────────────────────────────────────────────────────────
+  // Client-side filter over title/location/description. Case- and accent-
+  // insensitive; matches a loose subsequence (so "dbs" matches "Dog Barks") of
+  // at least 3 characters. Drives both grid views and the agenda.
+  const SEARCH_MIN_CHARS = 3;
+  let _searchTerm = '';
+
+  function normSearch(str) {
+    return String(str || '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase();
+  }
+
+  // True when `needle` appears as an (in-order, gappy) subsequence of `hay`.
+  // Plain substrings are a special case, so this also covers those.
+  function isSubseq(needle, hay) {
+    let i = 0;
+    for (let j = 0; j < hay.length && i < needle.length; j++) {
+      if (hay[j] === needle[i]) i++;
+    }
+    return i === needle.length;
+  }
+
+  function searchActive() {
+    return _searchTerm.trim().length >= SEARCH_MIN_CHARS;
+  }
+
+  function matchesSearch(e) {
+    if (!searchActive()) return true;
+    const p = e.extendedProps || {};
+    const hay = normSearch(
+      `${e.title || ''} ${p.location || ''} ${p.description || ''}`,
+    );
+    return isSubseq(normSearch(_searchTerm.trim()), hay);
+  }
+
+  // Toggle the search-box "in progress" spinner (the agenda keeps its own).
+  function setSearchBusy(busy) {
+    const sp = document.querySelector('.cal-search-spinner');
+    if (sp) sp.style.display = busy ? '' : 'none';
+  }
+
+  // Re-run filtering after the term changed. Grid views re-fetch (which filters
+  // within the shown interval); the agenda reloads (bounded when search active).
+  function applySearch() {
+    const clearBtn = document.querySelector('.cal-search-clear');
+    if (clearBtn) clearBtn.style.display = _searchTerm.length ? '' : 'none';
+    // A finished/cleared search re-seeds the date pickers next time one starts.
+    if (!searchActive()) { _agendaRangeSeeded = false; setSearchBusy(false); }
+    updateAgendaControls();
+    if (_agendaActive) {
+      agendaReset();
+      agendaLoadMore();
+    } else if (_fcCalendar) {
+      // Show the spinner up front; FC's `loading` callback clears it when the
+      // refetch finishes (it doesn't reliably fire true on the first refetch).
+      if (searchActive()) setSearchBusy(true);
+      _fcCalendar.refetchEvents();
+    }
+  }
+
+  // Build the toolbar search box and insert it after the "today" button. FC's
+  // customButtons render <button>s only, so the input is injected post-render.
+  function initSearchBox(calendarEl) {
+    const chunk = calendarEl.querySelector('.fc-toolbar-chunk');
+    if (!chunk) return;
+    const wrap = document.createElement('span');
+    wrap.className = 'cal-search';
+    wrap.innerHTML =
+      `<input type="search" id="cal-search-input" class="cal-search-input"` +
+      ` autocomplete="off" data-i18n-placeholder="ui.search_placeholder">` +
+      `<button type="button" class="cal-search-clear"` +
+      ` data-i18n-aria-label="ui.search_clear" aria-label="Clear search"` +
+      ` style="display:none">×</button>` +
+      `<span class="cal-search-spinner" style="display:none"></span>`;
+    const today = chunk.querySelector('.fc-today-button');
+    if (today && today.nextSibling) chunk.insertBefore(wrap, today.nextSibling);
+    else chunk.appendChild(wrap);
+    applyTranslations(wrap);
+
+    const input = wrap.querySelector('.cal-search-input');
+    const clearBtn = wrap.querySelector('.cal-search-clear');
+    input.value = _searchTerm;
+    input.addEventListener('input', () => {
+      _searchTerm = input.value;
+      applySearch();
+    });
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      _searchTerm = '';
+      applySearch();
+      input.focus();
+    });
   }
 
   // ── Event detail modal ──────────────────────────────────────────────────────
@@ -3084,9 +3188,57 @@
   let _agendaSeen = null; // Set of `${id}|${rawStart}` for boundary dedup
   let _agendaLastDayKey = null; // last rendered day header (yyyy-MM-dd)
   let _agendaObserver = null;
+  // End of the bounded window when a search is active (luxon DateTime, end of
+  // the "to" day). null → no bound (plain infinite scroll).
+  let _agendaToBound = null;
+  // Whether the agenda "from"/"to" pickers have been seeded for the current
+  // search session; re-seeded each time a search starts from cleared state.
+  let _agendaRangeSeeded = false;
 
   function agendaBtnEl() {
     return document.querySelector('.fc-agenda-button');
+  }
+
+  // Seed the agenda from/to date pickers from the user's default offsets.
+  function seedAgendaRange() {
+    const tz = effectiveTz();
+    const s = window.__SETTINGS__ || {};
+    const fromDays = Number.isFinite(+s.agenda_search_from_days) ? +s.agenda_search_from_days : 0;
+    const toDays = Number.isFinite(+s.agenda_search_to_days) ? +s.agenda_search_to_days : 365;
+    const today = luxon.DateTime.now().setZone(tz).startOf('day');
+    setDateFieldValue('agenda-from', today.minus({ days: fromDays }).toFormat('yyyy-MM-dd'));
+    setDateFieldValue('agenda-to', today.plus({ days: toDays }).toFormat('yyyy-MM-dd'));
+    _agendaRangeSeeded = true;
+  }
+
+  // Date pickers exist only while a search is active (owner mode only).
+  function updateAgendaControls() {
+    const el = document.getElementById('agenda-controls');
+    if (!el) return;
+    const visible = _agendaActive && searchActive() && !SHARE_MODE;
+    if (visible && !_agendaRangeSeeded) seedAgendaRange();
+    el.style.display = visible ? '' : 'none';
+  }
+
+  function agendaSearchFrom() {
+    const tz = effectiveTz();
+    const v = getDateFieldValue('agenda-from');
+    return v
+      ? luxon.DateTime.fromISO(v, { zone: tz }).startOf('day')
+      : luxon.DateTime.now().setZone(tz).startOf('day');
+  }
+
+  function agendaSearchTo() {
+    const tz = effectiveTz();
+    const v = getDateFieldValue('agenda-to');
+    return v ? luxon.DateTime.fromISO(v, { zone: tz }).endOf('day') : null;
+  }
+
+  // A from/to picker change just reloads the bounded agenda.
+  function onAgendaRangeChange() {
+    if (!_agendaActive || !searchActive()) return;
+    agendaReset();
+    agendaLoadMore();
   }
 
   function showAgenda() {
@@ -3105,6 +3257,7 @@
         '.fc-dayGridMonth-button,.fc-timeGridWeek-button,.fc-timeGridDay-button',
       )
       .forEach((b) => b.classList.remove('fc-button-active'));
+    updateAgendaControls();
     agendaReset();
     agendaLoadMore();
   }
@@ -3133,11 +3286,17 @@
 
   function agendaReset() {
     const tz = effectiveTz();
+    // An active search bounds the agenda to the from/to pickers; otherwise it
+    // tiles forward from today with no end (infinite scroll).
+    const useSearchRange = searchActive() && !SHARE_MODE;
+    _agendaToBound = useSearchRange ? agendaSearchTo() : null;
     // In an agenda share the slice is fixed: start at the sealed window and let
     // agendaLoadMore pull the single clamped page (no infinite scroll, no
     // pinned-undated section that would reach outside the slice).
     _agendaCursor = SHARE_MODE && SHARE_CFG && SHARE_CFG.window_from
       ? luxon.DateTime.fromISO(SHARE_CFG.window_from, { setZone: true }).setZone(tz)
+      : useSearchRange
+      ? agendaSearchFrom()
       : luxon.DateTime.now().setZone(tz).startOf('day');
     _agendaEmptyRuns = 0;
     _agendaLoading = false;
@@ -3175,9 +3334,20 @@
     _agendaLoading = true;
     agendaSetStatus('loading');
     const from = _agendaCursor;
-    // The share slice is a single fixed window; everything else tiles forward.
+    // A bounded search stops once the cursor reaches the "to" picker.
+    if (_agendaToBound && from >= _agendaToBound) {
+      _agendaDone = true;
+      agendaSetStatus('end');
+      _agendaLoading = false;
+      return;
+    }
+    // The share slice is a single fixed window; a bounded search loads the
+    // whole searched interval in one request (no slow chunk-by-chunk tiling);
+    // everything else tiles forward.
     const to = SHARE_MODE && SHARE_CFG && SHARE_CFG.window_to
       ? luxon.DateTime.fromISO(SHARE_CFG.window_to, { setZone: true }).setZone(effectiveTz())
+      : _agendaToBound
+      ? _agendaToBound
       : from.plus({ days: AGENDA_CHUNK_DAYS });
     try {
       const data = [];
@@ -3215,6 +3385,7 @@
       const fresh = [];
       for (const e of data) {
         const p = e.extendedProps || {};
+        if (!matchesSearch(e)) continue; // search filter (no-op when inactive)
         const sISO = p.rawStart || e.start;
         const s = luxon.DateTime.fromISO(sISO, { setZone: true });
         if (s < from || s >= to) continue; // half-open window guard
@@ -3227,7 +3398,9 @@
 
       if (fresh.length === 0) {
         _agendaEmptyRuns += 1;
-        if (_agendaEmptyRuns >= AGENDA_MAX_EMPTY) {
+        // A bounded search must scan the whole range even across long empty
+        // stretches, so only the cursor-vs-bound check ends it (top of fn).
+        if (!_agendaToBound && _agendaEmptyRuns >= AGENDA_MAX_EMPTY) {
           _agendaDone = true;
           agendaSetStatus('end');
         } else {
@@ -3240,9 +3413,12 @@
         agendaSetStatus('');
       }
       _agendaCursor = to; // windows tile forward regardless
-      // A share slice is one fixed page — stop after it so the sharee can't
-      // scroll outside the shared window.
-      if (SHARE_MODE) { _agendaDone = true; if (fresh.length) agendaSetStatus(''); else agendaSetStatus('end'); }
+      // A share slice is one fixed page, and a bounded search loads its whole
+      // interval at once — stop after this single page in both cases.
+      if (SHARE_MODE || _agendaToBound) {
+        _agendaDone = true;
+        agendaSetStatus(fresh.length ? '' : 'end');
+      }
     } catch (err) {
       agendaSetStatus('error', err.message);
       _agendaDone = true;
@@ -3378,6 +3554,7 @@
       const undated = [];
       data.forEach((e) => {
         const p = e.extendedProps || {};
+        if (!matchesSearch(e)) return; // search filter (no-op when inactive)
         if (p.undated) {
           if (p.completed && completedMode === 'hidden') return;
           undated.push(e);
@@ -3430,6 +3607,8 @@
   }
 
   function agendaSetStatus(kind, msg) {
+    // Mirror the agenda load state onto the search-box spinner while searching.
+    if (searchActive()) setSearchBusy(kind === 'loading');
     const el = document.getElementById('agenda-status');
     if (kind === 'loading') {
       el.style.display = '';
@@ -3760,6 +3939,11 @@
       datesSet: function () {
         if (_agendaActive) hideAgenda();
       },
+      // Drive the search-box spinner from the grid event-source fetch (the slow
+      // part of a search). The agenda manages its own spinner separately.
+      loading: function (isLoading) {
+        if (!_agendaActive && searchActive()) setSearchBusy(isLoading);
+      },
       firstDay: s.first_day_of_week != null ? s.first_day_of_week : 1,
       timeZone: s.timezone || 'local',
       eventTimeFormat: tf.eventTimeFormat,
@@ -3810,7 +3994,9 @@
             e.classNames = ['fc-journal'];
             return e;
           });
-          successCallback(data.concat(tasks).concat(journals));
+          let combined = data.concat(tasks).concat(journals);
+          if (searchActive()) combined = combined.filter(matchesSearch);
+          successCallback(combined);
         } catch (err) {
           failureCallback(err);
         }
@@ -3899,10 +4085,21 @@
     if (toolbarEl) {
       toolbarEl.addEventListener('click', (e) => {
         const b = e.target.closest('button');
+        // The search box (and its clear "×") live in the toolbar but are not
+        // view buttons — clicking them must not leave the agenda.
         if (!b || b.classList.contains('fc-agenda-button')
-            || b.classList.contains('fc-share-button')) return;
+            || b.classList.contains('fc-share-button')
+            || b.closest('.cal-search')) return;
         hideAgenda();
       });
+    }
+
+    // The search box and agenda date pickers are owner-only; a share is a fixed
+    // slice that must not be re-filtered or re-bounded by the sharee.
+    if (!SHARE_MODE) {
+      initSearchBox(calendarEl);
+      renderDateFields('agenda-from', onAgendaRangeChange);
+      renderDateFields('agenda-to', onAgendaRangeChange);
     }
 
     if (SHARE_MODE) {

@@ -94,6 +94,16 @@
   <div class="calendar-body">
     <div id="calendar"></div>
     <div id="agenda" class="agenda" style="display:none">
+      <div id="agenda-controls" class="agenda-controls" style="display:none">
+        <label class="agenda-range">
+          <span data-i18n="ui.agenda_from">From</span>
+          <span class="ev-date-fields" id="ev-agenda-from-date-fields"></span>
+        </label>
+        <label class="agenda-range">
+          <span data-i18n="ui.agenda_to">To</span>
+          <span class="ev-date-fields" id="ev-agenda-to-date-fields"></span>
+        </label>
+      </div>
       <div id="agenda-scroll" class="agenda-scroll">
         <div id="agenda-list"></div>
         <div id="agenda-sentinel" class="agenda-sentinel"></div>
@@ -492,6 +502,10 @@
         <option value="english">English</option>
         <option value="czech">Čeština</option>
       </select>
+      <label data-i18n="ui.pref_agenda_from">Agenda search starts (days in past)</label>
+      <input id="pref-agenda-from-offset" type="number" min="0" max="3650" step="1" value="0">
+      <label data-i18n="ui.pref_agenda_to">Agenda search ends (days in future)</label>
+      <input id="pref-agenda-to-offset" type="number" min="0" max="3650" step="1" value="365">
       <label class="ev-check">
         <input type="checkbox" id="pref-auto-logout-enabled">
         <span data-i18n="ui.pref_auto_logout">Automatic logout after inactivity</span>

@@ -221,5 +221,10 @@ class UserSettings(Base):
     double_click_to_create_events: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    # Default bounds for the agenda search window, as day offsets from today.
+    # "from" = today minus this many days (past), "to" = today plus this many
+    # days (future). Used only when a search is active in the agenda view.
+    agenda_search_from_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    agenda_search_to_days: Mapped[int] = mapped_column(Integer, default=365, nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="settings")
