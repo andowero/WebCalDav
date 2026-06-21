@@ -566,9 +566,31 @@ def _shift_until(vevent: Any, delta: timedelta) -> None:
     _set_rrule(vevent, parts)
 
 
+def _shift_until_in_parts(parts: dict[str, Any], delta: timedelta) -> None:
+    """Shift an RRULE-parts dict's UNTIL bound by ``delta`` (no-op without UNTIL).
+
+    A ``thisfuture`` split spins off a new series whose DTSTART is the dragged
+    occurrence's new time but whose rule is inherited from the old master. If
+    that rule has an UNTIL bound, it must move with the new DTSTART or the tail
+    occurrences past the (stationary) UNTIL silently vanish — the same hazard
+    ``_shift_until`` guards against for whole-series moves.
+    """
+    if not delta or "UNTIL" not in parts:
+        return
+    try:
+        parts["UNTIL"] = [b + delta for b in parts["UNTIL"]]
+    except TypeError:
+        pass
+
+
+def _series_anchor(vevent: Any) -> Any:
+    """The component's recurrence anchor: DTSTART, or DUE for a due-only VTODO."""
+    return vevent.decoded("dtstart") if "dtstart" in vevent else vevent.decoded("due")
+
+
 def _count_through(vevent: Any, pivot: date | datetime, inc: bool = True) -> int:
     """Number of occurrences from the series start through the pivot."""
-    base = _as_dt(vevent.decoded("dtstart"))
+    base = _as_dt(_series_anchor(vevent))
     return len(rrulestr(_rrule_text(vevent), dtstart=base).between(base, _as_dt(pivot), inc=inc))
 
 
@@ -582,8 +604,8 @@ def _truncate_until(vevent: Any, pivot: date | datetime) -> None:
     """
     parts = _rrule_parts(vevent)
     parts.pop("COUNT", None)
-    dtstart = vevent.decoded("dtstart")
-    base = _as_dt(dtstart)
+    anchor = _series_anchor(vevent)
+    base = _as_dt(anchor)
     last = rrulestr(_rrule_text(vevent), dtstart=base).before(_as_dt(pivot), inc=False)
     until: date | datetime
     if last is None:
@@ -592,7 +614,7 @@ def _truncate_until(vevent: Any, pivot: date | datetime) -> None:
             until = pivot.astimezone(timezone.utc) - timedelta(seconds=1)
         else:
             until = pivot - timedelta(days=1)
-    elif _is_all_day(dtstart):
+    elif _is_all_day(anchor):
         until = last.date()
     else:
         until = last.astimezone(timezone.utc)
@@ -786,25 +808,122 @@ def _overrides(ical: Any, name: str = "VEVENT") -> list[Any]:
     ]
 
 
-def _shift_override(
-    ve: Any, delta: timedelta, new_uid: str | None = None, kind: _Kind = _EVENT
-) -> None:
-    """Relocate a detached override by ``delta`` (and optionally re-key its UID).
+def _resolve_pivot(
+    ical: Any, recurrence_id: str, master: Any, kind: _Kind = _EVENT
+) -> date | datetime:
+    """Map a request's ``recurrence_id`` to the canonical occurrence pivot.
 
-    Only the recurrence id and time span move; the override's own customized
-    text fields (summary/location/description) are intentionally left alone so a
-    scoped edit on a *sibling* occurrence never clobbers them.
+    Normally a client edits an occurrence by its stable RECURRENCE-ID. But a
+    client may instead send a *moved* occurrence's current anchor (start/due)
+    when it has lost track of the original RECURRENCE-ID. If that value matches
+    no RECURRENCE-ID but does match an existing override's current anchor, return
+    that override's RECURRENCE-ID — so the same occurrence is edited in place
+    rather than spawning a duplicate, orphaned override (one whose RECURRENCE-ID
+    lands on no series slot)."""
+    base_key = "dtstart" if "dtstart" in master else kind.end_key
+    candidate = _occurrence_dt(recurrence_id, master.decoded(base_key))
+    overrides = _overrides(ical, kind.name)
+    for ov in overrides:
+        try:
+            if ov.decoded("recurrence-id") == candidate:
+                return candidate
+        except Exception:
+            pass
+    for ov in overrides:
+        try:
+            anchor = (
+                ov.decoded("dtstart") if "dtstart" in ov
+                else ov.decoded(kind.end_key) if kind.end_key and kind.end_key in ov
+                else None
+            )
+            if anchor is not None and anchor == candidate:
+                rid: date | datetime = ov.decoded("recurrence-id")
+                return rid
+        except Exception:
+            pass
+    return candidate
+
+
+def _shift_override(
+    ve: Any,
+    delta: timedelta,
+    new_uid: str | None = None,
+    kind: _Kind = _EVENT,
+    time_too: bool = True,
+) -> None:
+    """Rebind a detached override by ``delta`` (and optionally re-key its UID).
+
+    The RECURRENCE-ID always moves so the override stays a valid exception of the
+    shifted series (otherwise it orphans or duplicates a regenerated slot). With
+    ``time_too`` the actual time span (DTSTART/DTEND/DUE) moves too — the override
+    follows the series. With ``time_too=False`` the time span stays put: the
+    occurrence is *pinned* at its customized time while the rest of the series
+    moves around it. The override's own text fields are always left untouched.
     """
     if new_uid is not None:
         ve.pop("uid", None)
         ve.add("uid", new_uid)
     if not delta:
         return
-    for key in ("recurrence-id", "dtstart", kind.end_key):
+    keys = ("recurrence-id", "dtstart", kind.end_key) if time_too else ("recurrence-id",)
+    for key in keys:
         if key in ve:
             val = ve.decoded(key)
             ve.pop(key, None)
             ve.add(key, val + delta)
+
+
+def _reset_override(
+    ov: Any,
+    fields: set[str],
+    title: str,
+    start: date | datetime | None,
+    end: date | datetime | None,
+    location: str | None,
+    description: str | None,
+    reminders: list[tuple[timedelta, str]] | None = None,
+    priority: int | None = None,
+    kind: _Kind = _EVENT,
+) -> None:
+    """Snap a detached override's selected *fields* back to the series values.
+
+    ``fields`` names which properties to reset (any of "time", "title",
+    "location", "description", "reminders", "priority"); unlisted ones stay
+    customized. Time resets to the occurrence's own RECURRENCE-ID slot (dropping
+    any pinned offset) and keeps the master's duration; the RECURRENCE-ID itself
+    never moves. ``start``/``end`` are the new master span (for the slot
+    duration) and the other args the new master field values.
+    """
+    def _replace(key: str, value: Any) -> None:
+        ov.pop(key, None)
+        if value is not None and value != "":
+            ov.add(key, value)
+
+    if "time" in fields and "recurrence-id" in ov:
+        rid = ov.decoded("recurrence-id")
+        ov.pop("dtstart", None)
+        ov.add("dtstart", rid)
+        if kind.end_key:
+            ov.pop(kind.end_key, None)
+            if start is not None and end is not None:
+                ov.add(kind.end_key, rid + (_as_dt(end) - _as_dt(start)))
+    if "title" in fields:
+        _replace("summary", title)
+    if "location" in fields:
+        _replace("location", location)
+    if "description" in fields:
+        _replace("description", description)
+    if "priority" in fields and kind is _TODO:
+        _set_priority(ov, priority)
+    if "reminders" in fields:
+        _apply_alarms(ov, reminders, kind.end_key)
+    try:
+        seq = int(ov.get("sequence", 0)) + 1
+    except (TypeError, ValueError):
+        seq = 1
+    ov.pop("sequence", None)
+    ov.add("sequence", seq)
+    _replace("last-modified", datetime.now(timezone.utc))
 
 
 def _pop_overrides(
@@ -1054,6 +1173,8 @@ def _sync_update_event(
     recurrence_id: str | None = None,
     rrule: dict[str, Any] | None = None,
     reminders: list[tuple[timedelta, str]] | None = None,
+    reset_overrides: bool = False,
+    reset_fields: list[str] | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -1080,16 +1201,18 @@ def _sync_update_event(
             anchor_start = start
             anchor_end = end
             if is_recurring and recurrence_id:
-                pivot = _occurrence_dt(recurrence_id, master.decoded("dtstart"))
+                pivot = _resolve_pivot(ical, recurrence_id, master, _EVENT)
                 delta = _as_dt(start) - _as_dt(pivot)
                 old_start = master.decoded("dtstart")
                 anchor_start = old_start + delta
                 anchor_end = anchor_start + (_as_dt(end) - _as_dt(start))
-                # A whole-series time shift moves every generated slot; carry the
-                # detached overrides along (times only) so they stay bound and
-                # keep their own customized fields rather than orphaning.
+                # A whole-series time shift moves every generated slot. Rebind the
+                # detached overrides to the new grid (RECURRENCE-ID only) but pin
+                # their actual time: a customized occurrence stays where the user
+                # put it instead of drifting with the series. Opt into moving them
+                # via the reset flow below.
                 for ov in _overrides(ical):
-                    _shift_override(ov, delta)
+                    _shift_override(ov, delta, time_too=False)
                 _shift_exdate(master, delta)
             _apply_fields(master, title, anchor_start, anchor_end, location, description)
             _apply_alarms(master, reminders)
@@ -1099,12 +1222,19 @@ def _sync_update_event(
                 # No new rule supplied (e.g. a drag): keep the existing RRULE but
                 # carry its UNTIL bound along with the shifted DTSTART.
                 _shift_until(master, delta)
+            if reset_overrides and reset_fields:
+                rf = set(reset_fields)
+                for ov in _overrides(ical):
+                    _reset_override(
+                        ov, rf, title, anchor_start, anchor_end,
+                        location, description, reminders,
+                    )
             event.data = ical.to_ical().decode("utf-8")
             event.save()
             return
 
         assert recurrence_id is not None  # scope != "all" implies a pivot (see above)
-        pivot = _occurrence_dt(recurrence_id, master.decoded("dtstart"))
+        pivot = _resolve_pivot(ical, recurrence_id, master, _EVENT)
 
         if scope == "this":
             # Detach just this occurrence as a RECURRENCE-ID override.
@@ -1117,17 +1247,30 @@ def _sync_update_event(
             return
 
         if scope == "thisfuture":
+            # The dragged occurrence becomes the new series' first occurrence and
+            # its edited fields are applied to the new master, so any pre-existing
+            # detached override at the pivot is superseded — drop it or it shadows
+            # the new anchor and the occurrence appears not to move.
+            _pop_overrides(ical, keep=lambda rid: _as_dt(rid) != _as_dt(pivot))
             base = _as_dt(master.decoded("dtstart"))
             new_rule = _build_rrule(rrule, start) if rrule else _remaining_rule_parts(master, pivot)
             if _as_dt(pivot) <= base:
                 # Pivot is the first occurrence: just rewrite the whole series.
                 # A start shift moves every slot, so carry the overrides with it.
+                if not rrule:
+                    _shift_until_in_parts(new_rule, start - base)
                 for ov in _overrides(ical):
-                    _shift_override(ov, start - base)
+                    _shift_override(ov, start - base, time_too=False)
                 _shift_exdate(master, start - base)
                 _apply_fields(master, title, start, end, location, description)
                 _apply_alarms(master, reminders)
                 _set_rrule(master, new_rule)
+                if reset_overrides and reset_fields:
+                    rf = set(reset_fields)
+                    for ov in _overrides(ical):
+                        _reset_override(
+                            ov, rf, title, start, end, location, description, reminders,
+                        )
                 event.data = ical.to_ical().decode("utf-8")
                 event.save()
                 return
@@ -1136,9 +1279,17 @@ def _sync_update_event(
             # Overrides at/after the pivot belong to that new series, rebased by
             # the start delta; ones before the pivot stay with the old master.
             new_uid = f"{uuid.uuid4()}@webcaldav"
+            if not rrule:
+                _shift_until_in_parts(new_rule, _as_dt(start) - _as_dt(pivot))
             migrated = _pop_overrides(ical, keep=lambda rid: _as_dt(rid) < _as_dt(pivot))
             for ov in migrated:
-                _shift_override(ov, _as_dt(start) - _as_dt(pivot), new_uid=new_uid)
+                _shift_override(ov, _as_dt(start) - _as_dt(pivot), new_uid=new_uid, time_too=False)
+            if reset_overrides and reset_fields:
+                rf = set(reset_fields)
+                for ov in migrated:
+                    _reset_override(
+                        ov, rf, title, start, end, location, description, reminders,
+                    )
             old_ex = _exdates(master)
             _set_exdates(master, [d for d in old_ex if _as_dt(d) < _as_dt(pivot)])
             migrated_ex = [d + (_as_dt(start) - _as_dt(pivot)) for d in old_ex if _as_dt(d) >= _as_dt(pivot)]
@@ -1176,6 +1327,8 @@ async def update_event(
     recurrence_id: str | None = None,
     rrule: dict[str, Any] | None = None,
     reminders: list[tuple[timedelta, str]] | None = None,
+    reset_overrides: bool = False,
+    reset_fields: list[str] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="update_event").time():
         try:
@@ -1196,6 +1349,8 @@ async def update_event(
                 recurrence_id,
                 rrule,
                 reminders,
+                reset_overrides,
+                reset_fields,
             )
         except EventNotFoundError:
             raise
@@ -1621,6 +1776,8 @@ def _sync_update_task(
     rrule: dict[str, Any] | None = None,
     reminders: list[tuple[timedelta, str]] | None = None,
     priority: int | None = None,
+    reset_overrides: bool = False,
+    reset_fields: list[str] | None = None,
 ) -> None:
     with caldav.DAVClient(url=account_url, username=username, password=password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -1642,8 +1799,7 @@ def _sync_update_task(
             anchor_start = start
             anchor_end = due
             if is_recurring and recurrence_id:
-                base_key = "dtstart" if "dtstart" in master else "due"
-                pivot = _occurrence_dt(recurrence_id, master.decoded(base_key))
+                pivot = _resolve_pivot(ical, recurrence_id, master, _TODO)
                 edited_anchor = start if "dtstart" in master else due
                 delta = _as_dt(edited_anchor) - _as_dt(pivot) if edited_anchor is not None else timedelta()
                 old_start = master.decoded("dtstart") if "dtstart" in master else None
@@ -1651,7 +1807,7 @@ def _sync_update_task(
                 anchor_start = old_start + delta if old_start is not None else None
                 anchor_end = old_due + delta if old_due is not None else None
                 for ov in _overrides(ical, "VTODO"):
-                    _shift_override(ov, delta, kind=_TODO)
+                    _shift_override(ov, delta, kind=_TODO, time_too=False)
                 _shift_exdate(master, delta)
             _apply_fields(master, title, anchor_start, anchor_end, location, description, kind=_TODO)
             _apply_alarms(master, reminders, _TODO.end_key)
@@ -1661,45 +1817,94 @@ def _sync_update_task(
                 _set_rrule(master, _build_rrule(rrule, rrule_anchor))
             elif is_recurring and recurrence_id:
                 _shift_until(master, delta)
+            if reset_overrides and reset_fields:
+                rf = set(reset_fields)
+                for ov in _overrides(ical, "VTODO"):
+                    _reset_override(
+                        ov, rf, title, anchor_start, anchor_end, location,
+                        description, reminders, priority, kind=_TODO,
+                    )
             todo.data = ical.to_ical().decode("utf-8")
             todo.save()
             return
 
         assert recurrence_id is not None
         base_key = "dtstart" if "dtstart" in master else "due"
-        pivot = _occurrence_dt(recurrence_id, master.decoded(base_key))
+        pivot = _resolve_pivot(ical, recurrence_id, master, _TODO)
 
         if scope == "this":
+            # _upsert_override rebuilds the occurrence from scratch; carry over a
+            # prior override's COMPLETED state so editing a done occurrence (e.g.
+            # dragging it) doesn't silently mark it undone.
+            status = None
+            completed_dt = None
+            prev = None
+            for ov in _overrides(ical, "VTODO"):
+                try:
+                    if ov.decoded("recurrence-id") == pivot:
+                        prev = ov
+                        break
+                except Exception:
+                    pass
+            if prev is not None and _task_completed(prev):
+                status = "COMPLETED"
+                completed_dt = (
+                    prev.decoded("completed")
+                    if "completed" in prev
+                    else datetime.now(timezone.utc)
+                )
             _upsert_override(
                 ical, master, pivot, title, start, due, location, description,
-                reminders=reminders, kind=_TODO,
+                reminders=reminders, kind=_TODO, status=status, completed=completed_dt,
             )
             todo.data = ical.to_ical().decode("utf-8")
             todo.save()
             return
 
         if scope == "thisfuture":
+            # Drop any pre-existing override at the pivot: the dragged occurrence
+            # becomes the new series' first occurrence, so a stale override there
+            # would shadow the new anchor and the occurrence appears not to move.
+            _pop_overrides(ical, keep=lambda rid: _as_dt(rid) != _as_dt(pivot), name="VTODO")
             base = _as_dt(master.decoded(base_key))
             edited_anchor = start if base_key == "dtstart" else due
             anchor = edited_anchor if edited_anchor is not None else pivot
             new_rule = _build_rrule(rrule, anchor) if rrule else _remaining_rule_parts(master, pivot)
             if _as_dt(pivot) <= base:
                 shift = _as_dt(anchor) - base
+                if not rrule:
+                    _shift_until_in_parts(new_rule, shift)
                 for ov in _overrides(ical, "VTODO"):
-                    _shift_override(ov, shift, kind=_TODO)
+                    _shift_override(ov, shift, kind=_TODO, time_too=False)
                 _shift_exdate(master, shift)
                 _apply_fields(master, title, start, due, location, description, kind=_TODO)
                 _apply_alarms(master, reminders, _TODO.end_key)
                 _set_priority(master, priority)
                 _set_rrule(master, new_rule)
+                if reset_overrides and reset_fields:
+                    rf = set(reset_fields)
+                    for ov in _overrides(ical, "VTODO"):
+                        _reset_override(
+                            ov, rf, title, start, due, location, description,
+                            reminders, priority, kind=_TODO,
+                        )
                 todo.data = ical.to_ical().decode("utf-8")
                 todo.save()
                 return
             new_uid = f"{uuid.uuid4()}@webcaldav"
             shift = _as_dt(anchor) - _as_dt(pivot)
+            if not rrule:
+                _shift_until_in_parts(new_rule, shift)
             migrated = _pop_overrides(ical, keep=lambda rid: _as_dt(rid) < _as_dt(pivot), name="VTODO")
             for ov in migrated:
-                _shift_override(ov, shift, new_uid=new_uid, kind=_TODO)
+                _shift_override(ov, shift, new_uid=new_uid, kind=_TODO, time_too=False)
+            if reset_overrides and reset_fields:
+                rf = set(reset_fields)
+                for ov in migrated:
+                    _reset_override(
+                        ov, rf, title, start, due, location, description,
+                        reminders, priority, kind=_TODO,
+                    )
             old_ex = _exdates(master)
             _set_exdates(master, [d for d in old_ex if _as_dt(d) < _as_dt(pivot)])
             migrated_ex = [d + shift for d in old_ex if _as_dt(d) >= _as_dt(pivot)]
@@ -1733,13 +1938,15 @@ async def update_task(
     rrule: dict[str, Any] | None = None,
     reminders: list[tuple[timedelta, str]] | None = None,
     priority: int | None = None,
+    reset_overrides: bool = False,
+    reset_fields: list[str] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="update_task").time():
         try:
             await asyncio.to_thread(
                 _sync_update_task, account_url, username, password, calendar_url,
                 uid, title, start, due, location, description, scope, recurrence_id,
-                rrule, reminders, priority,
+                rrule, reminders, priority, reset_overrides, reset_fields,
             )
         except EventNotFoundError:
             raise
@@ -1844,16 +2051,31 @@ def _sync_set_task_status(
         # Recurring: RFC-advance. Completing the current occurrence writes a
         # COMPLETED override for that instance and leaves the master series, so
         # the next occurrence keeps showing. Un-completing drops the override.
-        base_key = "dtstart" if "dtstart" in master else "due"
-        pivot = _occurrence_dt(recurrence_id, master.decoded(base_key))
-        # Remove any existing override at the pivot first.
+        pivot = _resolve_pivot(ical, recurrence_id, master, _TODO)
+        # An override may already exist at the pivot (e.g. the occurrence's time
+        # was moved via a scope="this" edit). Toggle its status in place so the
+        # moved times/fields survive instead of being rebuilt from the master.
+        existing = None
         for comp in _overrides(ical, "VTODO"):
             try:
                 if comp.decoded("recurrence-id") == pivot:
-                    ical.subcomponents.remove(comp)
+                    existing = comp
+                    break
             except Exception:
                 pass
-        if completed:
+        if existing is not None:
+            occ_start, occ_due = _occurrence_span(master, pivot)
+            moved = (
+                (existing.decoded("dtstart") if "dtstart" in existing else None) != occ_start
+                or (existing.decoded("due") if "due" in existing else None) != occ_due
+            )
+            if not completed and not moved:
+                # Status-only override (never moved): un-completing returns the
+                # occurrence to the clean master series.
+                ical.subcomponents.remove(existing)
+            else:
+                _set_status(existing, completed)
+        elif completed:
             occ_start, occ_due = _occurrence_span(master, pivot)
             _upsert_override(
                 ical, master, pivot, str(master.get("summary") or ""),

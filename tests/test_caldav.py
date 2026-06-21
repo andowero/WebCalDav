@@ -250,6 +250,20 @@ END:VALARM
 END:VEVENT
 END:VCALENDAR"""
 
+# UNTIL-bounded series: four occurrences Jun 12/19/26, Jul 3 (UNTIL Jul 3 noon).
+_RECUR_UNTIL4_EVENT = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//webcaldav-test//EN
+BEGIN:VEVENT
+UID:recur-until4
+DTSTAMP:20260101T000000Z
+DTSTART:20260612T090000Z
+DTEND:20260612T093000Z
+RRULE:FREQ=WEEKLY;UNTIL=20260703T120000Z
+SUMMARY:Bounded weekly
+END:VEVENT
+END:VCALENDAR"""
+
 # UNTIL-bounded series: two occurrences, Jun 16 and Jun 23 (UNTIL Jun 24).
 _RECUR_UNTIL_EVENT = """BEGIN:VCALENDAR
 VERSION:2.0
@@ -504,6 +518,37 @@ async def test_update_recurring_this_twice(edit_calendar):
     assert len(solo2) == 1 and solo2[0][0].startswith("2026-06-19T13:00:00")
 
 
+async def test_update_recurring_this_twice_moved_pivot(edit_calendar):
+    """Re-editing a moved occurrence must not spawn an orphan override even when
+    the client pivots on the occurrence's already-MOVED start instead of its
+    stable RECURRENCE-ID. The backend maps the moved anchor back to the existing
+    override (matches the task-side _resolve_pivot fix)."""
+    base_url, url = edit_calendar
+    # First "this" edit: detach Jun 19, move it to 11:00.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo", all_day=False,
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+    )
+    # Second "this" edit pivots on the MOVED start (11:00), not the stable RID.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo2", all_day=False,
+        start=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 13, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this",
+        recurrence_id="2026-06-19T11:00:00+00:00",
+    )
+    view = await _recur_view(base_url, url)
+    # No orphan: still four occurrences, the detached one now at 13:00.
+    assert len(view) == 4
+    assert {v[1] for v in view} == {"Weekly sync", "Solo2"}
+    solo2 = [v for v in view if v[1] == "Solo2"]
+    assert len(solo2) == 1 and solo2[0][0].startswith("2026-06-19T13:00:00")
+
+
 async def test_update_recurring_thisfuture(edit_calendar):
     base_url, url = edit_calendar
     start = datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc)
@@ -520,6 +565,146 @@ async def test_update_recurring_thisfuture(edit_calendar):
     future = sorted(x[0][:10] for x in view if x[1] == "Future")
     assert future == ["2026-06-19", "2026-06-26", "2026-07-03"]
     assert all(x[0][11:16] == "11:00" for x in view if x[1] == "Future")
+
+
+async def _make_solo_override(base_url, url):
+    """Detach Jun 19 as a customized override: title "Solo", moved to 11:00."""
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Solo", all_day=False,
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+    )
+
+
+async def test_update_recurring_all_reset_time_only(edit_calendar):
+    """reset + time-only change: override time snaps to its series slot, the
+    customized title survives."""
+    base_url, url = edit_calendar
+    await _make_solo_override(base_url, url)
+    # Whole-series time shift +1h (pivot a non-overridden occurrence), title kept.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Weekly sync", all_day=False,
+        start=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 12, 10, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="all",
+        recurrence_id="2026-06-12T09:00:00+00:00",
+        reset_overrides=True, reset_fields=["time"],
+    )
+    view = await _recur_view(base_url, url)
+    assert len(view) == 4
+    assert {v[1] for v in view} == {"Weekly sync", "Solo"}
+    solo = [v for v in view if v[1] == "Solo"]
+    # Time reset to the series 10:00 slot; title still "Solo".
+    assert len(solo) == 1 and solo[0][0].startswith("2026-06-19T10:00:00")
+    assert all(v[0][11:16] == "10:00" for v in view)
+
+
+async def test_update_recurring_all_reset_title_only(edit_calendar):
+    """reset + title-only change: override title resets, its customized time
+    (11:00) is kept."""
+    base_url, url = edit_calendar
+    await _make_solo_override(base_url, url)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Renamed", all_day=False,
+        start=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 12, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="all",
+        recurrence_id="2026-06-12T09:00:00+00:00",
+        reset_overrides=True, reset_fields=["title"],
+    )
+    view = await _recur_view(base_url, url)
+    assert len(view) == 4
+    assert {v[1] for v in view} == {"Renamed"}
+    jun19 = [v for v in view if v[0].startswith("2026-06-19")]
+    assert len(jun19) == 1 and jun19[0][0][11:16] == "11:00"
+
+
+async def test_update_recurring_all_reset_time_and_title(edit_calendar):
+    """reset + time & title change: both reset on the override."""
+    base_url, url = edit_calendar
+    await _make_solo_override(base_url, url)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Renamed", all_day=False,
+        start=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 12, 10, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="all",
+        recurrence_id="2026-06-12T09:00:00+00:00",
+        reset_overrides=True, reset_fields=["time", "title"],
+    )
+    view = await _recur_view(base_url, url)
+    assert len(view) == 4
+    assert {v[1] for v in view} == {"Renamed"}
+    assert all(v[0][11:16] == "10:00" for v in view)
+
+
+async def test_update_recurring_all_no_reset_keeps_override(edit_calendar):
+    """No reset: the customized occurrence is pinned — it keeps both its title and
+    its absolute time while the rest of the series shifts around it."""
+    base_url, url = edit_calendar
+    await _make_solo_override(base_url, url)
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Renamed", all_day=False,
+        start=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 12, 10, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="all",
+        recurrence_id="2026-06-12T09:00:00+00:00",
+    )
+    view = await _recur_view(base_url, url)
+    assert len(view) == 4
+    assert {v[1] for v in view} == {"Renamed", "Solo"}
+    solo = [v for v in view if v[1] == "Solo"]
+    # Pinned: stays at its customized 11:00 (NOT dragged to 12:00); the series
+    # moved to 10:00 around it.
+    assert len(solo) == 1 and solo[0][0].startswith("2026-06-19T11:00:00")
+    assert all(v[0][11:16] == "10:00" for v in view if v[1] == "Renamed")
+
+
+async def test_update_recurring_thisfuture_reset(edit_calendar):
+    """thisfuture + reset: a migrated (future) override has its title reset while
+    its pinned time is kept; a pre-pivot override is left untouched."""
+    base_url, url = edit_calendar
+    # Pre-pivot override (Jun 19) and a future override (Jul 3), both at 11:00.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="SoloEarly", all_day=False,
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+    )
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="SoloLate", all_day=False,
+        start=datetime(2026, 7, 3, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 7, 3, 11, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this",
+        recurrence_id="2026-07-03T09:00:00+00:00",
+    )
+    # Split at Jun 26, rename future to "Future" (no time change), reset titles.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Future", all_day=False,
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="thisfuture",
+        recurrence_id="2026-06-26T09:00:00+00:00",
+        reset_overrides=True, reset_fields=["title"],
+    )
+    view = await _recur_view(base_url, url)
+    # Pre-pivot override untouched.
+    early = [v for v in view if v[0].startswith("2026-06-19")]
+    assert len(early) == 1 and early[0][1] == "SoloEarly" and early[0][0][11:16] == "11:00"
+    # Migrated override: title reset to "Future", pinned 11:00 kept.
+    late = [v for v in view if v[0].startswith("2026-07-03")]
+    assert len(late) == 1 and late[0][1] == "Future" and late[0][0][11:16] == "11:00"
+    # Jun 26 follows the new series at 09:00.
+    jun26 = [v for v in view if v[0].startswith("2026-06-26")]
+    assert len(jun26) == 1 and jun26[0][1] == "Future" and jun26[0][0][11:16] == "09:00"
 
 
 async def test_thisfuture_split_until_survives_all_rename(edit_calendar):
@@ -591,32 +776,116 @@ async def test_update_recurring_thisfuture_after_this_override(edit_calendar):
     assert len(view) == 4  # no duplicate
 
 
-async def test_update_recurring_all_drag_after_this_override(edit_calendar):
-    """A whole-series drag must move a prior override too, without clobbering it."""
+async def test_thisfuture_after_this_moves_pivot(edit_calendar):
+    """Splitting an occurrence that already has a "this" time-move must move it.
+
+    Bug: move Jun 19 to 11:00 ("this"), then drag the same occurrence to 13:00
+    ("thisfuture"). The stale 11:00 override shadowed the new series anchor, so
+    the pivot stayed at 11:00 while only future slots moved to 13:00.
+    """
     base_url, url = edit_calendar
+    # 1. Detach Jun 19 to 11:00.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Weekly sync", all_day=False,
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="this", recurrence_id=_PIVOT,
+    )
+    # 2. Drag the (now 11:00) occurrence to 13:00, this+future. The client sends
+    #    the moved anchor as recurrence_id; _resolve_pivot maps it back to 09:00.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-event",
+        title="Weekly sync", all_day=False,
+        start=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 19, 13, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="thisfuture",
+        recurrence_id="2026-06-19T11:00:00+00:00",
+    )
+    view = await _recur_view(base_url, url)
+    assert len(view) == 4  # no orphan, no vanish
+    jun19 = [v for v in view if v[0][:10] == "2026-06-19"]
+    assert len(jun19) == 1
+    # The pivot moved to 13:00, not stuck at the prior 11:00 override.
+    assert jun19[0][0][11:16] == "13:00"
+
+
+async def test_thisfuture_twice_until_series_keeps_all(edit_calendar):
+    """Two this+future splits forward on an UNTIL series keep every occurrence.
+
+    Bug (UNTIL-bounded only): split Jun 26 forward (+1d), then split the past
+    Jun 19 forward (+1d). The spun-off series inherited the old master's UNTIL
+    unshifted, so the moved tail fell past the stationary bound and vanished.
+    """
+    import caldav
+
+    base_url, url = edit_calendar
+    with caldav.DAVClient(url=base_url, username=USER, password=PASSWORD) as client:
+        caldav.Calendar(client=client, url=url).save_event(_RECUR_UNTIL4_EVENT)
+
+    # 1. Split Jun 26 forward by +1d -> Jun 27. New series carries Jul 3 -> Jul 4.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-until4",
+        title="Bounded weekly", all_day=False,
+        start=datetime(2026, 6, 27, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 27, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="thisfuture",
+        recurrence_id="2026-06-26T09:00:00+00:00",
+    )
+    # 2. Split the past Jun 19 forward by +1d -> Jun 20 (operates on old master,
+    #    now capped at UNTIL Jun 19). The new series UNTIL must shift +1d too.
+    await update_event(
+        base_url, USER, PASSWORD, url, "recur-until4",
+        title="Bounded weekly", all_day=False,
+        start=datetime(2026, 6, 20, 9, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 20, 9, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="thisfuture",
+        recurrence_id="2026-06-19T09:00:00+00:00",
+    )
+    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
+    # Ignore the fixture's unrelated recur-event (COUNT=4) sharing the calendar.
+    dates = sorted(
+        e["start"][:10] for e in events
+        if e["start"][:10] >= "2026-06-12" and e["id"] != "recur-event"
+    )
+    # Jun 12 (old master), Jun 20 (step 2), Jun 27 + Jul 4 (step 1's series).
+    assert dates == ["2026-06-12", "2026-06-20", "2026-06-27", "2026-07-04"]
+
+
+async def test_update_recurring_all_drag_pins_prior_override(edit_calendar):
+    """A whole-series time drag pins a prior override: it stays at its customized
+    time (rebinding its RECURRENCE-ID to the new grid) instead of drifting, and
+    never duplicates a regenerated slot."""
+    base_url, url = edit_calendar
+    # Detach Jun 26 to a customized 11:00.
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False,
-        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 26, 11, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 26, 11, 30, tzinfo=timezone.utc),
         location=None, description=None, scope="this",
         recurrence_id="2026-06-26T09:00:00+00:00",
     )
-    # Drag the whole series +7d (click Jun 19, drop on Jun 26) and rename.
+    # Drag the whole series +1h (09:00 -> 10:00) and rename. No reset requested.
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Renamed", all_day=False,
-        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
-        location=None, description=None, scope="all", recurrence_id=_PIVOT,
+        start=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 6, 12, 10, 30, tzinfo=timezone.utc),
+        location=None, description=None, scope="all",
+        recurrence_id="2026-06-12T09:00:00+00:00",
     )
     view = await _recur_view(base_url, url)
     assert len(view) == 4  # no duplicate
     days = [v[0][:10] for v in view]
     assert len(set(days)) == len(days)  # one event per day
-    # The override followed the +7d shift (Jun 26 -> Jul 3) and kept its title.
-    jul3 = [v for v in view if v[0][:10] == "2026-07-03"]
-    assert len(jul3) == 1 and jul3[0][1] == "Solo"
+    # The override stayed pinned at Jun 26 11:00 (not dragged to 10:00).
+    jun26 = [v for v in view if v[0][:10] == "2026-06-26"]
+    assert len(jun26) == 1 and jun26[0][1] == "Solo" and jun26[0][0][11:16] == "11:00"
+    # Every other occurrence moved with the series to 10:00.
+    assert all(v[0][11:16] == "10:00" for v in view if v[1] == "Renamed")
 
 
 async def test_update_recurring_two_this_overrides_isolated(edit_calendar):

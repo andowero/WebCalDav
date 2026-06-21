@@ -20,6 +20,25 @@
 
 - None currently open.
 
+## Recent additions
+
+### Reset customized occurrences on series edits (2026-06-20)
+- Editing a recurring event/task with scope "All" or "This and future" now offers
+  an opt-in "Reset customized events/tasks" checkbox. When set, only the
+  properties the edit changed are reset on individually edited occurrences
+  (`RECURRENCE-ID` overrides) back to the series values; unchanged properties stay
+  customized. Driven by `reset_overrides`/`reset_fields` and the new
+  `_reset_override` helper in `caldav_client.py`. Modal lists the affected
+  properties (EN + CS).
+
+## Recent fixes
+
+### Task drag/resize + moved-occurrence completion (2026-06-20)
+- Tasks are now drag-movable and edge-resizable in grid views (recurring tasks
+  prompt for scope); undated "today" tasks remain fixed.
+- Completing a moved recurring occurrence keeps its edited time (the
+  `RECURRENCE-ID` override is toggled in place, not rebuilt from the series).
+
 ## What has been accomplished
 
 ### MVP — secure login + dummy calendar (2026-05-26)

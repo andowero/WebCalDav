@@ -27,6 +27,7 @@ from ..session import SessionEntry
 # so both kinds share one validation and conversion path.
 from .events import (
     _RECUR_SCOPES,
+    _RESET_FIELDS,
     _TIME_RE,
     RecurrenceRule,
     Reminder,
@@ -56,9 +57,12 @@ class TaskUpdate(BaseModel):
     recurrence_id: str | None = None
     recurrence: RecurrenceRule | None = None
     reminders: list[Reminder] | None = Field(default=None, max_length=10)
+    reset_overrides: bool = False
+    reset_fields: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check(self) -> "TaskUpdate":
+        self.reset_fields = [f for f in self.reset_fields if f in _RESET_FIELDS]
         for r in self.reminders or []:
             if self.all_day:
                 if r.unit not in ("days", "weeks"):
@@ -268,6 +272,8 @@ async def put_task(
                 rrule=rrule,
                 reminders=_reminder_deltas(body.reminders, body.all_day),
                 priority=body.priority,
+                reset_overrides=body.reset_overrides,
+                reset_fields=body.reset_fields,
             )
     except EventNotFoundError:
         raise HTTPException(status_code=404, detail="Task not found")

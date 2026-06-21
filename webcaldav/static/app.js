@@ -2288,6 +2288,8 @@
       recurrenceId: props.recurrenceId || null,
       completed: !!props.completed,
       isNew: false,
+      // Baseline for the changed-property diff used by "reset customized".
+      original: snapshotEditFields(),
     };
 
     // Share button: only for an existing, calendar-backed item, when enabled and
@@ -2421,6 +2423,42 @@
     if (_fcCalendar) _fcCalendar.unselect();
   }
 
+  // Snapshot the editable modal fields in a comparable shape. Taken once when the
+  // modal opens and again at save time; the diff (computeChangedFields) drives the
+  // "reset customized occurrences" property list.
+  function snapshotEditFields() {
+    const pad = (n) => String(n).padStart(2, '0');
+    const t = (prefix) => {
+      const { h24, m } = getTimeParts(prefix);
+      return `${pad(h24)}:${pad(m)}`;
+    };
+    const allDay = document.getElementById('ev-allday').checked;
+    const startDate = getDateFieldValue('start');
+    const endDate = getDateFieldValue('end');
+    return {
+      title: document.getElementById('ev-name').value.trim(),
+      location: document.getElementById('ev-location').value,
+      description: document.getElementById('ev-notes').value,
+      priority: document.getElementById('ev-priority').value,
+      allDay,
+      start: allDay ? startDate : `${startDate}T${t('start')}`,
+      end: allDay ? endDate : `${endDate}T${t('end')}`,
+      reminders: JSON.stringify(collectReminders()),
+    };
+  }
+
+  function computeChangedFields(orig, cur, isTask) {
+    const changed = [];
+    if (!orig) return changed;
+    if (cur.allDay !== orig.allDay || cur.start !== orig.start || cur.end !== orig.end) changed.push('time');
+    if (cur.title !== orig.title) changed.push('title');
+    if (cur.location !== orig.location) changed.push('location');
+    if (cur.description !== orig.description) changed.push('description');
+    if (isTask && cur.priority !== orig.priority) changed.push('priority');
+    if (cur.reminders !== orig.reminders) changed.push('reminders');
+    return changed;
+  }
+
   async function saveEvent() {
     if (!_currentEvent || !_currentEvent.editable) return;
     hideError('ev-error');
@@ -2468,11 +2506,16 @@
 
     // Editing a recurring event: pick which occurrences the change applies to.
     if (!_currentEvent.isNew && _currentEvent.recurring) {
-      const scope = await chooseScope(tr('dyn.what_to_change'), tr('dyn.noun_event'));
+      const changed = computeChangedFields(_currentEvent.original, snapshotEditFields(), false);
+      const scope = await chooseScope(tr('dyn.what_to_change'), tr('dyn.noun_event'), changed);
       if (!scope) return;
       body.scope = scope;
       const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
       if (pivot) body.recurrence_id = pivot;
+      if (_scopeReset && changed.length && scope !== 'this') {
+        body.reset_overrides = true;
+        body.reset_fields = changed;
+      }
     }
 
     const btn = document.getElementById('btn-event-save');
@@ -2520,11 +2563,16 @@
     if (endDate) body.due = allDay ? endDate : `${endDate}T${timeStr('end')}:00`;
 
     if (!_currentEvent.isNew && _currentEvent.recurring) {
-      const scope = await chooseScope(tr('dyn.what_to_change'), tr('dyn.noun_task'));
+      const changed = computeChangedFields(_currentEvent.original, snapshotEditFields(), true);
+      const scope = await chooseScope(tr('dyn.what_to_change'), tr('dyn.noun_task'), changed);
       if (!scope) return;
       body.scope = scope;
       const pivot = _currentEvent.recurrenceId || _currentEvent.rawStart;
       if (pivot) body.recurrence_id = pivot;
+      if (_scopeReset && changed.length && scope !== 'this') {
+        body.reset_overrides = true;
+        body.reset_fields = changed;
+      }
     }
 
     const btn = document.getElementById('btn-event-save');
@@ -2760,12 +2808,39 @@
 
   let _scopeResolve = null;
 
-  function chooseScope(text, noun) {
+  // Reset-customized choice from the last scope pick (read by the edit flows
+  // right after chooseScope resolves). Only the "all"/"thisfuture" buttons carry
+  // a checkbox; everything else leaves this false.
+  let _scopeReset = false;
+
+  // changedFields (optional): the properties this edit changed. When given, the
+  // "reset customized occurrences" checkboxes + info text are shown next to the
+  // all/thisfuture buttons; omit it (delete/drag flows) to hide them.
+  function chooseScope(text, noun, changedFields) {
     const n = noun || tr('dyn.noun_event');
     document.getElementById('scope-title').textContent = text;
     document.querySelector('#scope-modal [data-scope="this"]').textContent = tr('dyn.scope_this', { noun: n });
     document.querySelector('#scope-modal [data-scope="thisfuture"]').textContent = tr('dyn.scope_thisfuture', { noun: n });
     document.querySelector('#scope-modal [data-scope="all"]').textContent = tr('dyn.scope_all', { noun: n });
+    _scopeReset = false;
+    const rows = document.querySelectorAll('#scope-modal .scope-reset');
+    const info = document.getElementById('scope-reset-info');
+    const fields = Array.isArray(changedFields) ? changedFields : [];
+    if (fields.length) {
+      const props = fields.map((f) => tr('dyn.prop_' + f)).join(', ');
+      rows.forEach((row) => {
+        row.style.display = '';
+        const cb = row.querySelector('input[type=checkbox]');
+        if (cb) cb.checked = false;
+        const span = row.querySelector('span');
+        if (span) span.textContent = tr('dyn.scope_reset_customized', { noun: n });
+      });
+      info.textContent = tr('dyn.scope_reset_info', { noun: n, props });
+      info.style.display = '';
+    } else {
+      rows.forEach((row) => { row.style.display = 'none'; });
+      info.style.display = 'none';
+    }
     show('scope-overlay');
     show('scope-modal');
     return new Promise((resolve) => { _scopeResolve = resolve; });
@@ -2782,7 +2857,12 @@
 
   function initScopeChooser() {
     document.querySelectorAll('#scope-modal [data-scope]').forEach((btn) => {
-      btn.addEventListener('click', () => closeScope(btn.getAttribute('data-scope')));
+      btn.addEventListener('click', () => {
+        const scope = btn.getAttribute('data-scope');
+        const cb = document.getElementById('scope-reset-' + scope);
+        _scopeReset = !!(cb && cb.checked);
+        closeScope(scope);
+      });
     });
     document.getElementById('scope-cancel').addEventListener('click', () => closeScope(null));
     document.getElementById('scope-overlay').addEventListener('click', () => closeScope(null));
@@ -2816,6 +2896,41 @@
     return body;
   }
 
+  // Build a PUT body for a dragged/resized task. Like eventToBody but emits
+  // start/due (not start/end) and only the anchors the task actually has, so a
+  // DUE-only or DTSTART-only task keeps its single anchor.
+  function taskToBody(event) {
+    const props = event.extendedProps || {};
+    const body = {
+      calendar_id: props.calendarId,
+      title: event.title || '',
+      all_day: event.allDay,
+      location: props.location || '',
+      description: props.description || '',
+      priority: props.priority || 0,
+      timezone: effectiveTz(),
+    };
+    const hasStart = props.rawStart != null;
+    const hasDue = props.rawDue != null;
+    if (hasStart && hasDue) {
+      if (event.allDay) {
+        // FC end is exclusive; a task DUE is stored inclusive (− 1 day).
+        body.start = event.startStr.slice(0, 10);
+        body.due = event.endStr ? shiftDateStr(event.endStr, -1) : body.start;
+      } else {
+        body.start = event.startStr;
+        body.due = event.endStr || event.startStr;
+      }
+    } else {
+      // Single anchor: the grid event start IS that anchor (DUE if present, else
+      // DTSTART — matching the server's _build_task_event).
+      const val = event.allDay ? event.startStr.slice(0, 10) : event.startStr;
+      if (hasDue) body.due = val;
+      else body.start = val;
+    }
+    return body;
+  }
+
   // Persist a drag (eventDrop) or resize (eventResize); revert on failure.
   async function onEventChange(info) {
     const props = info.event.extendedProps || {};
@@ -2823,9 +2938,16 @@
       info.revert();
       return;
     }
-    const body = eventToBody(info.event);
+    const isTask = !!props.isTask;
+    const body = isTask ? taskToBody(info.event) : eventToBody(info.event);
     if (props.recurrence) {
-      const scope = await chooseScope(tr('dyn.what_to_change'), tr(props.isTask ? 'dyn.noun_task' : 'dyn.noun_event'));
+      // A drag/resize only changes the time, so that is the lone reset target.
+      const changed = ['time'];
+      const scope = await chooseScope(
+        tr('dyn.what_to_change'),
+        tr(props.isTask ? 'dyn.noun_task' : 'dyn.noun_event'),
+        changed,
+      );
       if (!scope) { info.revert(); return; }
       body.scope = scope;
       // recurrence_id is the pivot: a detached override's stable RECURRENCE-ID
@@ -2835,9 +2957,14 @@
         props.rawStart ||
         (info.oldEvent && info.oldEvent.start ? info.oldEvent.start.toISOString() : null);
       if (pivot) body.recurrence_id = pivot;
+      if (_scopeReset && scope !== 'this') {
+        body.reset_overrides = true;
+        body.reset_fields = changed;
+      }
     }
     try {
-      await apiPut(`/events/${encodeURIComponent(info.event.id)}`, body);
+      const path = isTask ? '/tasks/' : '/events/';
+      await apiPut(`${path}${encodeURIComponent(info.event.id)}`, body);
       // Reload so scope splits / overrides (new resources) render correctly.
       refreshViews();
     } catch (err) {
@@ -3391,11 +3518,17 @@
     const completedMode = s.completed_task_display || 'hidden';
     const undatedMode = s.undated_task_display || 'agenda';
     const todayStr = luxon.DateTime.now().setZone(effectiveTz()).toFormat('yyyy-MM-dd');
+    const shareRO = SHARE_MODE && SHARE_CFG && SHARE_CFG.mode !== 'rw';
     const out = [];
     data.forEach((e) => {
       const p = e.extendedProps || {};
-      // Tasks aren't drag/resize editable; left-click still opens the modal.
-      e.editable = false;
+      // Dated tasks drag (move start/due) and resize like events; undated tasks
+      // parked on "today" stay fixed (a drag would assign an arbitrary date).
+      const canEdit = !shareRO && p.calendarId != null && !p.undated;
+      e.editable = canEdit;
+      e.startEditable = canEdit;
+      // Only spanning tasks (both DTSTART and DUE) get draggable edges.
+      e.durationEditable = canEdit && p.rawStart != null && p.rawDue != null;
       if (p.completed && completedMode === 'hidden') return;
       if (p.undated) {
         if (undatedMode !== 'today') return; // agenda-only → keep off the grid

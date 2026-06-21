@@ -2,6 +2,73 @@
 
 ## Unreleased — MVP
 
+### Changed — customized occurrences are now pinned on series edits (2026-06-20)
+- **Editing/dragging a recurring series no longer drags individually edited
+  occurrences along.** Previously a whole-series ("all") or "this and future"
+  time change shifted every detached `RECURRENCE-ID` override by the same delta,
+  so a pinned occurrence silently moved. Now overrides keep their absolute time
+  (and all other properties) — their `RECURRENCE-ID` is rebound to the new grid
+  so they stay valid exceptions (no duplicate/orphan) while staying put.
+  Implemented via `_shift_override(..., time_too=False)` in `caldav_client.py`.
+
+### Added — reset customized occurrences on series edits (2026-06-20)
+- **The scope chooser now offers "Reset customized events/tasks"** next to the
+  "All" and "This and future" buttons when editing or **dragging** a recurring
+  item. When checked, the properties the edit actually changed are reset on
+  individually edited occurrences (detached `RECURRENCE-ID` overrides) back to the
+  series values; properties the user did **not** change stay customized. Time
+  resets to the occurrence's own series slot (dropping any pinned offset); title,
+  location, description, reminders, and (tasks) priority reset to the new series
+  values. Unchecked keeps the customized occurrences pinned (see above).
+- The modal lists exactly which properties will be reset (derived from a
+  before/after diff of the edit on the frontend; a drag/resize lists "Time") and
+  is internationalized (English + Czech).
+- Backend: new `_reset_override` helper in `caldav_client.py`, wired into the
+  `all`/`thisfuture` branches of `_sync_update_event` and `_sync_update_task`;
+  driven by `reset_overrides`/`reset_fields` on `EventUpdate`/`TaskUpdate`.
+
+### Fixed — task drag + completion of moved occurrences (2026-06-20)
+- **Tasks are now draggable and resizable** in the month/week/day grid views,
+  matching events: a drag moves DTSTART/DUE, and tasks that span (both DTSTART
+  and DUE) have draggable edges. Recurring tasks prompt for scope as events do.
+  Undated tasks parked on "today" stay fixed. The drag handler routes task
+  changes to `PUT /tasks/` with a start/**due** body (`taskToBody` in
+  `app.js`).
+- **Marking a moved recurring task occurrence done no longer reverts its time.**
+  `_sync_set_task_status` now toggles an existing `RECURRENCE-ID` override in
+  place instead of rebuilding it from the master series, so a `scope="this"`
+  time edit survives completion (and un-completion).
+- **Editing a done recurring occurrence no longer marks it undone.** A
+  `scope="this"` edit (e.g. dragging a completed occurrence) now carries the
+  prior override's COMPLETED state into the rebuilt override.
+- **Re-dragging an already-moved occurrence no longer spawns duplicate/orphan
+  overrides** (which surfaced as a stuck occurrence plus a spurious "new
+  series"). A pivot resolver (`_resolve_pivot`) maps a request's
+  `recurrence_id` back to an existing override's stable RECURRENCE-ID when the
+  client sends the occurrence's already-moved anchor instead, so repeated edits
+  update the same occurrence in place. The same `_resolve_pivot` guard is
+  applied to recurring **events** (`_sync_update_event`), which had the
+  identical latent orphan-override bug.
+
+### Fixed — "this and future" split edge cases (2026-06-20)
+- **Splitting an occurrence that already had a "this only" time-move now moves
+  it.** Promoting a moved occurrence to `scope="thisfuture"` left the stale
+  single-occurrence override at the pivot, which shadowed the new series' first
+  occurrence — the dragged event appeared stuck at its old time while only the
+  future occurrences moved. The split now drops any override at the pivot (the
+  occurrence becomes the new series' anchor) in both `_sync_update_event` and
+  `_sync_update_task`.
+- **A second forward "this and future" split on an UNTIL-bounded series no
+  longer drops an occurrence.** The spun-off series inherited the old master's
+  `UNTIL` bound unshifted; moving the series forward pushed its tail past the
+  stationary bound, so an occurrence silently vanished (only on `UNTIL`-bounded
+  series, never `COUNT`/infinite — hence intermittent). The new series' `UNTIL`
+  now shifts with the drag delta (`_shift_until_in_parts`), mirroring the
+  whole-series-drag guard.
+- Fixed a latent crash in the task `thisfuture` split for **due-only** VTODOs:
+  `_count_through`/`_truncate_until` assumed a `DTSTART`; they now fall back to
+  `DUE` via `_series_anchor`.
+
 ### Added — calendar sharing (2026-06-19)
 - **Share links and `.ics` export** for three scopes: a **single item**
   (event/task/journal), a **grid period** (month/week/day), and an **agenda

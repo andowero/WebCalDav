@@ -158,6 +158,7 @@ async def get_events(
 
 
 _RECUR_SCOPES = {"all", "this", "thisfuture"}
+_RESET_FIELDS = {"time", "title", "location", "description", "reminders", "priority"}
 
 
 class RecurrenceRule(BaseModel):
@@ -231,9 +232,15 @@ class EventUpdate(BaseModel):
     # None/absent = leave the event's alarms untouched (drag/resize updates);
     # [] = remove all editable alarms; otherwise the full replacement set.
     reminders: list[Reminder] | None = Field(default=None, max_length=10)
+    # When editing "all"/"thisfuture": also reset the listed properties on
+    # individually edited occurrences (detached overrides) back to the series.
+    # reset_fields names which: any of time/title/location/description/reminders.
+    reset_overrides: bool = False
+    reset_fields: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_reminders(self) -> "EventUpdate":
+        self.reset_fields = [f for f in self.reset_fields if f in _RESET_FIELDS]
         for r in self.reminders or []:
             if self.all_day:
                 if r.unit not in ("days", "weeks"):
@@ -482,6 +489,8 @@ async def put_event(
                 recurrence_id=body.recurrence_id,
                 rrule=rrule,
                 reminders=_reminder_deltas(body.reminders, body.all_day),
+                reset_overrides=body.reset_overrides,
+                reset_fields=body.reset_fields,
             )
     except EventNotFoundError:
         raise HTTPException(status_code=404, detail="Event not found")

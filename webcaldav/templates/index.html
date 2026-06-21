@@ -269,8 +269,15 @@
   <div class="scope-options">
     <button type="button" class="btn-outline" data-scope="this"></button>
     <button type="button" class="btn-outline" data-scope="thisfuture"></button>
+    <label class="ev-check scope-reset" style="display:none">
+      <input type="checkbox" id="scope-reset-thisfuture"><span></span>
+    </label>
     <button type="button" class="btn-outline" data-scope="all"></button>
+    <label class="ev-check scope-reset" style="display:none">
+      <input type="checkbox" id="scope-reset-all"><span></span>
+    </label>
   </div>
+  <p class="pref-note" id="scope-reset-info" style="display:none"></p>
   <div class="confirm-footer">
     <button id="scope-cancel" class="btn-outline" data-i18n="ui.scope_cancel">Cancel</button>
   </div>
