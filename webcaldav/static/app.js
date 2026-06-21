@@ -260,9 +260,31 @@
   function fcViewFormats(dateKey) {
     const ds = luxonDateFmt(dateKey);
     return {
-      timeGridWeek: { dayHeaderFormat: 'EEE ' + ds },
+      timeGridWeek: { dayHeaderFormat: 'EEE ' + ds, titleFormat: weekTitleFormat },
       timeGridDay: { dayHeaderFormat: 'EEEE ' + ds, titleFormat: ds },
     };
+  }
+
+  // Custom timeGridWeek toolbar title: "<month> <year>, <d1> – <d2>", language
+  // agnostic. Cross-month weeks show both months; cross-year shows both years.
+  // FC titleFormat callback: markers are UTC, end is exclusive (last day = -1d).
+  // Returning the string via titleFormat keeps FC's preact in control of the DOM
+  // (mutating .fc-toolbar-title directly corrupts FC's title reconciliation).
+  function weekTitleFormat(arg) {
+    const DT = luxon.DateTime;
+    const sm = arg.start.marker || arg.start;
+    const em = arg.end.marker || arg.end;
+    const start = DT.fromJSDate(sm, { zone: 'utc' }).setLocale(LANG);
+    const last = DT.fromJSDate(em, { zone: 'utc' }).setLocale(LANG).minus({ days: 1 });
+    let head;
+    if (start.year !== last.year) {
+      head = `${start.toFormat('LLLL yyyy')} – ${last.toFormat('LLLL yyyy')}`;
+    } else if (start.month !== last.month) {
+      head = `${start.toFormat('LLLL')} – ${last.toFormat('LLLL')} ${start.toFormat('yyyy')}`;
+    } else {
+      head = start.toFormat('LLLL yyyy');
+    }
+    return `${head}, ${start.toFormat('d')} – ${last.toFormat('d')}`;
   }
 
   function fcTimeFormats(key) {
