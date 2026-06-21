@@ -213,17 +213,17 @@ async def test_items_clamped_to_window(client, db_engine, store, sharing_on, mon
     ids = await _add_calendars(uid, dek, n=1)
     seen = {}
 
-    async def fake_fetch_events(**kwargs):
+    async def fake_fetch_account_data(**kwargs):
         seen["from"] = kwargs["from_dt"]
         seen["to"] = kwargs["to_dt"]
-        return [{"id": "e1", "extendedProps": {"calendarId": kwargs["calendar_id"]}}]
+        ref = kwargs["calendars"][0]
+        return {
+            "events": [{"id": "e1", "extendedProps": {"calendarId": ref.calendar_id}}],
+            "tasks": [],
+            "journals": [],
+        }
 
-    async def empty(**kwargs):
-        return []
-
-    monkeypatch.setattr(shares_router, "fetch_events", fake_fetch_events)
-    monkeypatch.setattr(shares_router, "fetch_tasks", empty)
-    monkeypatch.setattr(shares_router, "fetch_journals", empty)
+    monkeypatch.setattr(shares_router, "fetch_account_data", fake_fetch_account_data)
 
     r = await client.post("/shares", json={
         "kind": "grid", "mode": "ro",

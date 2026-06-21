@@ -3378,23 +3378,18 @@
         });
         (items.journals || []).forEach((e) => data.push(e));
       } else {
-        const params = new URLSearchParams({ from: from.toISO(), to: to.toISO() });
-        const [evR, tkR, jrR] = await Promise.all([
-          fetch('/events?' + params.toString()),
-          fetch('/tasks?' + params.toString()),
-          fetch('/journals?' + params.toString()),
-        ]);
-        if (!evR.ok) throw new Error('Failed to fetch events');
-        (await evR.json()).forEach((e) => data.push(e));
-        if (tkR.ok) {
-          (await tkR.json()).forEach((e) => {
-            const p = e.extendedProps || {};
-            if (p.undated) return; // shown in the pinned "Tasks" section
-            if (p.completed && completedMode === 'hidden') return;
-            data.push(e);
-          });
-        }
-        if (jrR.ok) (await jrR.json()).forEach((e) => data.push(e));
+        const params = new URLSearchParams({ from: from.toISO(), to: to.toISO(), kinds: 'events,tasks,journals' });
+        const cdR = await fetch('/calendar-data?' + params.toString());
+        if (!cdR.ok) throw new Error('Failed to fetch calendar data');
+        const cd = await cdR.json();
+        (cd.events || []).forEach((e) => data.push(e));
+        (cd.tasks || []).forEach((e) => {
+          const p = e.extendedProps || {};
+          if (p.undated) return; // shown in the pinned "Tasks" section
+          if (p.completed && completedMode === 'hidden') return;
+          data.push(e);
+        });
+        (cd.journals || []).forEach((e) => data.push(e));
       }
 
       const fresh = [];
@@ -3983,16 +3978,13 @@
             rawTasks = items.tasks || [];
             rawJournals = items.journals || [];
           } else {
-            const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr });
-            const [evR, tkR, jrR] = await Promise.all([
-              fetch('/events?' + params.toString()),
-              fetch('/tasks?' + params.toString()),
-              fetch('/journals?' + params.toString()),
-            ]);
-            if (!evR.ok) throw new Error('Failed to fetch events');
-            data = await evR.json();
-            rawTasks = tkR.ok ? await tkR.json() : [];
-            rawJournals = jrR.ok ? await jrR.json() : [];
+            const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr, kinds: 'events,tasks,journals' });
+            const cdR = await fetch('/calendar-data?' + params.toString());
+            if (!cdR.ok) throw new Error('Failed to fetch calendar data');
+            const cd = await cdR.json();
+            data = cd.events || [];
+            rawTasks = cd.tasks || [];
+            rawJournals = cd.journals || [];
           }
           // Only real (calendar-backed) events are editable; recurring ones
           // prompt for occurrence scope on drop (see onEventChange). In a
@@ -4306,20 +4298,16 @@
     const params = new URLSearchParams({
       from: now.minus({ days: lookback }).toISO(),
       to: now.plus({ days: horizon }).toISO(),
+      kinds: 'events,tasks',
     });
     // Notify on events and tasks alike. Tasks anchor on due/start (their
     // `start`) and carry reminders in the same shape, so buildTriggers handles
     // both. Skip completed tasks — a done task shouldn't keep nagging.
-    const [evR, tkR] = await Promise.all([
-      fetch('/events?' + params.toString()),
-      fetch('/tasks?' + params.toString()),
-    ]);
-    if (!evR.ok) throw new Error('events fetch failed');
-    const events = await evR.json();
-    let tasks = [];
-    if (tkR.ok) {
-      tasks = (await tkR.json()).filter((t) => !((t.extendedProps || {}).completed));
-    }
+    const cdR = await fetch('/calendar-data?' + params.toString());
+    if (!cdR.ok) throw new Error('calendar-data fetch failed');
+    const cd = await cdR.json();
+    const events = cd.events || [];
+    const tasks = (cd.tasks || []).filter((t) => !((t.extendedProps || {}).completed));
     return events.concat(tasks);
   }
 

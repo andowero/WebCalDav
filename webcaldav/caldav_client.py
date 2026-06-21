@@ -9,6 +9,7 @@ from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 import caldav
+import niquests
 from caldav.elements.ical import CalendarColor
 from dateutil.rrule import rrulestr
 from icalendar import Alarm as IAlarm
@@ -27,6 +28,13 @@ class CalendarInfo(NamedTuple):
     caldav_id: str
     display_name: str
     color: str
+
+
+class CalendarRef(NamedTuple):
+    """One calendar to fetch within a shared-client account batch."""
+    calendar_url: str
+    color: str
+    calendar_id: int
 
 
 class UnsafeURLError(ValueError):
@@ -96,8 +104,29 @@ def _normalize_color(val: str | None) -> str | None:
     return val
 
 
+def _make_dav_client(url: str, username: str, password: str) -> caldav.DAVClient:
+    """A DAVClient forced onto plain HTTP/1.1 with a keep-alive session.
+
+    The default DAVClient builds its own niquests session that probes for HTTP/2
+    and QUIC and spawns per-connection watcher threads — pure overhead against a
+    self-hosted CalDAV server, and the dominant cost when a request fans out
+    across many calendars. Auth lives on the client (applied per request), not on
+    the session, so swapping in a bare HTTP/1.1 session is safe. Reusing one such
+    client across an account's calendars keep-alives a single connection instead
+    of paying a fresh handshake per calendar. auth_type="basic" also skips the
+    extra auth-probe round-trip.
+    """
+    client = caldav.DAVClient(
+        url=url, username=username, password=password, auth_type="basic"
+    )
+    client.session = niquests.Session(
+        disable_http2=True, disable_http3=True, multiplexed=False
+    )
+    return client
+
+
 def _sync_discover_calendars(url: str, username: str, password: str) -> list[CalendarInfo]:
-    with caldav.DAVClient(url=url, username=username, password=password) as client:
+    with _make_dav_client(url, username, password) as client:
         principal = client.principal()
         results: list[CalendarInfo] = []
         for cal in principal.calendars():
@@ -448,23 +477,17 @@ _TODO = _Kind("VTODO", "due", ITodo, "todo")
 _JOURNAL = _Kind("VJOURNAL", "", IJournal, "journal")
 
 
-def _master_meta(
-    cal: Any, from_dt: datetime, to_dt: datetime, kind: _Kind = _EVENT
+def _parse_masters(
+    masters: list[Any], kind: _Kind
 ) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], list[Any]]]:
-    """(UID -> master props, (UID, recurrence id) -> override reminders).
+    """Build (UID -> master props, (UID, recurrence id) -> override reminders)
+    from unexpanded master components.
 
-    The expanded search drops RRULE (and often VALARM) from each occurrence,
-    so recurrence/reminders are recovered from the unexpanded components here.
     Override props stay out of the master map — an override's own alarms must
     not leak to sibling occurrences via the fallback.
     """
     meta: dict[str, dict[str, Any]] = {}
     override_reminders: dict[tuple[str, str], list[Any]] = {}
-    try:
-        masters = cal.search(start=from_dt, end=to_dt, expand=False, **{kind.search_kw: True})
-    except Exception as e:
-        logger.warning("master search failed url=%s: %s", cal.url, e)
-        return meta, override_reminders
     for event in masters:
         try:
             for vevent in event.icalendar_instance.walk(kind.name):
@@ -483,6 +506,22 @@ def _master_meta(
         except Exception as e:
             logger.warning("Failed to parse master event: %s", e)
     return meta, override_reminders
+
+
+def _master_meta(
+    cal: Any, from_dt: datetime, to_dt: datetime, kind: _Kind = _EVENT
+) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], list[Any]]]:
+    """(UID -> master props, (UID, recurrence id) -> override reminders).
+
+    The expanded search drops RRULE (and often VALARM) from each occurrence,
+    so recurrence/reminders are recovered from the unexpanded components here.
+    """
+    try:
+        masters = cal.search(start=from_dt, end=to_dt, expand=False, **{kind.search_kw: True})
+    except Exception as e:
+        logger.warning("master search failed url=%s: %s", cal.url, e)
+        return {}, {}
+    return _parse_masters(masters, kind)
 
 
 class EventNotFoundError(Exception):
@@ -995,6 +1034,98 @@ def _series_ical(
     return str(ical.to_ical().decode("utf-8"))
 
 
+def _events_from_cal(
+    client: caldav.DAVClient,
+    calendar_url: str,
+    from_dt: datetime,
+    to_dt: datetime,
+    color: str,
+    calendar_id: int,
+) -> list[dict[str, Any]]:
+    """Fetch + parse events for one calendar using an already-open client."""
+    cal = caldav.Calendar(client=client, url=calendar_url)
+    events = cal.search(start=from_dt, end=to_dt, event=True, expand=True)
+    logger.info(
+        "caldav_search done url=%s from=%s to=%s raw_count=%d",
+        calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(events),
+    )
+    meta, override_reminders = _master_meta(cal, from_dt, to_dt)
+
+    # Slots covered by a detached override (keyed by uid + its RECURRENCE-ID).
+    # Some servers' expand still emits the master-generated occurrence at that
+    # slot alongside the moved override, which would show as a duplicate; the
+    # override wins, so suppress the plain occurrence at the same slot below.
+    overridden: set[tuple[str, str]] = set()
+    for event in events:
+        try:
+            for vevent in event.icalendar_instance.walk("VEVENT"):
+                if "recurrence-id" not in vevent:
+                    continue
+                uid = str(vevent.get("uid")) if vevent.get("uid") else str(event.url)
+                overridden.add((uid, _dt_to_iso(vevent.decoded("recurrence-id"))))
+        except Exception as e:
+            logger.warning("Failed to scan event for overrides: %s", e)
+
+    result: list[dict[str, Any]] = []
+    for event in events:
+        try:
+            ical = event.icalendar_instance
+            for vevent in ical.walk("VEVENT"):
+                if "dtstart" not in vevent:
+                    continue
+                uid = str(vevent.get("uid")) if vevent.get("uid") else str(event.url)
+                # Drop a plain occurrence that an override already covers.
+                if "recurrence-id" not in vevent and (uid, _dt_to_iso(vevent.decoded("dtstart"))) in overridden:
+                    continue
+                summary = vevent.get("summary")
+                title = str(summary) if summary else "(No title)"
+                dtstart = vevent.decoded("dtstart")
+                all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
+                ev: dict[str, Any] = {
+                    "id": uid,
+                    "title": title,
+                    "start": _dt_to_iso(dtstart),
+                    "allDay": all_day,
+                    "color": color,
+                }
+                if "dtend" in vevent:
+                    ev["end"] = _dt_to_iso(vevent.decoded("dtend"))
+                elif "duration" in vevent:
+                    dur = vevent.decoded("duration")
+                    if isinstance(dur, timedelta):
+                        ev["end"] = _dt_to_iso(dtstart + dur)
+
+                # Instance props take priority; recurrence/reminders fall
+                # back to the master since expansion strips them.
+                inst = _extract_props(vevent)
+                master = meta.get(uid, {})
+                extended: dict[str, Any] = {"rawStart": ev["start"], "calendarId": calendar_id}
+                if "end" in ev:
+                    extended["rawEnd"] = ev["end"]
+                # Detached overrides carry a stable RECURRENCE-ID that does not
+                # change when the occurrence is moved; it is the pivot the
+                # server keys overrides on, so expose it for scoped edits.
+                if "recurrence-id" in vevent:
+                    rid = _dt_to_iso(vevent.decoded("recurrence-id"))
+                    extended["recurrenceId"] = rid
+                    # Expansion may strip the override's VALARMs as well;
+                    # recover them from the unexpanded override component.
+                    if "reminders" not in inst and (uid, rid) in override_reminders:
+                        inst["reminders"] = override_reminders[(uid, rid)]
+                for key in (
+                    "description", "location", "recurrence", "recurrenceRule", "reminders",
+                ):
+                    val = inst.get(key, master.get(key))
+                    if val:
+                        extended[key] = val
+                ev["extendedProps"] = extended
+
+                result.append(ev)
+        except Exception as e:
+            logger.warning("Failed to parse event: %s", e)
+    return result
+
+
 def _sync_fetch_events(
     account_url: str,
     username: str,
@@ -1005,88 +1136,8 @@ def _sync_fetch_events(
     color: str,
     calendar_id: int,
 ) -> list[dict[str, Any]]:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
-        cal = caldav.Calendar(client=client, url=calendar_url)
-        events = cal.search(start=from_dt, end=to_dt, event=True, expand=True)
-        logger.info(
-            "caldav_search done url=%s from=%s to=%s raw_count=%d",
-            calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(events),
-        )
-        meta, override_reminders = _master_meta(cal, from_dt, to_dt)
-
-        # Slots covered by a detached override (keyed by uid + its RECURRENCE-ID).
-        # Some servers' expand still emits the master-generated occurrence at that
-        # slot alongside the moved override, which would show as a duplicate; the
-        # override wins, so suppress the plain occurrence at the same slot below.
-        overridden: set[tuple[str, str]] = set()
-        for event in events:
-            try:
-                for vevent in event.icalendar_instance.walk("VEVENT"):
-                    if "recurrence-id" not in vevent:
-                        continue
-                    uid = str(vevent.get("uid")) if vevent.get("uid") else str(event.url)
-                    overridden.add((uid, _dt_to_iso(vevent.decoded("recurrence-id"))))
-            except Exception as e:
-                logger.warning("Failed to scan event for overrides: %s", e)
-
-        result: list[dict[str, Any]] = []
-        for event in events:
-            try:
-                ical = event.icalendar_instance
-                for vevent in ical.walk("VEVENT"):
-                    if "dtstart" not in vevent:
-                        continue
-                    uid = str(vevent.get("uid")) if vevent.get("uid") else str(event.url)
-                    # Drop a plain occurrence that an override already covers.
-                    if "recurrence-id" not in vevent and (uid, _dt_to_iso(vevent.decoded("dtstart"))) in overridden:
-                        continue
-                    summary = vevent.get("summary")
-                    title = str(summary) if summary else "(No title)"
-                    dtstart = vevent.decoded("dtstart")
-                    all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
-                    ev: dict[str, Any] = {
-                        "id": uid,
-                        "title": title,
-                        "start": _dt_to_iso(dtstart),
-                        "allDay": all_day,
-                        "color": color,
-                    }
-                    if "dtend" in vevent:
-                        ev["end"] = _dt_to_iso(vevent.decoded("dtend"))
-                    elif "duration" in vevent:
-                        dur = vevent.decoded("duration")
-                        if isinstance(dur, timedelta):
-                            ev["end"] = _dt_to_iso(dtstart + dur)
-
-                    # Instance props take priority; recurrence/reminders fall
-                    # back to the master since expansion strips them.
-                    inst = _extract_props(vevent)
-                    master = meta.get(uid, {})
-                    extended: dict[str, Any] = {"rawStart": ev["start"], "calendarId": calendar_id}
-                    if "end" in ev:
-                        extended["rawEnd"] = ev["end"]
-                    # Detached overrides carry a stable RECURRENCE-ID that does not
-                    # change when the occurrence is moved; it is the pivot the
-                    # server keys overrides on, so expose it for scoped edits.
-                    if "recurrence-id" in vevent:
-                        rid = _dt_to_iso(vevent.decoded("recurrence-id"))
-                        extended["recurrenceId"] = rid
-                        # Expansion may strip the override's VALARMs as well;
-                        # recover them from the unexpanded override component.
-                        if "reminders" not in inst and (uid, rid) in override_reminders:
-                            inst["reminders"] = override_reminders[(uid, rid)]
-                    for key in (
-                        "description", "location", "recurrence", "recurrenceRule", "reminders",
-                    ):
-                        val = inst.get(key, master.get(key))
-                        if val:
-                            extended[key] = val
-                    ev["extendedProps"] = extended
-
-                    result.append(ev)
-            except Exception as e:
-                logger.warning("Failed to parse event: %s", e)
-        return result
+    with _make_dav_client(account_url, username, password) as client:
+        return _events_from_cal(client, calendar_url, from_dt, to_dt, color, calendar_id)
 
 
 async def fetch_events(
@@ -1131,7 +1182,7 @@ def _sync_fetch_sync_token(
     and only ETags (not event bodies) are fetched. Used to skip event refetches
     when nothing changed.
     """
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         sync = cal.get_objects_by_sync_token(load_objects=False)
         return str(sync.sync_token)
@@ -1176,7 +1227,7 @@ def _sync_update_event(
     reset_overrides: bool = False,
     reset_fields: list[str] | None = None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         try:
             event = cal.event_by_uid(uid)
@@ -1374,7 +1425,7 @@ def _sync_create_event(
     rrule: dict[str, Any] | None = None,
     reminders: list[tuple[timedelta, str]] | None = None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         rule_parts = _build_rrule(rrule, start) if rrule else None
         cal.save_event(_series_ical(
@@ -1430,7 +1481,7 @@ def _sync_delete_event(
     scope: str = "all",
     recurrence_id: str | None = None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         try:
             event = cal.event_by_uid(uid)
@@ -1615,6 +1666,81 @@ def _build_task_event(
     return ev
 
 
+def _tasks_from_cal(
+    client: caldav.DAVClient,
+    calendar_url: str,
+    from_dt: datetime,
+    to_dt: datetime,
+    color: str,
+    calendar_id: int,
+) -> list[dict[str, Any]]:
+    """Fetch + parse tasks for one calendar using an already-open client."""
+    cal = caldav.Calendar(client=client, url=calendar_url)
+    todos = cal.search(start=from_dt, end=to_dt, todo=True, expand=True, include_completed=True)
+    logger.info(
+        "caldav_search_todos done url=%s from=%s to=%s raw_count=%d",
+        calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(todos),
+    )
+
+    # One unbounded unexpanded todo search does double duty: it recovers the
+    # recurrence/reminder metadata for the dated occurrences above (expand
+    # strips RRULE/VALARM) AND yields the undated tasks (no DTSTART/DUE) that the
+    # date-bounded expand search never returns. This folds what used to be a
+    # separate cal.todos() round-trip into the master search.
+    try:
+        masters = cal.search(todo=True, expand=False, include_completed=True)
+    except Exception as e:
+        logger.warning("todo master search failed url=%s: %s", calendar_url, e)
+        masters = []
+    meta, override_reminders = _parse_masters(masters, _TODO)
+
+    overridden: set[tuple[str, str]] = set()
+    for todo in todos:
+        try:
+            for vtodo in todo.icalendar_instance.walk("VTODO"):
+                if "recurrence-id" not in vtodo:
+                    continue
+                uid = str(vtodo.get("uid")) if vtodo.get("uid") else str(todo.url)
+                overridden.add((uid, _dt_to_iso(vtodo.decoded("recurrence-id"))))
+        except Exception as e:
+            logger.warning("Failed to scan todo for overrides: %s", e)
+
+    result: list[dict[str, Any]] = []
+    for todo in todos:
+        try:
+            for vtodo in todo.icalendar_instance.walk("VTODO"):
+                if "dtstart" not in vtodo and "due" not in vtodo:
+                    continue
+                uid = str(vtodo.get("uid")) if vtodo.get("uid") else str(todo.url)
+                anchor_key = "due" if "due" in vtodo else "dtstart"
+                if "recurrence-id" not in vtodo and (uid, _dt_to_iso(vtodo.decoded(anchor_key))) in overridden:
+                    continue
+                ev = _build_task_event(
+                    vtodo, color, calendar_id, meta, override_reminders, str(todo.url)
+                )
+                if ev is not None:
+                    result.append(ev)
+        except Exception as e:
+            logger.warning("Failed to parse todo: %s", e)
+
+    # Undated tasks come from the same unbounded master search above.
+    for todo in masters:
+        try:
+            for vtodo in todo.icalendar_instance.walk("VTODO"):
+                if "recurrence-id" in vtodo:
+                    continue
+                if "dtstart" in vtodo or "due" in vtodo:
+                    continue
+                ev = _build_task_event(
+                    vtodo, color, calendar_id, {}, {}, str(todo.url), undated=True
+                )
+                if ev is not None:
+                    result.append(ev)
+        except Exception as e:
+            logger.warning("Failed to parse undated todo: %s", e)
+    return result
+
+
 def _sync_fetch_tasks(
     account_url: str,
     username: str,
@@ -1625,61 +1751,8 @@ def _sync_fetch_tasks(
     color: str,
     calendar_id: int,
 ) -> list[dict[str, Any]]:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
-        cal = caldav.Calendar(client=client, url=calendar_url)
-        todos = cal.search(start=from_dt, end=to_dt, todo=True, expand=True, include_completed=True)
-        logger.info(
-            "caldav_search_todos done url=%s from=%s to=%s raw_count=%d",
-            calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(todos),
-        )
-        meta, override_reminders = _master_meta(cal, from_dt, to_dt, _TODO)
-
-        overridden: set[tuple[str, str]] = set()
-        for todo in todos:
-            try:
-                for vtodo in todo.icalendar_instance.walk("VTODO"):
-                    if "recurrence-id" not in vtodo:
-                        continue
-                    uid = str(vtodo.get("uid")) if vtodo.get("uid") else str(todo.url)
-                    overridden.add((uid, _dt_to_iso(vtodo.decoded("recurrence-id"))))
-            except Exception as e:
-                logger.warning("Failed to scan todo for overrides: %s", e)
-
-        result: list[dict[str, Any]] = []
-        for todo in todos:
-            try:
-                for vtodo in todo.icalendar_instance.walk("VTODO"):
-                    if "dtstart" not in vtodo and "due" not in vtodo:
-                        continue
-                    uid = str(vtodo.get("uid")) if vtodo.get("uid") else str(todo.url)
-                    anchor_key = "due" if "due" in vtodo else "dtstart"
-                    if "recurrence-id" not in vtodo and (uid, _dt_to_iso(vtodo.decoded(anchor_key))) in overridden:
-                        continue
-                    ev = _build_task_event(
-                        vtodo, color, calendar_id, meta, override_reminders, str(todo.url)
-                    )
-                    if ev is not None:
-                        result.append(ev)
-            except Exception as e:
-                logger.warning("Failed to parse todo: %s", e)
-
-        # Undated tasks carry no date, so they never surface in the date-bounded
-        # expand search above; fetch them separately and tag them undated.
-        try:
-            for todo in cal.todos(include_completed=True):
-                for vtodo in todo.icalendar_instance.walk("VTODO"):
-                    if "recurrence-id" in vtodo:
-                        continue
-                    if "dtstart" in vtodo or "due" in vtodo:
-                        continue
-                    ev = _build_task_event(
-                        vtodo, color, calendar_id, {}, {}, str(todo.url), undated=True
-                    )
-                    if ev is not None:
-                        result.append(ev)
-        except Exception as e:
-            logger.warning("Failed to fetch undated todos url=%s: %s", calendar_url, e)
-        return result
+    with _make_dav_client(account_url, username, password) as client:
+        return _tasks_from_cal(client, calendar_url, from_dt, to_dt, color, calendar_id)
 
 
 async def fetch_tasks(
@@ -1718,7 +1791,7 @@ def _sync_create_task(
     reminders: list[tuple[timedelta, str]] | None = None,
     priority: int | None = None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         anchor = start or due
         rule_parts = _build_rrule(rrule, anchor) if rrule and anchor is not None else None
@@ -1779,7 +1852,7 @@ def _sync_update_task(
     reset_overrides: bool = False,
     reset_fields: list[str] | None = None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         try:
             todo = cal.todo_by_uid(uid)
@@ -1964,7 +2037,7 @@ def _sync_delete_task(
     scope: str = "all",
     recurrence_id: str | None = None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         try:
             todo = cal.todo_by_uid(uid)
@@ -2028,7 +2101,7 @@ def _sync_set_task_status(
     completed: bool,
     recurrence_id: str | None = None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         try:
             todo = cal.todo_by_uid(uid)
@@ -2117,6 +2190,54 @@ async def set_task_status(
 # _JOURNAL kind and the caldav lib's save_journal/journal_by_uid.
 
 
+def _journals_from_cal(
+    client: caldav.DAVClient,
+    calendar_url: str,
+    from_dt: datetime,
+    to_dt: datetime,
+    color: str,
+    calendar_id: int,
+) -> list[dict[str, Any]]:
+    """Fetch + parse journals for one calendar using an already-open client."""
+    cal = caldav.Calendar(client=client, url=calendar_url)
+    journals = cal.search(start=from_dt, end=to_dt, journal=True, expand=False)
+    logger.info(
+        "caldav_search_journals done url=%s from=%s to=%s raw_count=%d",
+        calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(journals),
+    )
+    result: list[dict[str, Any]] = []
+    for journal in journals:
+        try:
+            for vj in journal.icalendar_instance.walk("VJOURNAL"):
+                if "dtstart" not in vj:
+                    continue
+                uid = str(vj.get("uid")) if vj.get("uid") else str(journal.url)
+                summary = vj.get("summary")
+                title = str(summary) if summary else "(No title)"
+                dtstart = vj.decoded("dtstart")
+                all_day = _is_all_day(dtstart)
+                ev: dict[str, Any] = {
+                    "id": uid,
+                    "title": title,
+                    "start": _dt_to_iso(dtstart),
+                    "allDay": all_day,
+                    "color": color,
+                }
+                extended: dict[str, Any] = {
+                    "isJournal": True,
+                    "calendarId": calendar_id,
+                    "rawStart": ev["start"],
+                }
+                desc = vj.get("description")
+                if desc:
+                    extended["description"] = str(desc)
+                ev["extendedProps"] = extended
+                result.append(ev)
+        except Exception as e:
+            logger.warning("Failed to parse journal: %s", e)
+    return result
+
+
 def _sync_fetch_journals(
     account_url: str,
     username: str,
@@ -2127,44 +2248,8 @@ def _sync_fetch_journals(
     color: str,
     calendar_id: int,
 ) -> list[dict[str, Any]]:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
-        cal = caldav.Calendar(client=client, url=calendar_url)
-        journals = cal.search(start=from_dt, end=to_dt, journal=True, expand=False)
-        logger.info(
-            "caldav_search_journals done url=%s from=%s to=%s raw_count=%d",
-            calendar_url, from_dt.isoformat(), to_dt.isoformat(), len(journals),
-        )
-        result: list[dict[str, Any]] = []
-        for journal in journals:
-            try:
-                for vj in journal.icalendar_instance.walk("VJOURNAL"):
-                    if "dtstart" not in vj:
-                        continue
-                    uid = str(vj.get("uid")) if vj.get("uid") else str(journal.url)
-                    summary = vj.get("summary")
-                    title = str(summary) if summary else "(No title)"
-                    dtstart = vj.decoded("dtstart")
-                    all_day = _is_all_day(dtstart)
-                    ev: dict[str, Any] = {
-                        "id": uid,
-                        "title": title,
-                        "start": _dt_to_iso(dtstart),
-                        "allDay": all_day,
-                        "color": color,
-                    }
-                    extended: dict[str, Any] = {
-                        "isJournal": True,
-                        "calendarId": calendar_id,
-                        "rawStart": ev["start"],
-                    }
-                    desc = vj.get("description")
-                    if desc:
-                        extended["description"] = str(desc)
-                    ev["extendedProps"] = extended
-                    result.append(ev)
-            except Exception as e:
-                logger.warning("Failed to parse journal: %s", e)
-        return result
+    with _make_dav_client(account_url, username, password) as client:
+        return _journals_from_cal(client, calendar_url, from_dt, to_dt, color, calendar_id)
 
 
 async def fetch_journals(
@@ -2188,6 +2273,67 @@ async def fetch_journals(
             raise
 
 
+# Which item kinds a combined fetch may return, and the per-calendar helper for
+# each. Order is stable so callers see events, then tasks, then journals.
+_ACCOUNT_FETCHERS: tuple[tuple[str, Callable[..., list[dict[str, Any]]]], ...] = (
+    ("events", _events_from_cal),
+    ("tasks", _tasks_from_cal),
+    ("journals", _journals_from_cal),
+)
+
+
+def _sync_fetch_account_data(
+    account_url: str,
+    username: str,
+    password: str,
+    calendars: list[CalendarRef],
+    from_dt: datetime,
+    to_dt: datetime,
+    kinds: frozenset[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch the requested item kinds for every calendar of one account over a
+    single shared HTTP/1.1 connection.
+
+    One bad calendar (or kind) must not sink the rest, so each per-calendar fetch
+    is isolated; failures are logged and skipped.
+    """
+    out: dict[str, list[dict[str, Any]]] = {"events": [], "tasks": [], "journals": []}
+    with _make_dav_client(account_url, username, password) as client:
+        for ref in calendars:
+            for kind, fetcher in _ACCOUNT_FETCHERS:
+                if kind not in kinds:
+                    continue
+                try:
+                    out[kind].extend(
+                        fetcher(client, ref.calendar_url, from_dt, to_dt, ref.color, ref.calendar_id)
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "caldav_fetch_%s_failed calendar=%s: %s", kind, ref.calendar_id, e
+                    )
+    return out
+
+
+async def fetch_account_data(
+    account_url: str,
+    username: str,
+    password: str,
+    calendars: list[CalendarRef],
+    from_dt: datetime,
+    to_dt: datetime,
+    kinds: frozenset[str],
+) -> dict[str, list[dict[str, Any]]]:
+    with caldav_request_duration_seconds.labels(operation="fetch_account_data").time():
+        try:
+            return await asyncio.to_thread(
+                _sync_fetch_account_data,
+                account_url, username, password, calendars, from_dt, to_dt, kinds,
+            )
+        except Exception:
+            caldav_request_errors_total.labels(operation="fetch_account_data").inc()
+            raise
+
+
 def _sync_create_journal(
     account_url: str,
     username: str,
@@ -2198,7 +2344,7 @@ def _sync_create_journal(
     start: date | datetime,
     description: str | None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         cal.save_journal(_series_ical(
             uid, title, start, None, None, description, None, kind=_JOURNAL,
@@ -2236,7 +2382,7 @@ def _sync_update_journal(
     start: date | datetime,
     description: str | None,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         try:
             journal = cal.journal_by_uid(uid)
@@ -2282,7 +2428,7 @@ def _sync_delete_journal(
     calendar_url: str,
     uid: str,
 ) -> None:
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         try:
             journal = cal.journal_by_uid(uid)
@@ -2328,7 +2474,7 @@ def _sync_collect_components(
     """Collect the VEVENT/VTODO/VJOURNAL (+ VTIMEZONE) components in a window,
     unexpanded, from one calendar."""
     out: list[Any] = []
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         objects = cal.search(start=from_dt, end=to_dt, expand=False)
         for obj in objects:
@@ -2352,7 +2498,7 @@ def _sync_export_item(
     item_kind: str,
 ) -> str:
     """Serialize a single item (by uid) to a standalone .ics string."""
-    with caldav.DAVClient(url=account_url, username=username, password=password) as client:
+    with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         lookup = {
             "event": cal.event_by_uid,

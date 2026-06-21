@@ -2,6 +2,34 @@
 
 ## Unreleased — MVP
 
+### Performance — CalDAV connection reuse, calendar load now sub-second (2026-06-22)
+- **Root cause**: a calendar load was several seconds even against a localhost
+  CalDAV server. A whole-process profile showed ~100% of the time is network/HTTP,
+  ~0% CPU. The app opened a fresh `caldav.DAVClient` (new niquests session → new
+  TCP connection + HTTP/2/QUIC negotiation + leaked watcher threads) **per
+  calendar, per endpoint**. With `/events`, `/tasks`, `/journals` each fanning out
+  over every calendar, the profile saw ~295 connection setups for ~101 fetches.
+- **Fix**:
+  - New `_make_dav_client()` factory forces plain **HTTP/1.1** (disables HTTP/2 +
+    QUIC, `auth_type="basic"`), so there's no per-connection negotiation and no
+    watcher-thread spawn. Used at every production DAVClient site (reads + writes).
+  - Per-calendar fetch bodies were extracted (`_events_from_cal` /
+    `_tasks_from_cal` / `_journals_from_cal`) and a new account-level
+    `fetch_account_data()` opens **one client per account** and reuses that
+    keep-alive connection across all of the account's calendars and item kinds.
+  - New **`GET /calendar-data?from=&to=&kinds=`** endpoint returns
+    `{events, tasks, journals}` in one request; the month/week/agenda view loads
+    and the notification scheduler now call it instead of three parallel fetches.
+    Share `/items` was migrated to the same per-account batch fetch. The standalone
+    `/events`, `/tasks`, `/journals` endpoints remain (MCP, tests, compatibility).
+  - The undated-task fetch folded the separate `cal.todos()` round-trip into the
+    unexpanded masters search, dropping the tasks path from 3 round-trips to 2.
+- **Result**: per-account connections collapse from ~one-per-calendar-per-endpoint
+  to a single reused HTTP/1.1 connection. New regression test asserts one
+  `DAVClient` is opened for N calendars on an account. No event caching introduced —
+  reads still go straight to the server (connection reuse ≠ result caching).
+- Removed the temporary `PROFILE_CALDAV` toggle from the local `.env`.
+
 ### Added — event search + agenda search-range pickers (2026-06-21)
 - **A search box in the calendar toolbar** (after the "today" button) filters
   events, tasks, and journals by **title**, **location**, and **description**.

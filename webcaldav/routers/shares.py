@@ -23,11 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..baseurl import base_url
 from ..caldav_client import (
+    CalendarRef,
     export_item_ics,
     export_range_ics,
-    fetch_events,
-    fetch_journals,
-    fetch_tasks,
+    fetch_account_data,
 )
 from ..config import settings
 from ..crypto import decrypt_bytes
@@ -443,31 +442,38 @@ async def items(
     window and calendars."""
     from_dt, to_dt = _clamp_window(ctx)
     cals = await _readable_calendars(ctx, db)
+
+    # Group by account so each opens one shared client across its calendars.
+    by_account: dict[int, tuple[CalDAVAccount, list[CalendarRef]]] = {}
+    for cal, account in cals:
+        if account.id not in by_account:
+            by_account[account.id] = (account, [])
+        by_account[account.id][1].append(
+            CalendarRef(calendar_url=cal.caldav_id, color=cal.color, calendar_id=cal.id)
+        )
+
+    kinds = frozenset(("events", "tasks", "journals"))
     out_events: list[dict[str, Any]] = []
     out_tasks: list[dict[str, Any]] = []
     out_journals: list[dict[str, Any]] = []
-    for cal, account in cals:
+    for account, refs in by_account.values():
         pw = _password(account, ctx)
-        for fetch, sink in (
-            (fetch_events, out_events),
-            (fetch_tasks, out_tasks),
-            (fetch_journals, out_journals),
-        ):
-            try:
-                sink.extend(
-                    await fetch(
-                        account_url=account.url,
-                        username=account.username,
-                        password=pw,
-                        calendar_url=cal.caldav_id,
-                        from_dt=from_dt,
-                        to_dt=to_dt,
-                        color=cal.color,
-                        calendar_id=cal.id,
-                    )
-                )
-            except Exception as e:
-                logger.warning("share_fetch_failed", calendar_id=cal.id, error=repr(e))
+        try:
+            res = await fetch_account_data(
+                account_url=account.url,
+                username=account.username,
+                password=pw,
+                calendars=refs,
+                from_dt=from_dt,
+                to_dt=to_dt,
+                kinds=kinds,
+            )
+        except Exception as e:
+            logger.warning("share_fetch_failed", account_id=account.id, error=repr(e))
+            continue
+        out_events.extend(res["events"])
+        out_tasks.extend(res["tasks"])
+        out_journals.extend(res["journals"])
     if ctx.kind == "item":
         # Narrow to the shared uid only.
         out_events = [e for e in out_events if e.get("id") == ctx.item_uid]

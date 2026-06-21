@@ -160,6 +160,41 @@ async def test_fetch_events_parses_all_event_types(radicale_server):
     assert dur["end"].startswith("2026-05-18T10:00:00")
 
 
+async def test_account_fetch_reuses_one_client(radicale_server, monkeypatch):
+    """All calendars of one account share a single DAVClient/connection.
+
+    Regression guard for the connection-reuse fix: fetching two calendars across
+    all three item kinds must open exactly one client, not one per calendar/kind.
+    """
+    base_url, calendars = radicale_server
+    from webcaldav import caldav_client
+    from webcaldav.caldav_client import CalendarRef, fetch_account_data
+
+    calls = {"n": 0}
+    real = caldav_client._make_dav_client
+
+    def counting(url, username, password):
+        calls["n"] += 1
+        return real(url, username, password)
+
+    monkeypatch.setattr(caldav_client, "_make_dav_client", counting)
+
+    frm = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    to = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    refs = [
+        CalendarRef(calendar_url=calendars["Work"], color="#abcdef", calendar_id=1),
+        CalendarRef(calendar_url=calendars["Plain"], color="#123456", calendar_id=2),
+    ]
+    out = await fetch_account_data(
+        base_url, USER, PASSWORD, refs, frm, to,
+        frozenset({"events", "tasks", "journals"}),
+    )
+
+    assert calls["n"] == 1  # two calendars × three kinds → one shared client
+    # Data still flows through the shared client.
+    assert "tz-event" in {e["id"] for e in out["events"]}
+
+
 async def test_fetch_events_naive_range(radicale_server):
     """FullCalendar sends date-only/naive bounds; fetch must still work."""
     base_url, calendars = radicale_server

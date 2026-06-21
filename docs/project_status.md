@@ -22,6 +22,16 @@
 
 ## Recent additions
 
+### CalDAV connection reuse — sub-second calendar load (2026-06-22)
+- Calendar loads were network-bound: a fresh `caldav.DAVClient` (new connection +
+  HTTP/2/QUIC negotiation) was opened per calendar per endpoint. New
+  `_make_dav_client()` forces HTTP/1.1 and a new account-level `fetch_account_data()`
+  reuses one keep-alive connection across an account's calendars/kinds. A combined
+  `GET /calendar-data` endpoint replaces the three separate view-load fetches; the
+  notification scheduler and share `/items` use it too. Undated-task fetch folded
+  into the masters search (3→2 round-trips). Regression test guards single-client
+  reuse. No event caching added.
+
 ### Event search + agenda search-range pickers (2026-06-21)
 - Toolbar search box filters events/tasks/journals by title/location/description
   (case- and accent-insensitive, ≥ 3 chars, loose subsequence). Grid views filter

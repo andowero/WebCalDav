@@ -142,7 +142,9 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 
 ### API layer
 
-- FastAPI routers per resource: `auth`, `caldav_accounts`, `calendars`, `events`, `tasks`, `journals`, `settings`, `ops` (`/health`, `/metrics`).
+- FastAPI routers per resource: `auth`, `caldav_accounts`, `calendars`, `events`, `tasks`, `journals`, `calendar_data`, `settings`, `ops` (`/health`, `/metrics`).
+- `calendar_data` serves `GET /calendar-data?from=&to=&kinds=` → `{events, tasks, journals}` in one request. It groups the user's enabled calendars **by account** and opens **one CalDAV connection per account** (via `fetch_account_data`), reusing that keep-alive connection across all of the account's calendars and the requested item kinds. The month/week/agenda view loads and the notification scheduler call this instead of three separate fetches; the standalone `/events`, `/tasks`, `/journals` endpoints stay for MCP, shares-write delegation, and tests.
+- **Connection reuse** (not result caching): `caldav_client._make_dav_client()` builds every production `DAVClient` with a forced plain-HTTP/1.1 niquests session (HTTP/2 + QUIC disabled, `auth_type="basic"`) — no per-connection negotiation, no watcher threads. Per-calendar fetch logic lives in `_events_from_cal`/`_tasks_from_cal`/`_journals_from_cal` so it can run against a shared, already-open client.
 - `tasks` mirrors `events` for VTODO: `GET/POST /tasks`, `PUT/DELETE /tasks/{uid}`, and `POST /tasks/{uid}/status` (done/undone). It reuses the events router's recurrence/reminder models and helpers.
 - `journals` is a trimmed mirror for VJOURNAL: `GET/POST /journals`, `PUT/DELETE /journals/{uid}`. No recurrence/reminders/end — just title, a single start (date or datetime), and a Markdown `description` body; calendar move on edit works as for events.
 - `calendars` also serves `GET /calendars/ctags` — a per-calendar change token (the caldav lib's sync-token, falling back to an etag-hash on Radicale) used by the notification scheduler to skip redundant event refetches.

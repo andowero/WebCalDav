@@ -144,6 +144,11 @@ Journals — VJOURNAL (proxy to CalDAV, no local cache):
 - `POST /journals`, `PUT /journals/{uid}`, `DELETE /journals/{uid}`
 - A journal is a title + a Markdown body anchored on a single date(time); no end, recurrence or reminders.
 
+Combined read (proxy to CalDAV, no local cache):
+
+- `GET /calendar-data?from=&to=&kinds=events,tasks,journals` → `{events, tasks, journals}`.
+- One request for the main view loads: calendars are grouped by account and each account is fetched over a single reused CalDAV connection (one client per account, plain HTTP/1.1). `kinds` selects which item kinds to return. The per-kind `/events`, `/tasks`, `/journals` endpoints remain for MCP/shares/tests.
+
 Settings and ops:
 
 - `GET /settings`, `PUT /settings`

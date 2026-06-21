@@ -21,6 +21,7 @@ from .routers import (
     api_tokens,
     auth,
     caldav_accounts,
+    calendar_data,
     calendars,
     events,
     journals,
@@ -93,6 +94,7 @@ app.include_router(calendars.router)
 app.include_router(events.router)
 app.include_router(tasks.router)
 app.include_router(journals.router)
+app.include_router(calendar_data.router)
 app.include_router(settings_router.router)
 app.include_router(api_tokens.router)
 app.include_router(shares.router)
