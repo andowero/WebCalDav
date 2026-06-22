@@ -21,7 +21,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 - Locale is auto-detected from the browser; Czech translation included; more languages can be added under `webcaldav/locales/`.
 - All event and task attributes are editable; all-day and multi-day events supported.
 - Events and tasks are clickable and editable in place.
-- Desktop-first. Mobile browsers should work but are not the priority — native mobile apps already cover that use case.
+- Desktop-first, but mobile is now a supported target: a `@media (max-width: 768px)` layer turns the settings panel and modals into bottom sheets, enlarges tap targets, and adds touch interactions (long-press → context menu, swipe-down → dismiss). Native mobile apps still cover the heavier use cases.
 - Browser notifications for event and task reminders on Firefox, Chrome, Opera, and Safari.
 
 # Constraints and policies

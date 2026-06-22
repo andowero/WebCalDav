@@ -2,6 +2,46 @@
 
 ## Unreleased — MVP
 
+### Mobile / touch support — responsive bottom sheets + long-press menu (2026-06-22)
+- **Why**: the UI was desktop-only. On a phone the settings panel and modals
+  squished or hit their own `min-width`, tap targets were 20–36px, and the
+  right-click context menu had no touch equivalent — so tasks/journals could not
+  be marked done, edited, or deleted on mobile.
+- **CSS** (`webcaldav/static/app.css`): a new `@media (max-width: 768px)` layer
+  (plus a 480px tier) turns the settings panel and every modal into bottom
+  sheets (bottom-docked, full width, rounded top, grab handle), drops the desktop
+  `resize`/`min-width`, grows tap targets to the 44px guideline, sets 16px inputs
+  to stop iOS focus-zoom, clamps the mini date-picker to the viewport, shrinks the
+  journal editor minimums, hides the email in the top bar, lets the FullCalendar
+  toolbar wrap, and adds `:active` feedback where hover never fires. Desktop
+  (>768px) is unchanged — every rule lives inside the media query.
+- **JS** (`webcaldav/static/app.js`): `bindLongPress()` opens the existing context
+  menu on a ~500ms long-press of any grid event or agenda row (cancels on
+  scroll/multi-touch), restoring mark-done/edit/delete on touch; `initSheetSwipe()`
+  adds swipe-down-to-dismiss for the settings panel and each modal (drag past a
+  threshold calls the sheet's own close handler, else springs back), gated on
+  viewport width. `initCalendarSwipe()` pages the grid view on a horizontal
+  swipe (prev/next period) — ignored on events, in agenda mode, and in
+  navigation-locked share mode.
+- **Mobile follow-up fixes** (tested on Android Chrome over plain HTTP):
+  - Page no longer scrolls horizontally: the top bar wraps, hides the long
+    auto-logout text on mobile, and the page is clamped to `100vw` with
+    `overflow: hidden`. This removes the grey gutter and the off-screen
+    Settings/Logout buttons.
+  - Week/day column headers use a compact `weekday + day` format on narrow
+    screens (was a full ISO date per column, which overlapped into unreadable
+    "mingled" text and misaligned the header from the columns).
+  - Landscape phones: a `@media (max-height: 500px)` tier compacts the top bar,
+    toolbar, and buttons (the 44px touch targets and wrapped toolbar otherwise
+    ate the short viewport, squashing the grid to one row). Keyed on height so
+    portrait mode is unaffected.
+  - A search typed in the agenda now applies when switching to a grid view:
+    `hideAgenda()` forces `refetchEvents()` so the grid stops serving its cached
+    (unfiltered) event set on the view switch.
+  - Note for plain-HTTP LAN access: set `COOKIE_SECURE=false` or the session
+    cookie is dropped by the browser on a non-localhost `http://` origin (login
+    succeeds but bounces back to the login page).
+
 ### Performance — CalDAV connection reuse, calendar load now sub-second (2026-06-22)
 - **Root cause**: a calendar load was several seconds even against a localhost
   CalDAV server. A whole-process profile showed ~100% of the time is network/HTTP,

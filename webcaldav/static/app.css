@@ -1706,3 +1706,162 @@ details#add-account-details summary {
   justify-content: center;
   height: 100%;
 }
+
+/* ── Mobile / touch layer ──────────────────────────────────────────────────
+   Everything below only applies on narrow viewports; desktop (>768px) is left
+   exactly as designed above. The settings panel and every modal become bottom
+   sheets (docked to the bottom edge, full width, rounded top, grab handle);
+   tap targets grow to the 44px guideline; form inputs use 16px to stop iOS
+   from auto-zooming on focus. JS (app.js) adds long-press → context menu and
+   swipe-down → dismiss, both keyed to the same breakpoint. */
+@media (max-width: 768px) {
+  /* Bottom-sheet pattern shared by the settings panel and all modals. The
+     desktop centered transform is dropped; JS drives a translateY for the
+     swipe-to-dismiss drag, and the transition eases it back on release. */
+  .settings-panel,
+  .event-modal,
+  .confirm-modal {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
+    transform: none;
+    border: none;
+    border-top: 1px solid var(--border-panel);
+    border-radius: 16px 16px 0 0;
+    max-height: 90dvh;
+    resize: none;
+    transition: transform 0.18s ease-out;
+  }
+  /* Dragging adds .sheet-dragging inline transform; suppress the easing so the
+     sheet tracks the finger 1:1, then re-enable it for the spring-back. */
+  .settings-panel.sheet-dragging,
+  .event-modal.sheet-dragging,
+  .confirm-modal.sheet-dragging {
+    transition: none;
+  }
+
+  /* Grab-handle affordance pinned to the top of each sheet. */
+  .settings-header::before,
+  .event-modal-header::before,
+  .confirm-modal::before {
+    content: "";
+    position: absolute;
+    top: 0.45rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2.25rem;
+    height: 0.25rem;
+    border-radius: 999px;
+    background: var(--border-control);
+  }
+  .settings-header,
+  .event-modal-header { position: relative; padding-top: 1.1rem; }
+  .confirm-modal { position: fixed; padding-top: 1.6rem; }
+
+  /* Touch targets: 44px minimum, larger glyphs. */
+  .btn-outline,
+  .btn-primary,
+  .btn-danger {
+    min-height: 44px;
+    font-size: 15px;
+  }
+  .btn-icon { min-width: 44px; min-height: 44px; font-size: 20px; }
+  .ev-context-menu button { min-height: 44px; font-size: 15px; }
+  .ev-journal-tab { min-height: 40px; padding: 0.45rem 1rem; font-size: 15px; }
+  .cal-color { width: 36px; height: 36px; }
+  .ev-spin button { width: 2.2em; }
+  .ev-cal-nav { width: 2.4em; }
+  .ev-cal-day { padding: 0.55rem 0; }
+  .fab:active { background: var(--fab-hover); transform: scale(0.94); }
+
+  /* 16px inputs prevent the iOS focus-zoom; widen the cramped date spinners. */
+  .event-modal-body input[type="text"],
+  .event-modal-body .ev-dnum,
+  .event-modal-body textarea,
+  .event-modal-body select,
+  .settings-scroll input,
+  .settings-scroll select,
+  .cal-search-input {
+    font-size: 16px;
+  }
+  .event-modal-body .ev-dnum { width: 3em; }
+  .event-modal-body .ev-year { width: 4em; }
+
+  /* Mini date-picker popup must never overflow the viewport. */
+  .ev-cal-pop { width: min(15rem, 92vw); }
+
+  /* Journal editor: smaller minimums so Edit + Display fit a portrait phone. */
+  .event-modal-body textarea.ev-journal-edit,
+  .ev-journal-display { min-height: 10rem; }
+  .ev-journal-display { max-height: 50dvh; }
+
+  /* Stop the page from ever growing wider than the screen: the top bar's
+     intrinsic width (logo + name + buttons) used to force a horizontal scroll,
+     leaving a grey gutter and pushing the action buttons off-screen. */
+  html, body { overflow-x: hidden; }
+  #page-calendar { width: 100vw; max-width: 100vw; overflow: hidden; }
+
+  /* Top bar: drop the email + the long auto-logout text, and let the row wrap
+     instead of overflowing so the action buttons stay reachable. */
+  .user-email,
+  .logout-countdown { display: none; }
+  .top-bar {
+    flex-wrap: wrap;
+    height: auto;
+    min-width: 0;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .top-bar .btn-outline { padding: 0.3rem 0.6rem; }
+
+  /* FullCalendar header: let the toolbar wrap instead of overflowing, and put
+     the title on its own line above the button groups. */
+  .fc .fc-toolbar.fc-header-toolbar { flex-wrap: wrap; gap: 0.4rem; }
+  .fc .fc-toolbar-title { font-size: 1.3rem; }
+
+  /* Touch feedback where hover never fires. */
+  .agenda-row:active { background: var(--bg-row-hover); }
+  .ev-context-menu button:active,
+  .btn-outline:active { background: var(--bg-subtle); }
+  .ev-cal-day:active { background: var(--bg-control-hover); }
+}
+
+/* Narrow-phone tier: agenda time column shrinks so titles keep room. */
+@media (max-width: 480px) {
+  .agenda-time { flex-basis: 5rem; }
+  .fab { right: 1rem; bottom: 1rem; }
+}
+
+/* Short-viewport tier (landscape phones): height — not width — is the scarce
+   axis, so the chrome must stop eating it. Keyed on height so portrait phones
+   (tall) never match and vertical mode is untouched. Declared after the
+   max-width block so its compact min-heights win where both apply. */
+@media (max-height: 500px) {
+  /* Reclaim the 44px touch targets — in landscape there's width to spare, and
+     the user can rotate back for big targets. */
+  .btn-outline,
+  .btn-primary,
+  .btn-danger,
+  .fc .fc-button {
+    min-height: 0;
+    padding: 0.25rem 0.6rem;
+    font-size: 14px;
+  }
+  .btn-icon { min-height: 0; min-width: 0; }
+
+  /* Slim the two header rows so the grid keeps the remaining height. */
+  .top-bar { height: auto; padding: 0.2rem 0.75rem; gap: 0.5rem; }
+  .fc .fc-toolbar.fc-header-toolbar { margin-bottom: 0.4em; gap: 0.3rem; }
+  .fc .fc-toolbar-title { font-size: 1.15rem; }
+
+  /* Bottom-sheet modals can use nearly the whole short viewport. */
+  .settings-panel,
+  .event-modal,
+  .confirm-modal { max-height: 96dvh; }
+  .event-modal-body textarea.ev-journal-edit,
+  .ev-journal-display { min-height: 6rem; }
+}

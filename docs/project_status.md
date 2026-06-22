@@ -22,6 +22,13 @@
 
 ## Recent additions
 
+### Mobile / touch support (2026-06-22)
+- New `@media (max-width: 768px)` CSS layer makes the settings panel and all
+  modals bottom sheets, grows tap targets to 44px, uses 16px inputs (no iOS
+  focus-zoom), and lets the FullCalendar toolbar wrap. JS adds long-press →
+  context menu (mark done/edit/delete on touch) and swipe-down → dismiss for the
+  sheets. Desktop layout unchanged (all rules inside the breakpoint).
+
 ### CalDAV connection reuse — sub-second calendar load (2026-06-22)
 - Calendar loads were network-bound: a fresh `caldav.DAVClient` (new connection +
   HTTP/2/QUIC negotiation) was opened per calendar per endpoint. New

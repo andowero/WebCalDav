@@ -259,6 +259,17 @@
   // Per-view date formats so week/day headers honor the user's date_format.
   function fcViewFormats(dateKey) {
     const ds = luxonDateFmt(dateKey);
+    // A full ISO date per column doesn't fit a phone's ~45px week columns and
+    // the strings overlap. Use a compact weekday+day header on narrow screens.
+    if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
+      return {
+        timeGridWeek: {
+          dayHeaderFormat: { weekday: 'short', day: 'numeric', omitCommas: true },
+          titleFormat: weekTitleFormat,
+        },
+        timeGridDay: { dayHeaderFormat: 'EEEE ' + ds, titleFormat: ds },
+      };
+    }
     return {
       timeGridWeek: { dayHeaderFormat: 'EEE ' + ds, titleFormat: weekTitleFormat },
       timeGridDay: { dayHeaderFormat: 'EEEE ' + ds, titleFormat: ds },
@@ -2825,6 +2836,9 @@
   // ── Right-click context menu ─────────────────────────────────────────────────
 
   let _ctxEvent = null;
+  // A long-press that opens the menu must not let the trailing synthetic click
+  // (some browsers still emit one) immediately dismiss it again.
+  let _ctxSuppressClick = false;
 
   function showContextMenu(x, y, event) {
     _ctxEvent = event;
@@ -2848,6 +2862,64 @@
   function hideContextMenu() {
     document.getElementById('ev-context-menu').style.display = 'none';
     _ctxEvent = null;
+  }
+
+  // Touch devices have no right-click, so a long-press opens the same context
+  // menu. Bound alongside the desktop `contextmenu` listener on each event
+  // element and agenda row; cancels on movement (scroll) or multi-touch.
+  // `getEvent` returns the FC-shaped event the menu should act on.
+  function bindLongPress(el, getEvent) {
+    let timer = null;
+    let sx = 0, sy = 0;
+    const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    el.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) { clear(); return; }
+      const t = e.touches[0];
+      sx = t.clientX; sy = t.clientY;
+      clear();
+      timer = setTimeout(() => {
+        timer = null;
+        const ev = getEvent();
+        if (!ev) return;
+        _ctxSuppressClick = true;
+        setTimeout(() => { _ctxSuppressClick = false; }, 700);
+        // The menu is position:fixed, so viewport-relative client coords are right.
+        showContextMenu(sx, sy, ev);
+      }, 500);
+    }, { passive: true });
+    el.addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      if (t && (Math.abs(t.clientX - sx) > 10 || Math.abs(t.clientY - sy) > 10)) clear();
+    }, { passive: true });
+    el.addEventListener('touchend', clear, { passive: true });
+    el.addEventListener('touchcancel', clear, { passive: true });
+  }
+
+  // Horizontal swipe on the calendar body pages the grid view (prev/next
+  // period). Skipped in agenda mode (it scrolls/loads vertically) and in share
+  // mode (navigation is locked to the shared window). A swipe starting on an
+  // event is ignored so it never fights FullCalendar's own touch event drag.
+  function initCalendarSwipe(calendarEl) {
+    let sx = 0, sy = 0, onEvent = false, tracking = false;
+    calendarEl.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) { tracking = false; return; }
+      const t = e.touches[0];
+      sx = t.clientX; sy = t.clientY;
+      onEvent = !!(e.target.closest && e.target.closest('.fc-event'));
+      tracking = true;
+    }, { passive: true });
+    calendarEl.addEventListener('touchend', (e) => {
+      if (!tracking) return;
+      tracking = false;
+      if (onEvent || _agendaActive || SHARE_MODE || !_fcCalendar) return;
+      const t = e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      // Clear horizontal intent only: long enough, and mostly sideways.
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      if (dx < 0) _fcCalendar.next();
+      else _fcCalendar.prev();
+    }, { passive: true });
   }
 
   function initContextMenu() {
@@ -2896,6 +2968,8 @@
     });
     // Any outside click / scroll dismisses the menu.
     document.addEventListener('click', (e) => {
+      // Swallow the synthetic click that can trail a long-press open.
+      if (_ctxSuppressClick) { _ctxSuppressClick = false; return; }
       if (!menu.contains(e.target)) hideContextMenu();
     });
     document.addEventListener('contextmenu', (e) => {
@@ -3297,6 +3371,11 @@
     if (_agendaObserver) _agendaObserver.disconnect();
     // Correct layout drift from the view harness having been display:none.
     if (_fcCalendar) _fcCalendar.updateSize();
+    // The grid filters within its `events` source, but FC reuses cached events
+    // on a view switch without re-running the source — so a search typed while
+    // the agenda was up wouldn't apply to the grid. Force a refetch on the way
+    // out so the grid reflects the current search term.
+    if (_fcCalendar) _fcCalendar.refetchEvents();
   }
 
   function agendaReset() {
@@ -3492,6 +3571,9 @@
       });
     }
     row.addEventListener('click', () => openEventModal(agendaToFcShim(e)));
+    // Long-press opens the context menu (mark done / edit / delete) on touch,
+    // matching the right-click affordance on the grid views.
+    if (p.calendarId != null) bindLongPress(row, () => agendaToFcShim(e));
     return row;
   }
 
@@ -4074,11 +4156,13 @@
           e.preventDefault();
           showContextMenu(e.pageX, e.pageY, info.event);
         });
+        bindLongPress(info.el, () => info.event);
       },
       eventDrop: onEventChange,
       eventResize: onEventChange,
     });
     _fcCalendar.render();
+    initCalendarSwipe(calendarEl);
 
     const fab = document.getElementById('btn-create-fab');
     fab.addEventListener('click', openCreateModalBlank);
@@ -4367,10 +4451,65 @@
     _notifCtags = null;
   }
 
+  // ── Bottom-sheet swipe-to-dismiss (mobile) ──────────────────────────────────
+  // On narrow viewports the settings panel and modals dock to the bottom edge
+  // (see app.css @media). Dragging the sheet (or its header) down past a
+  // threshold closes it via its own close handler; a short drag springs back.
+  // Bound once at startup and gated on viewport width, so desktop is untouched.
+  function bindSheetDrag(sheet, handle, close) {
+    let startY = 0, dy = 0, dragging = false;
+    const onMove = (e) => {
+      if (!dragging) return;
+      const t = e.touches[0];
+      if (!t) return;
+      dy = Math.max(0, t.clientY - startY);
+      sheet.style.transform = `translateY(${dy}px)`;
+    };
+    const onEnd = () => {
+      if (!dragging) return;
+      dragging = false;
+      sheet.classList.remove('sheet-dragging');
+      sheet.style.transform = '';
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      document.removeEventListener('touchcancel', onEnd);
+      if (dy > 90) close();
+    };
+    handle.addEventListener('touchstart', (e) => {
+      if (window.innerWidth > 768 || e.touches.length !== 1) return;
+      startY = e.touches[0].clientY;
+      dy = 0;
+      dragging = true;
+      sheet.classList.add('sheet-dragging');
+      document.addEventListener('touchmove', onMove, { passive: true });
+      document.addEventListener('touchend', onEnd, { passive: true });
+      document.addEventListener('touchcancel', onEnd, { passive: true });
+    }, { passive: true });
+  }
+
+  function initSheetSwipe() {
+    const sheets = [
+      { id: 'settings-panel', handle: '.settings-header', close: closeSettings },
+      { id: 'event-modal', handle: '.event-modal-header', close: closeEventModal },
+      { id: 'share-modal', handle: '.event-modal-header', close: closeShareModal },
+      { id: 'confirm-modal', handle: null, close: () => closeConfirm(false) },
+      { id: 'scope-modal', handle: null, close: () => closeScope(null) },
+      { id: 'token-modal', handle: null, close: closeTokenModal },
+      { id: 'shareres-modal', handle: null, close: closeShareResult },
+    ];
+    for (const s of sheets) {
+      const el = document.getElementById(s.id);
+      if (!el) continue;
+      const handle = s.handle ? el.querySelector(s.handle) : el;
+      if (handle) bindSheetDrag(el, handle, s.close);
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     // Date/time formatting (Luxon) and static markup follow the active language.
     if (window.luxon && luxon.Settings) luxon.Settings.defaultLocale = LANG;
     applyTranslations(document);
+    initSheetSwipe();
     const state = window.__STATE__;
     if (state === 'anonymous') initLogin();
     else if (state === 'restricted') initChangePassword();
