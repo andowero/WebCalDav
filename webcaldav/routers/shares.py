@@ -27,13 +27,14 @@ from ..caldav_client import (
     export_item_ics,
     export_range_ics,
     fetch_account_data,
+    fetch_item_by_uid,
 )
 from ..config import settings
 from ..crypto import decrypt_bytes
 from ..deps import get_db, get_share_context, get_unrestricted_session
 from ..models import Calendar, CalDAVAccount, Share, ShareCalendar, UserSettings
 from ..session import SessionEntry
-from ..shares import ShareContext, mint_share
+from ..shares import ShareContext, grid_window, mint_share
 from . import events as events_router
 from . import journals as journals_router
 from . import tasks as tasks_router
@@ -174,6 +175,104 @@ async def list_shares(
         ).scalars().all()
         out.append(_to_out(s, list(cals)))
     return out
+
+
+class ExportRequest(BaseModel):
+    """Scope for a direct owner-side .ics download. Mirrors ShareCreate but
+    carries no mode/expiry: an export needs neither, so it is offered before the
+    access/expiry choice (and without minting a credential-bearing link)."""
+
+    kind: Literal["item", "grid", "agenda"]
+    item: ItemSpec | None = None
+    grid: GridSpec | None = None
+    agenda: AgendaSpec | None = None
+    calendars: list[CalScope] | None = None
+
+
+@router.post("/export.ics")
+async def owner_export_ics(
+    body: ExportRequest,
+    entry: SessionEntry = Depends(get_unrestricted_session),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Export the chosen scope to .ics using the owner's own session (no share is
+    created). Available from the first share dialog since .ics ignores
+    read-only/read-write and expiry."""
+    if not settings.sharing_enabled:
+        raise HTTPException(status_code=403, detail="Sharing is disabled")
+    owned = await _user_calendars(entry.user_id, db)
+    tz, fdow = await _user_settings(entry.user_id, db)
+
+    accounts: dict[int, CalDAVAccount] = {}
+
+    async def _password_for(cal: Calendar) -> tuple[CalDAVAccount, str]:
+        acc = accounts.get(cal.caldav_account_id)
+        if acc is None:
+            acc = (
+                await db.execute(
+                    select(CalDAVAccount).where(CalDAVAccount.id == cal.caldav_account_id)
+                )
+            ).scalar_one()
+            accounts[cal.caldav_account_id] = acc
+        pw = decrypt_bytes(acc.encrypted_password, acc.nonce, entry.dek).decode()
+        return acc, pw
+
+    if body.kind == "item":
+        if body.item is None or body.item.calendar_id not in owned:
+            raise HTTPException(status_code=400, detail="Unknown calendar")
+        cal = owned[body.item.calendar_id]
+        acc, pw = await _password_for(cal)
+        ics = await export_item_ics(
+            account_url=acc.url,
+            username=acc.username,
+            password=pw,
+            calendar_url=cal.caldav_id,
+            uid=body.item.uid,
+            item_kind=body.item.item_kind,
+        )
+        filename = f"{body.item.uid.split('@')[0]}.ics"
+    else:
+        scope = body.calendars or []
+        ids = [c.id for c in scope]
+        if not ids:
+            raise HTTPException(status_code=400, detail="At least one calendar is required")
+        if not set(ids).issubset(owned):
+            raise HTTPException(status_code=400, detail="Unknown calendar in scope")
+        if body.kind == "grid":
+            if body.grid is None:
+                raise HTTPException(status_code=400, detail="grid is required")
+            try:
+                from_dt, to_dt = grid_window(body.grid.grid_view, body.grid.grid_anchor, fdow, tz)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid grid")
+        else:
+            if body.agenda is None:
+                raise HTTPException(status_code=400, detail="agenda is required")
+            try:
+                from_dt = datetime.fromisoformat(body.agenda.agenda_from)
+                to_dt = datetime.fromisoformat(body.agenda.agenda_to)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid agenda range")
+        sources = []
+        for cid in ids:
+            cal = owned[cid]
+            acc, pw = await _password_for(cal)
+            sources.append(
+                {
+                    "account_url": acc.url,
+                    "username": acc.username,
+                    "password": pw,
+                    "calendar_url": cal.caldav_id,
+                }
+            )
+        ics = await export_range_ics(sources, from_dt, to_dt)
+        filename = "calendar.ics"
+
+    return Response(
+        content=ics,
+        media_type="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("")
@@ -440,8 +539,38 @@ async def items(
 ) -> dict[str, Any]:
     """Events, tasks and journals visible to the share, scoped to the sealed
     window and calendars."""
-    from_dt, to_dt = _clamp_window(ctx)
     cals = await _readable_calendars(ctx, db)
+
+    if ctx.kind == "item":
+        # Single-item share: fetch the one item directly by uid (one CalDAV GET)
+        # instead of a wide date-range search + filter. Fast and reschedule-proof.
+        by_id = {c.id: (c, a) for c, a in cals}
+        empty: dict[str, list[dict[str, Any]]] = {"events": [], "tasks": [], "journals": []}
+        if ctx.item_calendar_id not in by_id:
+            return empty
+        cal, account = by_id[ctx.item_calendar_id]
+        try:
+            item = await fetch_item_by_uid(
+                account_url=account.url,
+                username=account.username,
+                password=_password(account, ctx),
+                calendar_url=cal.caldav_id,
+                uid=ctx.item_uid or "",
+                item_kind=ctx.item_kind or "event",
+                color=cal.color,
+                calendar_id=cal.id,
+            )
+        except Exception as e:
+            logger.warning("share_item_fetch_failed share_id=%s error=%s", ctx.share_id, repr(e))
+            return empty
+        if item is None:
+            return empty
+        bucket = {"event": "events", "task": "tasks", "journal": "journals"}[
+            ctx.item_kind or "event"
+        ]
+        return {**empty, bucket: [item]}
+
+    from_dt, to_dt = _clamp_window(ctx)
 
     # Group by account so each opens one shared client across its calendars.
     by_account: dict[int, tuple[CalDAVAccount, list[CalendarRef]]] = {}

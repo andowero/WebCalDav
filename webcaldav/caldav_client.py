@@ -1034,6 +1034,65 @@ def _series_ical(
     return str(ical.to_ical().decode("utf-8"))
 
 
+def _vevent_to_dict(
+    vevent: Any,
+    color: str,
+    calendar_id: int,
+    fallback_uid: str,
+    master_props: dict[str, Any] | None = None,
+    override_reminders: dict[tuple[str, str], list[Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Build the FullCalendar event dict for a single VEVENT. Shared by the
+    windowed grid fetch and the single-item by-uid fetch. ``master_props`` and
+    ``override_reminders`` recover RRULE/VALARM data that expansion strips; pass
+    empty/None for an unexpanded master (which carries them inline)."""
+    if "dtstart" not in vevent:
+        return None
+    master_props = master_props or {}
+    override_reminders = override_reminders or {}
+    uid = str(vevent.get("uid")) if vevent.get("uid") else fallback_uid
+    summary = vevent.get("summary")
+    title = str(summary) if summary else "(No title)"
+    dtstart = vevent.decoded("dtstart")
+    all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
+    ev: dict[str, Any] = {
+        "id": uid,
+        "title": title,
+        "start": _dt_to_iso(dtstart),
+        "allDay": all_day,
+        "color": color,
+    }
+    if "dtend" in vevent:
+        ev["end"] = _dt_to_iso(vevent.decoded("dtend"))
+    elif "duration" in vevent:
+        dur = vevent.decoded("duration")
+        if isinstance(dur, timedelta):
+            ev["end"] = _dt_to_iso(dtstart + dur)
+
+    # Instance props take priority; recurrence/reminders fall back to the master
+    # since expansion strips them.
+    inst = _extract_props(vevent)
+    extended: dict[str, Any] = {"rawStart": ev["start"], "calendarId": calendar_id}
+    if "end" in ev:
+        extended["rawEnd"] = ev["end"]
+    # Detached overrides carry a stable RECURRENCE-ID that does not change when
+    # the occurrence is moved; it is the pivot the server keys overrides on, so
+    # expose it for scoped edits.
+    if "recurrence-id" in vevent:
+        rid = _dt_to_iso(vevent.decoded("recurrence-id"))
+        extended["recurrenceId"] = rid
+        # Expansion may strip the override's VALARMs as well; recover them from
+        # the unexpanded override component.
+        if "reminders" not in inst and (uid, rid) in override_reminders:
+            inst["reminders"] = override_reminders[(uid, rid)]
+    for key in ("description", "location", "recurrence", "recurrenceRule", "reminders"):
+        val = inst.get(key, master_props.get(key))
+        if val:
+            extended[key] = val
+    ev["extendedProps"] = extended
+    return ev
+
+
 def _events_from_cal(
     client: caldav.DAVClient,
     calendar_url: str,
@@ -1077,50 +1136,12 @@ def _events_from_cal(
                 # Drop a plain occurrence that an override already covers.
                 if "recurrence-id" not in vevent and (uid, _dt_to_iso(vevent.decoded("dtstart"))) in overridden:
                     continue
-                summary = vevent.get("summary")
-                title = str(summary) if summary else "(No title)"
-                dtstart = vevent.decoded("dtstart")
-                all_day = isinstance(dtstart, date) and not isinstance(dtstart, datetime)
-                ev: dict[str, Any] = {
-                    "id": uid,
-                    "title": title,
-                    "start": _dt_to_iso(dtstart),
-                    "allDay": all_day,
-                    "color": color,
-                }
-                if "dtend" in vevent:
-                    ev["end"] = _dt_to_iso(vevent.decoded("dtend"))
-                elif "duration" in vevent:
-                    dur = vevent.decoded("duration")
-                    if isinstance(dur, timedelta):
-                        ev["end"] = _dt_to_iso(dtstart + dur)
-
-                # Instance props take priority; recurrence/reminders fall
-                # back to the master since expansion strips them.
-                inst = _extract_props(vevent)
-                master = meta.get(uid, {})
-                extended: dict[str, Any] = {"rawStart": ev["start"], "calendarId": calendar_id}
-                if "end" in ev:
-                    extended["rawEnd"] = ev["end"]
-                # Detached overrides carry a stable RECURRENCE-ID that does not
-                # change when the occurrence is moved; it is the pivot the
-                # server keys overrides on, so expose it for scoped edits.
-                if "recurrence-id" in vevent:
-                    rid = _dt_to_iso(vevent.decoded("recurrence-id"))
-                    extended["recurrenceId"] = rid
-                    # Expansion may strip the override's VALARMs as well;
-                    # recover them from the unexpanded override component.
-                    if "reminders" not in inst and (uid, rid) in override_reminders:
-                        inst["reminders"] = override_reminders[(uid, rid)]
-                for key in (
-                    "description", "location", "recurrence", "recurrenceRule", "reminders",
-                ):
-                    val = inst.get(key, master.get(key))
-                    if val:
-                        extended[key] = val
-                ev["extendedProps"] = extended
-
-                result.append(ev)
+                ev = _vevent_to_dict(
+                    vevent, color, calendar_id, str(event.url),
+                    meta.get(uid, {}), override_reminders,
+                )
+                if ev is not None:
+                    result.append(ev)
         except Exception as e:
             logger.warning("Failed to parse event: %s", e)
     return result
@@ -2190,6 +2211,37 @@ async def set_task_status(
 # _JOURNAL kind and the caldav lib's save_journal/journal_by_uid.
 
 
+def _vjournal_to_dict(
+    vj: Any, color: str, calendar_id: int, fallback_uid: str
+) -> dict[str, Any] | None:
+    """Build the FullCalendar event dict for a single VJOURNAL. Shared by the
+    windowed fetch and the single-item by-uid fetch."""
+    if "dtstart" not in vj:
+        return None
+    uid = str(vj.get("uid")) if vj.get("uid") else fallback_uid
+    summary = vj.get("summary")
+    title = str(summary) if summary else "(No title)"
+    dtstart = vj.decoded("dtstart")
+    all_day = _is_all_day(dtstart)
+    ev: dict[str, Any] = {
+        "id": uid,
+        "title": title,
+        "start": _dt_to_iso(dtstart),
+        "allDay": all_day,
+        "color": color,
+    }
+    extended: dict[str, Any] = {
+        "isJournal": True,
+        "calendarId": calendar_id,
+        "rawStart": ev["start"],
+    }
+    desc = vj.get("description")
+    if desc:
+        extended["description"] = str(desc)
+    ev["extendedProps"] = extended
+    return ev
+
+
 def _journals_from_cal(
     client: caldav.DAVClient,
     calendar_url: str,
@@ -2209,30 +2261,9 @@ def _journals_from_cal(
     for journal in journals:
         try:
             for vj in journal.icalendar_instance.walk("VJOURNAL"):
-                if "dtstart" not in vj:
-                    continue
-                uid = str(vj.get("uid")) if vj.get("uid") else str(journal.url)
-                summary = vj.get("summary")
-                title = str(summary) if summary else "(No title)"
-                dtstart = vj.decoded("dtstart")
-                all_day = _is_all_day(dtstart)
-                ev: dict[str, Any] = {
-                    "id": uid,
-                    "title": title,
-                    "start": _dt_to_iso(dtstart),
-                    "allDay": all_day,
-                    "color": color,
-                }
-                extended: dict[str, Any] = {
-                    "isJournal": True,
-                    "calendarId": calendar_id,
-                    "rawStart": ev["start"],
-                }
-                desc = vj.get("description")
-                if desc:
-                    extended["description"] = str(desc)
-                ev["extendedProps"] = extended
-                result.append(ev)
+                ev = _vjournal_to_dict(vj, color, calendar_id, str(journal.url))
+                if ev is not None:
+                    result.append(ev)
         except Exception as e:
             logger.warning("Failed to parse journal: %s", e)
     return result
@@ -2530,6 +2561,77 @@ async def export_item_ics(
             raise
         except Exception:
             caldav_request_errors_total.labels(operation="export_item").inc()
+            raise
+
+
+def _sync_fetch_item_by_uid(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    item_kind: str,
+    color: str,
+    calendar_id: int,
+) -> dict[str, Any] | None:
+    """Fetch one item directly by uid (one CalDAV GET, no date-range search) and
+    parse it into the FullCalendar dict. Used by single-item shares so the lookup
+    is reschedule-proof and avoids the wide windowed search."""
+    with _make_dav_client(account_url, username, password) as client:
+        cal = caldav.Calendar(client=client, url=calendar_url)
+        lookup = {
+            "event": cal.event_by_uid,
+            "task": cal.todo_by_uid,
+            "journal": cal.journal_by_uid,
+        }[item_kind]
+        try:
+            obj = lookup(uid)
+        except caldav.lib.error.NotFoundError as e:
+            raise EventNotFoundError(uid) from e
+        comp_name = {"event": "VEVENT", "task": "VTODO", "journal": "VJOURNAL"}[item_kind]
+        fallback = str(obj.url)
+        # A recurring series resource holds the master plus detached overrides;
+        # the single-item view renders the master, so prefer the component
+        # without a RECURRENCE-ID.
+        comps = sorted(
+            obj.icalendar_instance.walk(comp_name), key=lambda c: "recurrence-id" in c
+        )
+        for comp in comps:
+            if item_kind == "event":
+                ev = _vevent_to_dict(comp, color, calendar_id, fallback)
+            elif item_kind == "task":
+                undated = "dtstart" not in comp and "due" not in comp
+                ev = _build_task_event(
+                    comp, color, calendar_id, {}, {}, fallback, undated=undated
+                )
+            else:
+                ev = _vjournal_to_dict(comp, color, calendar_id, fallback)
+            if ev is not None:
+                return ev
+        return None
+
+
+async def fetch_item_by_uid(
+    account_url: str,
+    username: str,
+    password: str,
+    calendar_url: str,
+    uid: str,
+    item_kind: str,
+    color: str,
+    calendar_id: int,
+) -> dict[str, Any] | None:
+    with caldav_request_duration_seconds.labels(operation="fetch_item").time():
+        try:
+            return await asyncio.to_thread(
+                _sync_fetch_item_by_uid,
+                account_url, username, password, calendar_url,
+                uid, item_kind, color, calendar_id,
+            )
+        except EventNotFoundError:
+            raise
+        except Exception:
+            caldav_request_errors_total.labels(operation="fetch_item").inc()
             raise
 
 

@@ -321,6 +321,65 @@ async def test_item_share_limited_to_uid(client, db_engine, store, sharing_on, m
 
 
 # --------------------------------------------------------------------------- #
+# Single-item shares fetch directly by uid (fast, reschedule-proof)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_item_share_fetches_by_uid(client, db_engine, store, sharing_on, monkeypatch):
+    uid, dek = await _login(client, store, "s-item-uid@example.com")
+    ids = await _add_calendars(uid, dek, n=1)
+
+    seen = {}
+
+    async def fake_fetch_item_by_uid(**kwargs):
+        seen["uid"] = kwargs["uid"]
+        seen["item_kind"] = kwargs["item_kind"]
+        return {"id": kwargs["uid"], "title": "Solo", "extendedProps": {"calendarId": kwargs["calendar_id"]}}
+
+    async def boom_fetch_account_data(**kwargs):  # pragma: no cover - must not run
+        raise AssertionError("item share must not use the windowed search")
+
+    monkeypatch.setattr(shares_router, "fetch_item_by_uid", fake_fetch_item_by_uid)
+    monkeypatch.setattr(shares_router, "fetch_account_data", boom_fetch_account_data)
+
+    r = await client.post("/shares", json={
+        "kind": "item", "mode": "ro",
+        "item": {"uid": "solo@x", "item_kind": "event", "calendar_id": ids[0]},
+    })
+    secret = _secret(r.json()["url"])
+    res = await client.get("/shares/items", headers=_hdr(secret))
+    assert res.status_code == 200
+    body = res.json()
+    assert [e["id"] for e in body["events"]] == ["solo@x"]
+    assert body["tasks"] == [] and body["journals"] == []
+    # The lookup was by uid (so it survives the owner rescheduling the event),
+    # never the wide date-range fallback.
+    assert seen == {"uid": "solo@x", "item_kind": "event"}
+
+
+# --------------------------------------------------------------------------- #
+# Owner-side .ics export (first dialog, no link minted)
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_owner_export_ics(client, db_engine, store, sharing_on, monkeypatch):
+    uid, dek = await _login(client, store, "s-owner-ics@example.com")
+    ids = await _add_calendars(uid, dek, n=1)
+
+    async def fake_export_range(sources, from_dt, to_dt):
+        return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR\r\n"
+
+    monkeypatch.setattr(shares_router, "export_range_ics", fake_export_range)
+
+    res = await client.post("/shares/export.ics", json={
+        "kind": "grid",
+        "grid": {"grid_view": "dayGridMonth", "grid_anchor": "2026-06-15"},
+        "calendars": [{"id": ids[0]}],
+    })
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/calendar")
+    assert "VCALENDAR" in res.text
+
+
+# --------------------------------------------------------------------------- #
 # .ics export
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio

@@ -2,6 +2,38 @@
 
 ## Unreleased — MVP
 
+### Sharing UX fixes — refresh-safe links, faster single items, polished share view (2026-06-23)
+- **Why**: opening a shared link and refreshing the browser broke it (the URL
+  fragment holding the secret was stripped after first load), single shared
+  events loaded slowly, and the single-item share view had rough edges (exitable
+  modal, stray `+` button, hardcoded "Current calendar", English recurrence
+  text, the editor shown to read-only viewers, the modal vanishing on save).
+- **Refresh-safe secret** (`webcaldav/static/app.js`): the share secret is no
+  longer cleared from the URL fragment, so reload/bookmark re-read it. The
+  fragment still never reaches the server (out of logs/Referer).
+- **Single-item shares fetch by UID** (`webcaldav/caldav_client.py`,
+  `webcaldav/routers/shares.py`): a new `fetch_item_by_uid` (reusing the
+  `*_by_uid` lookup) replaces the ±10-year windowed search + filter for item
+  shares — one CalDAV GET, fast, and reschedule-proof. The per-component dict
+  builders were factored out (`_vevent_to_dict`, `_vjournal_to_dict`) and reused.
+- **Single-item share view** (`app.js`): no close/`+` buttons, the real calendar
+  name (or a localized fallback), a localized plain-language recurrence summary
+  for read-only viewers (the structured editor only for writable ones), and a
+  non-modal "Saved." toast that keeps the editor open on save.
+- **Feedback toasts** (`app.js`/`app.css`): a reusable `toast()` confirms
+  "Copied to clipboard." on the share-link and API-token copy buttons.
+- **`.ics` in the first share dialog** (`index.html`, `app.js`,
+  `webcaldav/routers/shares.py`): a new owner-authed `POST /shares/export.ics`
+  serves the chosen scope straight from the session, so downloading never mints
+  a link or requires picking access/expiry.
+- **Grid-share date pickers bounded** (`app.js`/`app.css`): create/edit date
+  fields and the mini-calendar refuse dates outside the shared window;
+  recurrence-until is deliberately left unbounded.
+- **i18n** (`webcaldav/locales/{en,cs}.json`): new keys for the recurrence
+  summary, "This calendar", "Copied…", and "Download .ics".
+- **Tests** (`tests/test_shares_api.py`): item shares fetch by UID (asserting the
+  windowed path is not used), and the owner `.ics` export.
+
 ### Mobile / touch support — responsive bottom sheets + long-press menu (2026-06-22)
 - **Why**: the UI was desktop-only. On a phone the settings panel and modals
   squished or hit their own `min-width`, tap targets were 20–36px, and the

@@ -302,6 +302,28 @@ body {
   font-size: 13px;
 }
 
+/* Transient toast (saved / copied feedback). Above all modals. */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 2rem;
+  transform: translate(-50%, 1rem);
+  background: var(--text-strong);
+  color: var(--bg-surface);
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  font-size: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.app-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 /* ── Calendar page ── */
 #page-calendar {
   flex: 1;
@@ -1036,6 +1058,12 @@ details#add-account-details summary {
 .ev-cal-day.other-month { color: var(--text-dim); }
 .ev-cal-day.today { outline: 1px solid var(--today-outline); }
 .ev-cal-day.selected { background: var(--primary); color: #fff; }
+.ev-cal-day.disabled {
+  color: var(--text-disabled);
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
 .ev-cal-grid.months { grid-template-columns: repeat(3, 1fr); }
 

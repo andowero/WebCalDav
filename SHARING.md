@@ -25,7 +25,10 @@ Every share modal also offers a **`.ics` download** — a standard iCalendar fil
 that imports into Google Calendar, Apple Calendar, Outlook, etc. A single `.ics`
 holds many events, so a grid/agenda export is one file with everything in the
 window. `.ics` is the only download format offered because it is the universal
-interchange standard; the "other format" is the live link itself.
+interchange standard; the "other format" is the live link itself. The download
+sits in the **first** share dialog and ignores the read-only/read & write and
+expiry choices (a file needs neither), so exporting never mints a link — it is
+served straight from your own session.
 
 ## Read-only vs read & write
 
@@ -36,6 +39,24 @@ interchange standard; the "other format" is the live link itself.
   **but only on the calendars you marked writable**. Recurring events that reach
   past the shared window are written in full; the view still only renders the
   occurrences inside the window.
+
+## Opening a shared link
+
+- **Refreshing or bookmarking keeps working.** The secret stays in the URL
+  fragment, so reloading the page re-reads it — a link is not consumed by being
+  opened, and only expires or is revoked.
+- **A single-item link is the whole page.** Its editor opens fixed in place: no
+  close/exit or `+` create buttons, and the real calendar name is shown. Saving
+  an editable item keeps the editor open and confirms with a brief "Saved."
+  toast instead of vanishing. The one item loads fast — it is fetched directly
+  by UID rather than scanned over a wide date range, so it also keeps working if
+  you reschedule the event after sharing.
+- **Recurrence reads in the recipient's language.** A read-only item shows a
+  localized plain-language summary of its repeat rule (not the structured
+  editor); an editable item shows the editor.
+- **Grid shares keep new items inside the window.** When creating/editing in a
+  shared month/week/day, the date pickers refuse dates outside the shared
+  window (a recurrence *end* date may still fall beyond it).
 
 ## Expiry and revocation
 
