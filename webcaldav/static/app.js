@@ -305,7 +305,9 @@
 
   // Custom timeGridWeek toolbar title: "<month> <year>, <d1> – <d2>", language
   // agnostic. Cross-month weeks show both months; cross-year shows both years.
-  // FC titleFormat callback: markers are UTC, end is exclusive (last day = -1d).
+  // FC titleFormat callback: markers are UTC. FC already hands us the *inclusive*
+  // last instant of the range as the end marker (e.g. Sun 23:59:59.999), so the
+  // last day is read straight off it — no -1d (that over-subtracts to Sat).
   // Returning the string via titleFormat keeps FC's preact in control of the DOM
   // (mutating .fc-toolbar-title directly corrupts FC's title reconciliation).
   function weekTitleFormat(arg) {
@@ -313,7 +315,7 @@
     const sm = arg.start.marker || arg.start;
     const em = arg.end.marker || arg.end;
     const start = DT.fromJSDate(sm, { zone: 'utc' }).setLocale(LANG);
-    const last = DT.fromJSDate(em, { zone: 'utc' }).setLocale(LANG).minus({ days: 1 });
+    const last = DT.fromJSDate(em, { zone: 'utc' }).setLocale(LANG);
     let head;
     if (start.year !== last.year) {
       head = `${start.toFormat('LLLL yyyy')} – ${last.toFormat('LLLL yyyy')}`;
