@@ -2587,9 +2587,12 @@
     }
 
     // A single-item share modal is the whole page: no close/cancel buttons.
+    // The .ics download lives in the underlying page header which is
+    // unreachable here, so surface it in the modal header instead.
     const itemView = shareItemView();
     document.getElementById('btn-event-close').style.display = itemView ? 'none' : '';
     document.getElementById('btn-event-cancel').style.display = itemView ? 'none' : '';
+    document.getElementById('btn-event-ics').style.display = itemView ? '' : 'none';
 
     refreshPrevBoundaries();
     applyAllDayToggle();
@@ -2968,6 +2971,7 @@
     document.getElementById('btn-event-cancel').addEventListener('click', closeEventModal);
     document.getElementById('btn-event-save').addEventListener('click', saveEvent);
     document.getElementById('btn-event-delete').addEventListener('click', deleteCurrentEvent);
+    document.getElementById('btn-event-ics').addEventListener('click', downloadShareIcs);
     document.getElementById('event-overlay').addEventListener('click', closeEventModal);
     document.getElementById('ev-calendar').addEventListener('change', (e) => {
       if (_currentEvent) _currentEvent.calendarId = parseInt(e.target.value, 10);
