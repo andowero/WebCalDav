@@ -2,6 +2,59 @@
 
 ## Unreleased — MVP
 
+### Keyboard accessibility pass (2026-06-27)
+- **Why**: the app is aimed at non-experts (e.g. a self-hoster setting it up for
+  an elderly relative), but a keyboard-only user was locked out of core flows —
+  buttons had no focus ring, modals never moved or trapped focus, the custom
+  date/time picker pulled its controls out of the tab order, and the agenda was
+  a wall of click-only `<div>`s. Target: WCAG 2.2 keyboard operability + basic
+  agenda screen-reader semantics. Contrast / high-contrast theme deferred.
+- **Focus ring** (`app.css`): one shared `:focus-visible` outline for every
+  interactive control (buttons, links, agenda rows, picker grid, AM/PM, tabs),
+  visible in both themes; mouse clicks show no ring.
+- **Modal focus management** (`app.js`): opening any dialog modal moves focus
+  inside, traps Tab/Shift+Tab within it (stacked for nested dialogs), and
+  restores focus to the opener on close — driven from `show()`/`hide()` so every
+  existing call site is covered.
+- **Date/time picker** (`app.js`): the 📅 trigger and AM/PM toggles are back in
+  the tab order; the mini-calendar popup takes focus on open, supports
+  Arrow/Home/End navigation and Enter to select, and Escape closes it (returning
+  focus to the trigger) without closing the event modal.
+- **Agenda keyboard + screen reader** (`index.html`, `app.js`): rows are
+  focusable list items (`role="list"`/`listitem`) with a composed `aria-label`
+  (time, title, location, kind), open on Enter/Space, and the task checkbox is
+  separately keyboard-toggleable; the status line is a polite live region.
+- **Journal tabs** (`index.html`, `app.js`): proper `tabpanel`/`aria-controls`/
+  `aria-selected` wiring, roving tabindex, and Left/Right arrow switching.
+- **Task checkboxes keyboard-reachable** (`app.js`): the grid task checkbox is
+  now tabbable (Tab/Shift+Tab) and toggles with Enter/Space, matching the agenda
+  checkbox; arrow navigation still focuses the whole event/row, never the box.
+- **Agenda keyboard navigation** (`app.js`): Up/Down move one row at a time
+  (focusing whole rows; checkboxes via Tab), Home/End jump to the first/last
+  loaded row, and PageUp/PageDown page the viewport. Down/End/PageDown pull the
+  next page at the bottom (the same infinite-scroll load the IntersectionObserver
+  drives).
+- **Cheap wins**: a "Skip to calendar" skip link (new `ui.skip_to_content`
+  string, EN + CS), `role="alert"` on the in-modal error nodes, and a
+  `prefers-reduced-motion` block that neutralises slide/spin animations.
+- **Docs**: new `docs/accessibility_testing.md` manual keyboard checklist (the
+  authoritative "done", matching the project's no-E2E stance).
+- **Calendar grid keyboard shortcuts** (`app.js`, `app.css`): PageUp/PageDown
+  step the view back/forward (month/week/day), Home jumps to today, Insert
+  creates an event on the focused day (nothing focused → today in month, the
+  shown day in day view, the week's first day in week view), Delete removes the
+  focused event (with the same confirm / recurring-scope chooser as the context
+  menu, refactored into a shared `deleteEventFlow`). Arrow navigation: month view
+  moves day-by-day / week-by-week; week & day views move between day columns
+  (Left/Right) and between a day's events — all-day lane first, then timed —
+  (Up/Down); focus lands on the day's first event or the whole-day cell/column
+  (roving tabindex). Pressing
+  an arrow when focus has fallen off-grid (after create/delete or paging)
+  re-enters the grid instead of doing nothing. Enter on an empty day/column
+  creates an event there. Up/Down on a focused day/month/year field in the edit
+  modal steps it by 1. The handler self-guards against modals, the date picker,
+  the agenda, and text fields so it never steals keys.
+
 ### Sharing UX fixes — refresh-safe links, faster single items, polished share view (2026-06-23)
 - **Why**: opening a shared link and refreshing the browser broke it (the URL
   fragment holding the secret was stripped after first load), single shared

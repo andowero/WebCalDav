@@ -18,6 +18,7 @@ A lightweight, self-hosted web UI for viewing and editing calendar events on you
 - Optional MCP server: AI assistants can read and write your events, tasks, and journals via scoped, read-only or read-write API tokens ([MCP.md](MCP.md)).
 - Calendar sharing: hand a single item, a month/week/day, or an agenda slice to someone via a read-only or read-write link (the secret rides in the URL fragment, never the server logs) or a downloadable `.ics`; links expire and can be revoked ([SHARING.md](SHARING.md)).
 - Per-user settings: timezone, first day of week, time and date format, default view, auto-logout, double-click to create events.
+- Keyboard accessible: the whole UI is operable by keyboard with a visible focus ring and focus-managed dialogs, the agenda exposes basic screen-reader semantics, and `prefers-reduced-motion` is honored (see [docs/accessibility_testing.md](docs/accessibility_testing.md)).
 - No caching — every read and write goes straight to your CalDAV server.
 
 > **Note:** FullCalendar, luxon, and the journal Markdown stack (markdown-it + plugins and highlight.js) are vendored into the container (`webcaldav/static/vendor/`) and served from the app itself — no third-party CDN, and the browser needs no internet access beyond your own server.

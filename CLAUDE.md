@@ -23,6 +23,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 - Events and tasks are clickable and editable in place.
 - Desktop-first, but mobile is now a supported target: a `@media (max-width: 768px)` layer turns the settings panel and modals into bottom sheets, enlarges tap targets, and adds touch interactions (long-press → context menu, swipe-down → dismiss). Native mobile apps still cover the heavier use cases.
 - Browser notifications for event and task reminders on Firefox, Chrome, Opera, and Safari.
+- Accessibility: the UI is keyboard-operable (visible `:focus-visible` ring, focus-trapped/restored dialogs, keyboard-navigable date/time picker, a skip link) and the agenda has basic screen-reader semantics (focusable `listitem` rows with composed `aria-label`s); `prefers-reduced-motion` is honored. Colour-contrast / a high-contrast theme are not yet targeted (event colours stay the user's choice). Verified manually via `docs/accessibility_testing.md` (no automated a11y/E2E tests).
 
 # Constraints and policies
 

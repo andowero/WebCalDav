@@ -1,5 +1,6 @@
 {
   "ui": {
+    "skip_to_content": "Skip to calendar",
     "login_email": "Email",
     "login_password": "Password",
     "login_signin": "Sign in",

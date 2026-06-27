@@ -1,5 +1,6 @@
 {
   "ui": {
+    "skip_to_content": "Přejít na kalendář",
     "login_email": "E-mail",
     "login_password": "Heslo",
     "login_signin": "Přihlásit se",

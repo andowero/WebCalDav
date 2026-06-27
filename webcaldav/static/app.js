@@ -2,10 +2,14 @@
   'use strict';
 
   function show(id) {
-    document.getElementById(id).style.display = '';
+    const el = document.getElementById(id);
+    el.style.display = '';
+    if (MODAL_IDS.has(id)) _onModalOpen(el);
   }
   function hide(id) {
-    document.getElementById(id).style.display = 'none';
+    const el = document.getElementById(id);
+    el.style.display = 'none';
+    if (MODAL_IDS.has(id)) _onModalClose(el);
   }
   function showError(id, msg) {
     const el = document.getElementById(id);
@@ -34,6 +38,65 @@
     clearTimeout(_toastTimer);
     _toastTimer = setTimeout(() => { el.classList.remove('show'); }, 2000);
   }
+
+  // ── Modal focus management ───────────────────────────────────────────────────
+  // Keyboard operability for the dialog modals: when one opens we move focus
+  // into it, keep Tab/Shift+Tab cycling within it (no escaping to the page
+  // behind), and restore focus to whatever opened it on close. Nesting works
+  // (e.g. a delete-confirm on top of the event modal) via a stack — the topmost
+  // open modal owns the trap. Driven entirely from show()/hide() so the many
+  // existing open/close call sites need no changes.
+  const MODAL_IDS = new Set([
+    'event-modal', 'share-modal', 'shareres-modal', 'token-modal',
+    'confirm-modal', 'scope-modal', 'settings-panel',
+  ]);
+  let _modalStack = [];
+
+  function _isVisible(el) {
+    return !!(el && el.getClientRects().length);
+  }
+  // Focusable, currently-interactive controls inside a container, in DOM order.
+  function _focusable(container) {
+    return Array.from(container.querySelectorAll(
+      'a[href], button, input, select, textarea, [tabindex]',
+    )).filter((el) => !el.disabled && el.tabIndex !== -1 && _isVisible(el)
+      && el.getAttribute('aria-hidden') !== 'true');
+  }
+  function _onModalOpen(el) {
+    if (_modalStack.some((m) => m.el === el)) return; // already open
+    _modalStack.push({ el: el, prevFocus: document.activeElement });
+    const f = _focusable(el);
+    const target = f[0] || el;
+    // Defer so any render that runs after show() in the same call settles first.
+    setTimeout(() => { try { target.focus(); } catch (e) { /* gone */ } }, 0);
+  }
+  function _onModalClose(el) {
+    const idx = _modalStack.map((m) => m.el).lastIndexOf(el);
+    if (idx === -1) return;
+    const prev = _modalStack.splice(idx, 1)[0].prevFocus;
+    if (prev && document.contains(prev) && _isVisible(prev)) {
+      try { prev.focus(); } catch (e) { /* gone */ }
+    }
+  }
+  // Tab trap: confine Tab cycling to the topmost open modal.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || !_modalStack.length) return;
+    // The date popup lives outside the modal in the DOM; while it's open let Tab
+    // move freely within it instead of being yanked back into the modal.
+    if (_calPop && !_calPop.hidden) return;
+    const top = _modalStack[_modalStack.length - 1].el;
+    const f = _focusable(top);
+    if (!f.length) { e.preventDefault(); return; }
+    const first = f[0];
+    const last = f[f.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey) {
+      if (active === first || !top.contains(active)) { e.preventDefault(); last.focus(); }
+    } else if (active === last || !top.contains(active)) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
 
   // ── Share mode ──────────────────────────────────────────────────────────────
   // On the /s/<id> page app.js runs in "share mode": the same modals/renderers,
@@ -1381,12 +1444,20 @@
     const md = journalRenderer();
     el.innerHTML = md ? md.render(src) : escHtml(src);
   }
-  function setJournalTab(tab) {
+  function setJournalTab(tab, focusTab) {
     const edit = tab !== 'display';
     document.getElementById('ev-journal-edit').style.display = edit ? '' : 'none';
     document.getElementById('ev-journal-display').style.display = edit ? 'none' : '';
-    document.getElementById('ev-journal-tab-edit').classList.toggle('active', edit);
-    document.getElementById('ev-journal-tab-display').classList.toggle('active', !edit);
+    const editTab = document.getElementById('ev-journal-tab-edit');
+    const dispTab = document.getElementById('ev-journal-tab-display');
+    editTab.classList.toggle('active', edit);
+    dispTab.classList.toggle('active', !edit);
+    // ARIA tab state + roving tabindex: only the selected tab is in the tab order.
+    editTab.setAttribute('aria-selected', edit ? 'true' : 'false');
+    dispTab.setAttribute('aria-selected', edit ? 'false' : 'true');
+    editTab.tabIndex = edit ? 0 : -1;
+    dispTab.tabIndex = edit ? -1 : 0;
+    if (focusTab) (edit ? editTab : dispTab).focus();
     if (!edit) renderJournalDisplay();
   }
   function setJournalBody(md) {
@@ -1520,7 +1591,7 @@
       `<span class="ev-colon">:</span>` +
       `<input type="text" class="ev-mm ev-rem-mm" data-idx="${idx}" inputmode="numeric" maxlength="2" value="${pad2(m || 0)}">` +
       (h12mode
-        ? `<button type="button" class="ev-ampm ev-rem-ampm" data-idx="${idx}" tabindex="-1">${h24 >= 12 ? 'PM' : 'AM'}</button>`
+        ? `<button type="button" class="ev-ampm ev-rem-ampm" data-idx="${idx}">${h24 >= 12 ? 'PM' : 'AM'}</button>`
         : '')
     );
   }
@@ -1960,7 +2031,7 @@
     });
     container.innerHTML =
       pieces.join(`<span class="ev-dsep">${sep}</span>`) +
-      `<button type="button" class="ev-cal-btn" tabindex="-1" aria-label="${escHtml(tr('dyn.pick_date'))}">📅</button>`;
+      `<button type="button" class="ev-cal-btn" aria-label="${escHtml(tr('dyn.pick_date'))}">📅</button>`;
 
     order.forEach((part) => {
       const [lo, hi] = DATE_PART_RANGE[part];
@@ -1969,6 +2040,20 @@
       input.addEventListener('blur', () => {
         if (input.value === '') return;
         input.value = String(clampInt(input.value, lo, hi)).padStart(pad, '0');
+      });
+      // Arrow Up/Down step the day/month/year field by 1 (clamped to its range),
+      // mirroring the time-field steppers.
+      input.addEventListener('keydown', (e) => {
+        if (input.disabled) return;
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        const delta = e.key === 'ArrowUp' ? 1 : -1;
+        const base = input.value === ''
+          ? (part === 'year' ? luxon.DateTime.local().year : lo)
+          : clampInt(input.value, lo, hi);
+        input.value = String(clampInt(base + delta, lo, hi)).padStart(pad, '0');
+        clampDateFieldToBounds(prefix);
+        onChange();
       });
       // Keep the typed value inside any active bounds (e.g. a grid share window)
       // before the field's own change handler reacts to it.
@@ -2001,6 +2086,7 @@
 
   let _calPop = null;
   let _calState = null; // { prefix, onChange, view: luxon DateTime (month) }
+  let _calTrigger = null; // control that opened the picker, to restore focus to
 
   // Optional [min, max] selectable-date bounds per field prefix, as yyyy-MM-dd.
   // Used to keep a grid share's create/edit dates inside the shared window. The
@@ -2076,7 +2162,36 @@
     document.addEventListener('mousedown', (e) => {
       if (pop.hidden) return;
       if (pop.contains(e.target) || e.target.closest('.ev-cal-btn, .fc-toolbar-title')) return;
-      closeDatePicker();
+      closeDatePicker(false); // clicked elsewhere — don't yank focus back to trigger
+    });
+    // Keyboard: arrow keys move between grid cells, Escape closes and returns
+    // focus to the trigger. Escape is stopped here so it doesn't also bubble to
+    // the modal's global Escape handler and close the whole event modal.
+    pop.addEventListener('keydown', (e) => {
+      if (pop.hidden) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeDatePicker();
+        return;
+      }
+      const cells = Array.from(
+        pop.querySelectorAll('.ev-cal-day:not([disabled]), .ev-cal-month'),
+      );
+      const idx = cells.indexOf(document.activeElement);
+      if (idx === -1) return; // focus not on a grid cell
+      const cols = pop.querySelector('.ev-cal-grid').classList.contains('months') ? 3 : 7;
+      let delta = 0;
+      if (e.key === 'ArrowLeft') delta = -1;
+      else if (e.key === 'ArrowRight') delta = 1;
+      else if (e.key === 'ArrowUp') delta = -cols;
+      else if (e.key === 'ArrowDown') delta = cols;
+      else if (e.key === 'Home') { e.preventDefault(); cells[0].focus(); return; }
+      else if (e.key === 'End') { e.preventDefault(); cells[cells.length - 1].focus(); return; }
+      else return;
+      e.preventDefault();
+      const t = Math.max(0, Math.min(cells.length - 1, idx + delta));
+      cells[t].focus();
     });
     _calPop = pop;
     return pop;
@@ -2169,9 +2284,16 @@
     };
     renderCalGrid();
     pop.hidden = false;
+    _calTrigger = anchor;
     const r = anchor.getBoundingClientRect();
     pop.style.top = `${r.bottom + 4}px`;
     pop.style.left = `${Math.min(r.left, window.innerWidth - pop.offsetWidth - 8)}px`;
+    // Move focus into the popup so keyboard users can navigate it: prefer the
+    // selected day, then today, then the first selectable cell.
+    const focusTarget = pop.querySelector('.ev-cal-day.selected, .ev-cal-month.selected')
+      || pop.querySelector('.ev-cal-day.today, .ev-cal-month.today')
+      || pop.querySelector('.ev-cal-day:not([disabled]), .ev-cal-month');
+    if (focusTarget) setTimeout(() => { try { focusTarget.focus(); } catch (e) { /* gone */ } }, 0);
   }
 
   function openDatePicker(prefix, btn, onChange) {
@@ -2201,9 +2323,16 @@
     });
   }
 
-  function closeDatePicker() {
+  function closeDatePicker(returnFocus = true) {
     if (_calPop) _calPop.hidden = true;
     _calState = null;
+    const trigger = _calTrigger;
+    _calTrigger = null;
+    // Return focus to the control that opened the picker (the 📅 button or the
+    // calendar title) so keyboard focus isn't dropped to the page body.
+    if (returnFocus && trigger && document.contains(trigger)) {
+      try { trigger.focus(); } catch (e) { /* gone */ }
+    }
   }
 
   // Turn a text input into a zero-padded numeric stepper with ▲▼ buttons.
@@ -2287,7 +2416,7 @@
       `<input type="text" id="ev-${prefix}-hh" class="ev-hh" inputmode="numeric" maxlength="2">` +
       `<span class="ev-colon">:</span>` +
       `<input type="text" id="ev-${prefix}-mm" class="ev-mm" inputmode="numeric" maxlength="2">` +
-      (h12 ? `<button type="button" class="ev-ampm" id="ev-${prefix}-ampm" tabindex="-1">AM</button>` : '');
+      (h12 ? `<button type="button" class="ev-ampm" id="ev-${prefix}-ampm">AM</button>` : '');
 
     document.getElementById(`ev-${prefix}-hh`).addEventListener('change', onChange);
     document.getElementById(`ev-${prefix}-mm`).addEventListener('change', onChange);
@@ -2986,6 +3115,19 @@
     document.getElementById('ev-type').addEventListener('change', applyTypeToggle);
     document.getElementById('ev-journal-tab-edit').addEventListener('click', () => setJournalTab('edit'));
     document.getElementById('ev-journal-tab-display').addEventListener('click', () => setJournalTab('display'));
+    // Arrow keys move between the two tabs (APG tablist pattern); the moved-to
+    // tab is selected and focused.
+    document.querySelectorAll('.ev-journal-tabs [role="tab"]').forEach((tab) => {
+      tab.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          setJournalTab('display', true);
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          setJournalTab('edit', true);
+        }
+      });
+    });
     document.getElementById('ev-reminder-add').addEventListener('click', addReminderRow);
     initRecurEditor();
     // Date-field and time-field listeners/steppers are bound per-open inside
@@ -3087,6 +3229,38 @@
     }, { passive: true });
   }
 
+  // Delete an event/task/journal with the right confirmation: a plain yes/no for
+  // single items, or the recurring-scope chooser for a series. Shared by the
+  // context menu and the keyboard Delete shortcut.
+  async function deleteEventFlow(ev) {
+    if (!ev) return;
+    const props = ev.extendedProps || {};
+    if (props.calendarId == null) return; // demo / non-writable event
+    const isTask = !!props.isTask;
+    const isJournal = !!props.isJournal;
+    const noun = tr(isJournal ? 'dyn.noun_journal' : (isTask ? 'dyn.noun_task' : 'dyn.noun_event'));
+    let qs = `calendar_id=${props.calendarId}`;
+    if (props.recurrence) {
+      // Recurring: a scope choice replaces the plain yes/no confirm.
+      const scope = await chooseScope(tr('dyn.what_to_delete'), noun);
+      if (!scope) return;
+      qs += `&scope=${scope}`;
+      const pivot =
+        props.recurrenceId || props.rawStart || (ev.start ? ev.start.toISOString() : null);
+      if (pivot) qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
+    } else {
+      const ok = await confirmDialog(tr('dyn.confirm_delete', { title: ev.title || tr(isJournal ? 'dyn.this_journal' : (isTask ? 'dyn.this_task' : 'dyn.this_event')) }));
+      if (!ok) return;
+    }
+    try {
+      const base = isJournal ? 'journals' : (isTask ? 'tasks' : 'events');
+      await apiDelete(`/${base}/${encodeURIComponent(ev.id)}?${qs}`);
+      refreshViews();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
   function initContextMenu() {
     const menu = document.getElementById('ev-context-menu');
     document.getElementById('ctx-edit').addEventListener('click', () => {
@@ -3101,35 +3275,10 @@
       const p = ev.extendedProps || {};
       toggleTaskDone(ev, !p.completed);
     });
-    document.getElementById('ctx-delete').addEventListener('click', async () => {
+    document.getElementById('ctx-delete').addEventListener('click', () => {
       const ev = _ctxEvent;
       hideContextMenu();
-      if (!ev) return;
-      const props = ev.extendedProps || {};
-      if (props.calendarId == null) return;
-      const isTask = !!props.isTask;
-      const isJournal = !!props.isJournal;
-      const noun = tr(isJournal ? 'dyn.noun_journal' : (isTask ? 'dyn.noun_task' : 'dyn.noun_event'));
-      let qs = `calendar_id=${props.calendarId}`;
-      if (props.recurrence) {
-        // Recurring: a scope choice replaces the plain yes/no confirm.
-        const scope = await chooseScope(tr('dyn.what_to_delete'), noun);
-        if (!scope) return;
-        qs += `&scope=${scope}`;
-        const pivot =
-          props.recurrenceId || props.rawStart || (ev.start ? ev.start.toISOString() : null);
-        if (pivot) qs += `&recurrence_id=${encodeURIComponent(pivot)}`;
-      } else {
-        const ok = await confirmDialog(tr('dyn.confirm_delete', { title: ev.title || tr(isJournal ? 'dyn.this_journal' : (isTask ? 'dyn.this_task' : 'dyn.this_event')) }));
-        if (!ok) return;
-      }
-      try {
-        const base = isJournal ? 'journals' : (isTask ? 'tasks' : 'events');
-        await apiDelete(`/${base}/${encodeURIComponent(ev.id)}?${qs}`);
-        refreshViews();
-      } catch (err) {
-        alert(err.message);
-      }
+      deleteEventFlow(ev);
     });
     // Any outside click / scroll dismisses the menu.
     document.addEventListener('click', (e) => {
@@ -3695,6 +3844,94 @@
     if (near) agendaLoadMore();
   }
 
+  // ── Agenda keyboard navigation ───────────────────────────────────────────────
+  // Arrows step one row (focusing the whole row, tasks included — the checkbox
+  // is reached with Tab); Home/End jump to the first/last loaded row; PageUp/Down
+  // page by the viewport. Down/End/PageDown pull more rows at the bottom (the
+  // same infinite-scroll load the IntersectionObserver drives).
+  function agendaRows() {
+    return Array.from(document.querySelectorAll('#agenda-list .agenda-row'));
+  }
+  function activeAgendaRow() {
+    const a = document.activeElement;
+    return a && a.closest ? a.closest('.agenda-row') : null;
+  }
+  function focusAgendaRow(row) {
+    if (row) row.focus();
+  }
+  // Rows whose box currently intersects the scroll viewport, in DOM order.
+  function visibleAgendaRows(rows) {
+    const root = document.getElementById('agenda-scroll');
+    const r = root.getBoundingClientRect();
+    return rows.filter((row) => {
+      const rr = row.getBoundingClientRect();
+      return rr.bottom > r.top && rr.top < r.bottom;
+    });
+  }
+
+  async function onAgendaKeydown(e) {
+    if (!_agendaActive) return;
+    if (_modalStack.length) return;
+    if (_calPop && !_calPop.hidden) return;
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'PageDown', 'PageUp'].includes(e.key)) return;
+
+    const rows = agendaRows();
+    if (!rows.length) return;
+    const cur = activeAgendaRow();
+    const idx = cur ? rows.indexOf(cur) : -1;
+    const root = document.getElementById('agenda-scroll');
+    e.preventDefault();
+
+    switch (e.key) {
+      case 'ArrowDown':
+        if (idx === -1) { focusAgendaRow(rows[0]); return; }
+        if (idx < rows.length - 1) { focusAgendaRow(rows[idx + 1]); return; }
+        await agendaLoadMore(); // at the last loaded row → pull the next page
+        { const r2 = agendaRows(); if (r2.length > rows.length) focusAgendaRow(r2[idx + 1]); }
+        return;
+      case 'ArrowUp':
+        if (idx <= 0) { focusAgendaRow(rows[0]); return; }
+        focusAgendaRow(rows[idx - 1]);
+        return;
+      case 'Home':
+        focusAgendaRow(rows[0]);
+        return;
+      case 'End':
+        await agendaLoadMore(); // jump to the last loaded item, loading more first
+        { const r2 = agendaRows(); focusAgendaRow(r2[r2.length - 1]); }
+        return;
+      case 'PageDown': {
+        const vis = visibleAgendaRows(rows);
+        const bottom = vis[vis.length - 1];
+        if (bottom && bottom !== cur) { focusAgendaRow(bottom); return; }
+        // Already on the bottom-most visible row: load more if at the end, else
+        // page the viewport down, then focus the new bottom-most visible row.
+        if (idx >= rows.length - 1) await agendaLoadMore();
+        else root.scrollBy({ top: root.clientHeight });
+        setTimeout(() => {
+          const r2 = agendaRows();
+          const v2 = visibleAgendaRows(r2);
+          focusAgendaRow(v2[v2.length - 1] || r2[r2.length - 1]);
+        }, 0);
+        return;
+      }
+      case 'PageUp': {
+        const vis = visibleAgendaRows(rows);
+        const top = vis[0];
+        if (top && top !== cur) { focusAgendaRow(top); return; }
+        root.scrollBy({ top: -root.clientHeight });
+        setTimeout(() => {
+          const v2 = visibleAgendaRows(agendaRows());
+          focusAgendaRow(v2[0]);
+        }, 0);
+        return;
+      }
+      default:
+    }
+  }
+
   // Build one agenda row. Events get a colour dot; tasks get a checkbox square
   // (the dot's task counterpart) that toggles completion without opening the
   // modal. `forcedTimeTxt` is used by the undated "Tasks" section.
@@ -3708,6 +3945,10 @@
 
     const row = document.createElement('div');
     row.className = 'agenda-row';
+    // Each row is a focusable list item so keyboard users can reach it (Tab) and
+    // open it (Enter/Space), mirroring the click affordance.
+    row.setAttribute('role', 'listitem');
+    row.tabIndex = 0;
     // Expose the occurrence start so the agenda-share modal can infer a default
     // from/to from what's currently on screen.
     row.setAttribute('data-start', p.rawStart || e.start || '');
@@ -3722,20 +3963,42 @@
     const marker = isJournal
       ? `<span class="agenda-tri" style="color:${escHtml(e.color || '#3788d8')}"></span>`
       : isTask
-      ? `<span class="agenda-box${p.completed ? ' done' : ''}" style="color:${escHtml(e.color || '#3788d8')}" role="checkbox"></span>`
+      ? `<span class="agenda-box${p.completed ? ' done' : ''}" style="color:${escHtml(e.color || '#3788d8')}" role="checkbox" tabindex="0" aria-checked="${p.completed ? 'true' : 'false'}"></span>`
       : `<span class="agenda-dot" style="background:${escHtml(e.color || '#3788d8')}"></span>`;
     row.innerHTML =
       `<span class="agenda-time">${escHtml(timeTxt)}</span>` + marker +
       `<span class="agenda-main"><div class="agenda-title">${escHtml(e.title || '(no title)')}</div>${loc}</span>`;
+    // A single screen-reader label per row: time, title, location, kind (+ done).
+    const kindWord = tr(isJournal ? 'ui.opt_journal' : (isTask ? 'ui.opt_task' : 'ui.opt_event'));
+    const parts = [timeTxt, e.title || tr('dyn.no_title')];
+    if (p.location) parts.push(p.location);
+    parts.push(kindWord);
+    if (isTask && p.completed) parts.push(tr('ui.modal_task_done'));
+    row.setAttribute('aria-label', parts.join(', '));
     if (isTask) {
       const box = row.querySelector('.agenda-box');
-      if (box) box.addEventListener('click', (ev) => {
+      // Keep the row's aria-label as the row description; give the checkbox its
+      // own short name so it doesn't re-read the whole row.
+      if (box) box.setAttribute('aria-label', kindWord);
+      const toggle = (ev) => {
         ev.stopPropagation();
         ev.preventDefault();
         toggleTaskDone(agendaToFcShim(e), !p.completed);
-      });
+      };
+      if (box) {
+        box.addEventListener('click', toggle);
+        box.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') toggle(ev);
+        });
+      }
     }
-    row.addEventListener('click', () => openEventModal(agendaToFcShim(e)));
+    const open = () => openEventModal(agendaToFcShim(e));
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (ev) => {
+      // Ignore keys meant for a focused child control (e.g. the task checkbox).
+      if (ev.target !== row) return;
+      if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+    });
     // Long-press opens the context menu (mark done / edit / delete) on touch,
     // matching the right-click affordance on the grid views.
     if (p.calendarId != null) bindLongPress(row, () => agendaToFcShim(e));
@@ -4010,11 +4273,19 @@
     box.className = 'fc-task-box' + (props.completed ? ' done' : '');
     box.setAttribute('role', 'checkbox');
     box.setAttribute('aria-checked', props.completed ? 'true' : 'false');
+    // Tabbable so Tab/Shift+Tab reach the checkbox; arrow navigation still lands
+    // on the whole event, never the box.
+    box.tabIndex = 0;
+    box.setAttribute('aria-label', info.event.title || tr('ui.opt_task'));
     box.title = props.completed ? tr('dyn.mark_undone') : tr('dyn.mark_done');
-    box.addEventListener('click', function (e) {
+    const toggle = function (e) {
       e.stopPropagation();
       e.preventDefault();
       toggleTaskDone(info.event, !props.completed);
+    };
+    box.addEventListener('click', toggle);
+    box.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') toggle(e);
     });
     const dot = info.el.querySelector('.fc-daygrid-event-dot');
     if (dot) {
@@ -4094,6 +4365,300 @@
       const start = roundToMinutes(
         luxon.DateTime.fromISO(info.dateStr, { setZone: true }).setZone(tz), 30);
       openCreateModal(start, start.plus({ minutes: 30 }), false);
+    }
+  }
+
+  // Open the create modal for a given yyyy-MM-dd day (keyboard Insert / Enter),
+  // mirroring a month-view click: the day as date, now (rounded) as the time,
+  // a default 1-hour duration.
+  function createOnDate(isoDay) {
+    if (!isoDay) return;
+    const tz = effectiveTz();
+    const t = roundToMinutes(luxon.DateTime.now().setZone(tz), 5);
+    const start = luxon.DateTime.fromObject(
+      { year: +isoDay.slice(0, 4), month: +isoDay.slice(5, 7), day: +isoDay.slice(8, 10),
+        hour: t.hour, minute: t.minute },
+      { zone: tz },
+    );
+    openCreateModal(start, start.plus({ hours: 1 }), false);
+  }
+
+  // ── Calendar grid keyboard navigation ────────────────────────────────────────
+  // Maps focused-grid DOM back to dates/events for the keyboard shortcuts
+  // (PageUp/Down, Home, Insert, Delete, Arrows, Enter). The event WeakMap is
+  // filled in eventDidMount so Delete can resolve the focused occurrence.
+  const _eventEls = new WeakMap();
+  let _gridPendingFocus = null; // yyyy-MM-dd or 'auto' to focus after a re-render
+
+  function _activeEl() {
+    return document.activeElement;
+  }
+  function _calRoot() {
+    return document.getElementById('calendar');
+  }
+  function isMonthView() {
+    return _fcCalendar && _fcCalendar.view.type === 'dayGridMonth';
+  }
+  function isTimeGridView() {
+    const t = _fcCalendar && _fcCalendar.view.type;
+    return t === 'timeGridWeek' || t === 'timeGridDay';
+  }
+  // The cell/column selector for the current view: month uses the daygrid day
+  // cells, week/day use the timegrid columns.
+  function gridCellSelector() {
+    return isMonthView() ? '.fc-daygrid-day[data-date]' : '.fc-timegrid-col[data-date]';
+  }
+  // yyyy-MM-dd of the day cell/column currently holding focus (whether the empty
+  // cell/column or an event within it is focused), or null when focus is off-grid.
+  function focusedGridCellDate() {
+    const a = _activeEl();
+    const cell = a && a.closest ? a.closest(gridCellSelector()) : null;
+    return cell ? cell.getAttribute('data-date') : null;
+  }
+  function focusedGridEvent() {
+    const a = _activeEl();
+    const el = a && a.closest ? a.closest('.fc-event') : null;
+    return el ? _eventEls.get(el) : null;
+  }
+  // The day yyyy-MM-dd holding focus, tolerant of the week/day all-day lane
+  // (whose events sit in a daygrid cell, not the timegrid column). Used by Insert.
+  function focusedDayDate() {
+    const a = _activeEl();
+    if (!a || !a.closest) return null;
+    const sel = isMonthView()
+      ? '.fc-daygrid-day[data-date]'
+      : '.fc-timegrid-col[data-date], .fc-daygrid-day[data-date]';
+    const cell = a.closest(sel);
+    return cell ? cell.getAttribute('data-date') : null;
+  }
+  // Roving tabindex: make `cell` the single tab entry among the current view's
+  // cells/columns (so Tab re-enters the grid where the user left off).
+  function setGridRovingTo(cell) {
+    const sel = cell.classList.contains('fc-timegrid-col')
+      ? '.fc-timegrid-col[tabindex]' : '.fc-daygrid-day[tabindex]';
+    _calRoot().querySelectorAll(sel).forEach((c) => { c.tabIndex = -1; });
+    cell.tabIndex = 0;
+  }
+  // Timed events of one day's timegrid column, in DOM (≈ time) order.
+  // The focusable events of one day in a week/day view, top-to-bottom: the
+  // all-day lane events (in the daygrid all-day row) first, then the timed
+  // events (in the timegrid column).
+  function timegridDayEvents(iso) {
+    const cal = _calRoot();
+    const allDayCell = cal.querySelector(`.fc-daygrid-day[data-date="${iso}"]`);
+    const allDay = allDayCell
+      ? Array.from(allDayCell.querySelectorAll('.fc-daygrid-event')) : [];
+    const col = cal.querySelector(`.fc-timegrid-col[data-date="${iso}"]`);
+    const timed = col ? Array.from(col.querySelectorAll('.fc-timegrid-event')) : [];
+    return allDay.concat(timed);
+  }
+  function timegridColDates() {
+    return Array.from(_calRoot().querySelectorAll('.fc-timegrid-col[data-date]'))
+      .map((c) => c.getAttribute('data-date'));
+  }
+  // Focus a month-view day by date: its first event if any, else the empty cell.
+  // If the date isn't in the rendered grid, navigate there first and finish the
+  // focus once the new grid mounts (via datesSet → _gridPendingFocus).
+  function focusGridDay(iso) {
+    const cell = _calRoot().querySelector(`.fc-daygrid-day[data-date="${iso}"]`);
+    if (!cell) {
+      _gridPendingFocus = iso;
+      _fcCalendar.gotoDate(iso);
+      return;
+    }
+    setGridRovingTo(cell);
+    const ev = cell.querySelector('.fc-daygrid-day-events .fc-event');
+    (ev || cell).focus();
+  }
+  // Focus a timegrid (week/day) column by date: its first event (all-day lane,
+  // then timed) if any, else the whole-day column. Roving stays on the column so
+  // Tab re-enters the day even when an all-day event (outside the column) is focused.
+  function focusTimegridDay(iso) {
+    const col = _calRoot().querySelector(`.fc-timegrid-col[data-date="${iso}"]`);
+    if (!col) return;
+    setGridRovingTo(col);
+    const evs = timegridDayEvents(iso);
+    (evs[0] || col).focus();
+  }
+  // The yyyy-MM-dd that arrow keys should enter the grid at when focus is
+  // currently off-grid: the roving tab-entry cell if present, else today, else
+  // the first in-range cell/column.
+  function gridEntryDate() {
+    const cal = _calRoot();
+    const sel = gridCellSelector();
+    const roving = cal.querySelector(sel.replace('[data-date]', '[tabindex="0"]'));
+    if (roving) return roving.getAttribute('data-date');
+    const today = isMonthView()
+      ? cal.querySelector('.fc-daygrid-day.fc-day-today')
+      : cal.querySelector('.fc-timegrid-col.fc-day-today');
+    const first = isMonthView()
+      ? (cal.querySelector('.fc-daygrid-day:not(.fc-day-other)') || cal.querySelector('.fc-daygrid-day'))
+      : cal.querySelector('.fc-timegrid-col[data-date]');
+    const cell = today || first;
+    return cell ? cell.getAttribute('data-date') : null;
+  }
+  function focusGridEntry(iso) {
+    if (!iso) return;
+    if (isMonthView()) focusGridDay(iso);
+    else if (isTimeGridView()) focusTimegridDay(iso);
+  }
+  // Ensure the current grid view always has one tabbable cell/column so Tab can
+  // enter it (dayCellDidMount marks today, but the visible range may not contain
+  // it, and timegrid columns get no per-cell mount hook).
+  function ensureGridEntry() {
+    if (!_fcCalendar) return;
+    const cal = _calRoot();
+    if (isMonthView()) {
+      if (cal.querySelector('.fc-daygrid-day[tabindex="0"]')) return;
+      const first = cal.querySelector('.fc-daygrid-day:not(.fc-day-other)')
+        || cal.querySelector('.fc-daygrid-day');
+      if (first) first.tabIndex = 0;
+    } else if (isTimeGridView()) {
+      cal.querySelectorAll('.fc-timegrid-col[data-date]').forEach((c) => {
+        if (!c.hasAttribute('tabindex')) c.tabIndex = -1;
+      });
+      if (cal.querySelector('.fc-timegrid-col[tabindex="0"]')) return;
+      const first = cal.querySelector('.fc-timegrid-col.fc-day-today')
+        || cal.querySelector('.fc-timegrid-col[data-date]');
+      if (first) first.tabIndex = 0;
+    }
+  }
+  // Apply a pending focus request after a navigation re-render.
+  function applyGridPendingFocus() {
+    const want = _gridPendingFocus;
+    _gridPendingFocus = null;
+    if (!want || !_fcCalendar) return;
+    let iso = want;
+    if (want === 'auto') {
+      const cal = _calRoot();
+      const today = isMonthView()
+        ? cal.querySelector('.fc-daygrid-day.fc-day-today')
+        : cal.querySelector('.fc-timegrid-col.fc-day-today');
+      iso = today ? today.getAttribute('data-date') : gridEntryDate();
+    }
+    focusGridEntry(iso);
+  }
+  // The yyyy-MM-dd that Insert creates on when nothing is focused: today in
+  // month view, otherwise the displayed period's start (the shown day in day
+  // view, the first day of the week in week view).
+  function insertFallbackDate() {
+    const v = _fcCalendar.view;
+    if (v.type === 'dayGridMonth') {
+      return luxon.DateTime.now().setZone(effectiveTz()).toFormat('yyyy-MM-dd');
+    }
+    return luxon.DateTime.fromJSDate(v.currentStart, { zone: 'utc' }).toFormat('yyyy-MM-dd');
+  }
+
+  // Month view: arrows move by day (Left/Right) and week (Up/Down); focus lands
+  // on the day's first event or the empty cell. From off-grid, the first arrow
+  // enters the grid at the entry cell.
+  function monthArrow(e) {
+    const cur = focusedGridCellDate();
+    e.preventDefault();
+    if (cur == null) { focusGridEntry(gridEntryDate()); return; }
+    const delta = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1
+      : e.key === 'ArrowUp' ? -7 : 7;
+    focusGridDay(luxon.DateTime.fromISO(cur).plus({ days: delta }).toFormat('yyyy-MM-dd'));
+  }
+  // Week/day view: Left/Right move between day columns (first event or whole-day
+  // column); Up/Down move between a day's events (all-day lane, then timed).
+  // From off-grid, the first arrow enters the grid. The focused day is read from
+  // either the timegrid column or the all-day lane cell, since all-day events
+  // live outside the timegrid column.
+  function timeArrow(e) {
+    const a = _activeEl();
+    const cell = a && a.closest
+      ? a.closest('.fc-timegrid-col[data-date], .fc-daygrid-day[data-date]') : null;
+    const curDate = cell ? cell.getAttribute('data-date') : null;
+    e.preventDefault();
+    if (curDate == null) { focusGridEntry(gridEntryDate()); return; }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const cols = timegridColDates();
+      let i = cols.indexOf(curDate);
+      i = Math.max(0, Math.min(cols.length - 1, i + (e.key === 'ArrowLeft' ? -1 : 1)));
+      focusTimegridDay(cols[i]);
+      return;
+    }
+    // Up/Down within the day's events. The whole-day column is the target above
+    // the first event (and the only target on an empty day).
+    const col = _calRoot().querySelector(`.fc-timegrid-col[data-date="${curDate}"]`);
+    const evs = timegridDayEvents(curDate);
+    if (!evs.length) return; // empty day → nothing to step through
+    const onEvent = a.closest('.fc-event');
+    let i = onEvent ? evs.indexOf(onEvent) : -1;
+    if (i === -1) {
+      i = e.key === 'ArrowDown' ? 0 : evs.length - 1; // from the column into the list
+    } else {
+      i += e.key === 'ArrowDown' ? 1 : -1;
+      if (i < 0) { if (col) { setGridRovingTo(col); col.focus(); } return; } // above first
+      if (i > evs.length - 1) return; // already at the last event
+    }
+    if (col) setGridRovingTo(col);
+    evs[i].focus();
+  }
+
+  // The keydown handler for the calendar grid shortcuts. Returns early (no
+  // preventDefault) when a modal/picker/agenda is active or focus is in a field,
+  // so it never steals keys from inputs or other components.
+  function onGridKeydown(e) {
+    if (!_fcCalendar || _agendaActive) return;
+    if (_modalStack.length) return;
+    if (_calPop && !_calPop.hidden) return;
+    const t = e.target;
+    if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+    const roShare = SHARE_MODE && SHARE_CFG && SHARE_CFG.mode !== 'rw';
+
+    switch (e.key) {
+      case 'PageUp':
+        e.preventDefault();
+        _gridPendingFocus = 'auto';
+        _fcCalendar.prev();
+        return;
+      case 'PageDown':
+        e.preventDefault();
+        _gridPendingFocus = 'auto';
+        _fcCalendar.next();
+        return;
+      case 'Home':
+        e.preventDefault();
+        _gridPendingFocus = 'auto';
+        _fcCalendar.today();
+        return;
+      case 'Insert': {
+        if (roShare) return;
+        e.preventDefault();
+        createOnDate(focusedDayDate() || insertFallbackDate());
+        return;
+      }
+      case 'Delete': {
+        if (roShare) return;
+        const ev = focusedGridEvent();
+        if (!ev) return; // nothing focused to delete
+        e.preventDefault();
+        deleteEventFlow(ev);
+        return;
+      }
+      case 'Enter': {
+        // Enter on an empty day cell/column creates an event there; Enter on an
+        // event is left to FullCalendar (opens the edit modal).
+        if (roShare) return;
+        const a = _activeEl();
+        if (!a || !a.classList) return;
+        const onCell = a.classList.contains('fc-daygrid-day')
+          || a.classList.contains('fc-timegrid-col');
+        if (!onCell) return;
+        e.preventDefault();
+        createOnDate(a.getAttribute('data-date'));
+        return;
+      }
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'ArrowUp':
+      case 'ArrowDown':
+        if (isMonthView()) monthArrow(e);
+        else if (isTimeGridView()) timeArrow(e);
+        return;
+      default:
     }
   }
 
@@ -4194,7 +4759,18 @@
           },
       // Clicking any built-in view button (or navigating) leaves the agenda.
       datesSet: function () {
-        if (_agendaActive) hideAgenda();
+        if (_agendaActive) { hideAgenda(); return; }
+        // After any navigation/re-render keep one tabbable entry cell and finish
+        // any pending keyboard-focus request (deferred so the new grid is in DOM).
+        setTimeout(() => { ensureGridEntry(); applyGridPendingFocus(); }, 0);
+      },
+      // Make month-grid day cells focusable for keyboard navigation; today is the
+      // default Tab entry. Roving tabindex is managed during arrow nav. Only in
+      // month view — week/day arrow nav isn't offered, so no extra tab stops.
+      dayCellDidMount: function (arg) {
+        if (arg.view.type === 'dayGridMonth') {
+          arg.el.setAttribute('tabindex', arg.isToday ? '0' : '-1');
+        }
       },
       // Drive the search-box spinner from the grid event-source fetch (the slow
       // part of a search). The agenda manages its own spinner separately.
@@ -4315,6 +4891,9 @@
         const props = info.event.extendedProps || {};
         // Demo events have no calendar; skip the right-click menu for them.
         if (props.calendarId == null) return;
+        // Map the rendered element back to its event so the keyboard Delete
+        // shortcut can resolve the focused occurrence.
+        _eventEls.set(info.el, info.event);
         if (props.isJournal) decorateJournalEl(info);
         else if (props.isTask) decorateTaskEl(info);
         info.el.addEventListener('contextmenu', function (e) {
@@ -4328,6 +4907,11 @@
     });
     _fcCalendar.render();
     initCalendarSwipe(calendarEl);
+    // Calendar grid keyboard shortcuts (PageUp/Down, Home, Insert, Delete,
+    // arrows, Enter). On document so it works wherever focus sits in the grid;
+    // it self-guards against modals, the date picker, the agenda, and fields.
+    document.addEventListener('keydown', onGridKeydown);
+    document.addEventListener('keydown', onAgendaKeydown);
 
     const fab = document.getElementById('btn-create-fab');
     fab.addEventListener('click', openCreateModalBlank);

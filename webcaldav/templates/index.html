@@ -32,6 +32,7 @@
   <link rel="stylesheet" href="/static/app.css?v={{ static_v }}">
 </head>
 <body>
+<a href="#main-content" class="skip-link" data-i18n="ui.skip_to_content">Skip to calendar</a>
 
 <script>
   window.__STATE__ = {{ state | tojson }};
@@ -51,7 +52,7 @@
   <div class="auth-card">
     <img src="/static/icon.png?v={{ static_v }}" alt="" class="auth-logo">
     <h1>WebCalDav</h1>
-    <div id="login-error" class="error-msg" style="display:none"></div>
+    <div id="login-error" class="error-msg" role="alert" style="display:none"></div>
     <form id="login-form">
       <label for="login-email" data-i18n="ui.login_email">Email</label>
       <input id="login-email" type="email" autocomplete="username" required>
@@ -68,7 +69,7 @@
     <img src="/static/icon.png?v={{ static_v }}" alt="" class="auth-logo">
     <h1>WebCalDav</h1>
     <p class="info-msg" data-i18n="ui.cpw_intro">First login — please set a new password before continuing.</p>
-    <div id="cpw-error" class="error-msg" style="display:none"></div>
+    <div id="cpw-error" class="error-msg" role="alert" style="display:none"></div>
     <form id="change-pw-form">
       <label for="cpw-old" data-i18n="ui.cpw_old">Current (one-off) password</label>
       <input id="cpw-old" type="password" autocomplete="current-password" required>
@@ -91,7 +92,7 @@
     <button id="btn-settings" class="btn-outline" data-i18n="ui.header_settings">Settings</button>
     <button id="btn-logout" class="btn-outline" data-i18n="ui.header_logout">Log out</button>
   </header>
-  <div class="calendar-body">
+  <div class="calendar-body" id="main-content" tabindex="-1">
     <div id="calendar"></div>
     <div id="agenda" class="agenda" style="display:none">
       <div id="agenda-controls" class="agenda-controls" style="display:none">
@@ -105,9 +106,9 @@
         </label>
       </div>
       <div id="agenda-scroll" class="agenda-scroll">
-        <div id="agenda-list"></div>
+        <div id="agenda-list" role="list"></div>
         <div id="agenda-sentinel" class="agenda-sentinel"></div>
-        <div id="agenda-status" class="agenda-status" style="display:none"></div>
+        <div id="agenda-status" class="agenda-status" role="status" aria-live="polite" style="display:none"></div>
       </div>
     </div>
     <button id="btn-create-fab" class="fab" type="button" data-i18n-aria-label="ui.fab_new_event" data-i18n-title="ui.fab_new_event" aria-label="New event" title="New event">+</button>
@@ -125,7 +126,7 @@
   </div>
   <div class="event-modal-body">
     <div id="ev-edit-note" class="info-msg" style="display:none"></div>
-    <div id="ev-error" class="error-msg" style="display:none"></div>
+    <div id="ev-error" class="error-msg" role="alert" style="display:none"></div>
 
     <label class="ev-field" id="ev-type-field">
       <span class="ev-label" data-i18n="ui.modal_type">Type</span>
@@ -234,11 +235,11 @@
     <div class="ev-field" id="ev-journal-field" style="display:none">
       <span class="ev-label" data-i18n="ui.modal_journal_body">Entry</span>
       <div class="ev-journal-tabs" role="tablist">
-        <button type="button" id="ev-journal-tab-edit" class="ev-journal-tab" role="tab" data-i18n="ui.journal_tab_edit">Edit</button>
-        <button type="button" id="ev-journal-tab-display" class="ev-journal-tab" role="tab" data-i18n="ui.journal_tab_display">Display</button>
+        <button type="button" id="ev-journal-tab-edit" class="ev-journal-tab" role="tab" aria-selected="true" aria-controls="ev-journal-edit" data-i18n="ui.journal_tab_edit">Edit</button>
+        <button type="button" id="ev-journal-tab-display" class="ev-journal-tab" role="tab" aria-selected="false" tabindex="-1" aria-controls="ev-journal-display" data-i18n="ui.journal_tab_display">Display</button>
       </div>
-      <textarea id="ev-journal-edit" class="ev-journal-edit" rows="12" placeholder="—"></textarea>
-      <div id="ev-journal-display" class="ev-journal-display" style="display:none"></div>
+      <textarea id="ev-journal-edit" class="ev-journal-edit" rows="12" placeholder="—" role="tabpanel" aria-labelledby="ev-journal-tab-edit"></textarea>
+      <div id="ev-journal-display" class="ev-journal-display" role="tabpanel" aria-labelledby="ev-journal-tab-display" style="display:none"></div>
     </div>
 
     <div class="ev-field" id="ev-reminders-field">
@@ -316,7 +317,7 @@
     <button id="btn-share-close" class="btn-icon" data-i18n-aria-label="ui.modal_close" aria-label="Close">&#x2715;</button>
   </div>
   <div class="event-modal-body">
-    <div id="share-error" class="error-msg" style="display:none"></div>
+    <div id="share-error" class="error-msg" role="alert" style="display:none"></div>
     <p id="share-scope-desc" class="pref-note"></p>
     <p class="pref-note" data-i18n="ui.share_warn">Anyone with the link gets this access. For read &amp; write they can edit your events. The link can decrypt your CalDAV credentials — treat it like a password.</p>
 
@@ -396,7 +397,7 @@
     <details id="add-account-details">
       <summary data-i18n="ui.settings_add_account">Add account</summary>
       <form id="add-account-form" class="inner-form">
-        <div id="add-account-error" class="error-msg" style="display:none"></div>
+        <div id="add-account-error" class="error-msg" role="alert" style="display:none"></div>
         <label data-i18n="ui.settings_server_url">Server URL</label>
         <input id="acc-url" type="url" placeholder="https://dav.example.com" required>
         <label data-i18n="ui.settings_username">Username</label>
@@ -421,7 +422,7 @@
     <details id="add-token-details">
       <summary data-i18n="ui.tokens_add">Create token</summary>
       <form id="add-token-form" class="inner-form">
-        <div id="add-token-error" class="error-msg" style="display:none"></div>
+        <div id="add-token-error" class="error-msg" role="alert" style="display:none"></div>
         <label data-i18n="ui.tokens_name">Name</label>
         <input id="token-name" type="text" autocomplete="off" maxlength="200" required>
         <label data-i18n="ui.tokens_access">Access</label>

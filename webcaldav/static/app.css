@@ -1893,3 +1893,61 @@ details#add-account-details summary {
   .event-modal-body textarea.ev-journal-edit,
   .ev-journal-display { min-height: 6rem; }
 }
+
+/* ── Accessibility ──────────────────────────────────────────────────────────
+   Keyboard operability: a single visible focus ring for every interactive
+   control. Uses :focus-visible so a mouse click never shows the ring, only
+   keyboard navigation does. The auth/settings input rules above already set
+   their own :focus outline; this covers buttons, links, and the custom
+   widgets (agenda rows, date-picker grid, AM/PM, tabs, context menu) that had
+   no focus feedback at all. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Some controls (agenda rows, calendar days) clip or have no padding, so an
+   offset ring would be cut off — pull it inside for those. */
+.agenda-row:focus-visible,
+.ev-cal-day:focus-visible,
+.fc .fc-daygrid-event:focus-visible,
+.fc .fc-timegrid-event:focus-visible,
+.fc .fc-daygrid-day:focus-visible,
+.fc .fc-timegrid-col:focus-visible {
+  outline-offset: -2px;
+}
+/* The day cell's outline would be hidden behind sibling cells without this. */
+.fc .fc-daygrid-day:focus-visible {
+  position: relative;
+  z-index: 1;
+}
+/* Skip link: visually hidden until focused, then pinned to the top-left. */
+.skip-link {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translateY(-120%);
+  z-index: 1100;
+  margin: 0.25rem;
+  padding: 0.5rem 0.9rem;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 4px;
+  font-size: 14px;
+  text-decoration: none;
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+/* Honour a user's reduced-motion preference: drop the modal/sheet slide and
+   spinner animation, keeping the UI fully usable without movement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

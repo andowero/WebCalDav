@@ -15,12 +15,28 @@
 | v8        | Configurable double-click to create events                | Complete |
 | v9        | Journals (VJOURNAL): view, create, edit, delete           | Complete |
 | v10       | Calendar sharing (links + .ics) for items/views/agenda    | Complete |
+| v11       | Keyboard accessibility + basic agenda screen-reader support | Complete |
 
 ## Known issues
 
 - None currently open.
 
 ## Recent additions
+
+### Keyboard accessibility pass (2026-06-27)
+- Makes the app fully operable by keyboard (WCAG 2.2 keyboard criteria) and gives
+  the agenda basic screen-reader semantics. A shared `:focus-visible` ring covers
+  every control; dialog modals move/trap/restore focus (driven from
+  `show()`/`hide()`); the custom date/time picker is back in the tab order with
+  Arrow-key grid navigation and Escape-to-close; agenda rows are focusable list
+  items with composed `aria-label`s and Enter/Space activation; journal tabs get
+  full tablist ARIA + arrow switching. Calendar grid shortcuts: PageUp/PageDown
+  (prev/next period), Home (today), Insert (new event on focused day), Delete
+  (delete focused event, with confirm), month-view arrow navigation, and Enter to
+  create on an empty day. Plus a skip link, `role="alert"` errors,
+  and a `prefers-reduced-motion` block. Verified by the manual keyboard checklist
+  in `docs/accessibility_testing.md`. Out of scope this pass: colour contrast /
+  high-contrast theme and full screen-reader support for the FullCalendar grids.
 
 ### Mobile / touch support (2026-06-22)
 - New `@media (max-width: 768px)` CSS layer makes the settings panel and all
