@@ -494,4 +494,4 @@ A third CalDAV item kind alongside events and tasks: dated free-text notes.
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
-| v11 | Per-calendar ACL sharing with named recipients / accounts | Planned |
+| v12 | Per-calendar ACL sharing with named recipients / accounts | Planned |

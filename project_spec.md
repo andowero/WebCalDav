@@ -42,6 +42,8 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 | v8        | Configurable double-click action (event vs. task creation)         |
 | v9        | VJOURNAL support (read and write calendar journal entries)         |
 | v10       | Calendar sharing: read-only/read-write share links + `.ics` for a single item, a grid period, or an agenda slice |
+| v11       | Keyboard accessibility + basic agenda screen-reader support         |
+| —         | Mobile / responsive layout + touch support (bottom-sheet panels, long-press menu, swipe-to-dismiss); shipped as an ongoing improvement rather than a numbered milestone |
 
 ## Part 2: Technical design
 
@@ -66,10 +68,10 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 
 ### Data model
 
-- `users(id, email, kdf_salt, wrapped_dek, dek_nonce, password_verifier, must_change_password, created_at)`
+- `users(id, email, kdf_salt, kdf_time_cost, kdf_memory_cost, kdf_parallelism, wrapped_dek, dek_nonce, password_verifier, must_change_password, created_at)` — the `kdf_*` columns record the argon2id parameters the user's KEK was derived with, stored per user so the global defaults can be hardened without locking out existing users (they pick up stronger parameters on their next password change/reset).
 - `caldav_accounts(id, user_id, url, username, encrypted_password, nonce, created_at)`
 - `calendars(id, caldav_account_id, caldav_id, display_name, color, enabled, is_default)`
-- `user_settings(user_id, timezone, first_day_of_week, time_format, date_format, default_view, auto_logout_enabled, auto_logout_timeout_seconds, notifications_enabled, completed_task_display, undated_task_display, theme, language)`
+- `user_settings(user_id, timezone, first_day_of_week, time_format, date_format, default_view, auto_logout_enabled, auto_logout_timeout_seconds, notifications_enabled, completed_task_display, undated_task_display, theme, language, double_click_to_create_events, agenda_search_from_days, agenda_search_to_days)`
 - `api_tokens(id, user_id, name, token_sha256, sealed_blob, blob_nonce, mode, all_calendars, expires_at, created_at, last_used_at)` — MCP API tokens. `token_sha256` is the lookup hash; `sealed_blob`/`blob_nonce` is an AES-GCM blob keyed by the token secret holding the *authoritative* `{dek, mode, all_calendars, calendar_ids, expires_at}`. The plaintext `mode`/`all_calendars`/`expires_at` columns are a display-only mirror, never trusted for authorization.
 - `api_token_calendars(id, api_token_id, calendar_id)` — display-only scope rows for a calendar-scoped token (authoritative scope is in `api_tokens.sealed_blob`).
 - `shares(id, user_id, name, token_sha256, sealed_blob, blob_nonce, kind, mode, expires_at, item_uid, item_kind, item_calendar_id, grid_view, grid_anchor, agenda_from, agenda_to, default_calendar_id, created_at, last_used_at)` — share links. `kind` is `item`/`grid`/`agenda`. `token_sha256` is the lookup hash; `sealed_blob`/`blob_nonce` is an AES-GCM blob keyed by the URL-fragment secret holding the *authoritative* `{dek, kind, mode, scope, window, expires_at}`. All other columns are a display-only mirror, never trusted for authorization. Same sealing design as `api_tokens`.
@@ -107,6 +109,8 @@ The CLI generates a random one-off password, generates a random DEK, derives KEK
 
 **Session cookie.** `HttpOnly`, `SameSite=Lax`, `Secure` (the latter set by the reverse proxy).
 
+**CSRF.** State-changing requests must carry an `X-Requested-With: fetch` header, enforced on the session-authed mutating routes. A simple cross-site form post cannot set a custom header, so this blocks CSRF without a token round-trip. The MCP endpoint (`/mcp`) is exempt — it is `Authorization: Bearer`-authed, not cookie-authed.
+
 **Share links.** Same sealing design as MCP API tokens. A share's URL carries a random secret in its **fragment** (`/s/<id>#<secret>`); the DEK and the share's authoritative kind/mode/scope/window/expiry are sealed in an AES-GCM blob keyed by `derive_token_key(secret)`. Only `sha256(secret)` is stored; the `shares`/`share_calendars` mirror columns are display-only and never trusted for authorization. The secret is sent in the `X-Share-Secret` header (never the request line), keeping it out of access/proxy logs and the Referer. A stolen DB without the secret, or a leaked URL without the DB row, yields nothing — both are needed. Expiry is enforced from the sealed blob; reads are clamped to the sealed window and writes to the sealed writable-calendar set. Anyone holding a link has the granted access, so links expire (default 30 days) and are revocable. Gated by `SHARING_ENABLED`. See `SHARING.md`.
 
 **No TLS termination in the app.**
@@ -118,17 +122,20 @@ Authentication:
 - `POST /auth/login`
 - `POST /auth/logout`
 - `POST /auth/change-password` — used for both the forced first-login flow and voluntary changes
+- `GET /auth/session` — idle-logout countdown status (does not refresh the idle timer)
 
 CalDAV accounts and calendars:
 
 - `GET /caldav-accounts`, `POST /caldav-accounts`, `DELETE /caldav-accounts/{id}`
 - `GET /calendars`
-- `PATCH /calendars/{id}` — change color or enabled flag
+- `GET /calendars/ctags` — per-calendar change-detection tokens (used by the browser-notification scheduler to skip unchanged calendars)
+- `PATCH /calendars/{id}` — change color, enabled flag, or default-calendar flag
 
 Events (proxy to CalDAV, no local cache):
 
 - `GET /events?from=&to=&calendar_ids=`
 - `POST /events`
+- `POST /events/recurrence-preview` — preview a recurrence rule (returns the last occurrence + count), no write
 - `PUT /events/{uid}`
 - `DELETE /events/{uid}`
 
@@ -165,7 +172,7 @@ MCP server (only mounted when `MCP_SERVER_ENABLED`):
 
 - `/mcp` — Streamable HTTP (`mcp` SDK / `FastMCP`), authenticated by
   `Authorization: Bearer WebCalDav…`. Tools: `list_items`, `list_journals`,
-  `get_item_details`, `create_event`, `create_task`, `create_journal`,
+  `list_calendars`, `get_item_details`, `create_event`, `create_task`, `create_journal`,
   `update_event`, `update_task`, `update_journal`, `set_task_status`,
   `delete_event`, `delete_task`, `delete_journal`. English + ISO 8601;
   read-only tokens are rejected by mutating tools; scoped tokens are limited to
@@ -178,6 +185,9 @@ Calendar sharing:
 - `POST /shares` — create a share of kind `item`/`grid`/`agenda` (requires
   `SHARING_ENABLED` + active session; DEK + scope sealed in); returns the URL
   with its fragment secret once
+- `POST /shares/export.ics` — owner-side `.ics` download of an item/grid/agenda
+  scope (session-authed) without minting a share link; distinct from the
+  share-secret-authed `GET /shares/{id}/export.ics` below
 - `DELETE /shares/{id}` — revoke (works even when `SHARING_ENABLED` is off)
 - `GET /s/{id}` — the share-view page; reuses the main app (`index.html` +
   `app.js`) in a navigation-locked share mode (the secret rides in the fragment

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — MVP
+## Unreleased
 
 ### Keyboard accessibility pass (2026-06-27)
 - **Why**: the app is aimed at non-experts (e.g. a self-hoster setting it up for
