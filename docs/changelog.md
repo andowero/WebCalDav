@@ -2,6 +2,20 @@
 
 ## Unreleased — MVP
 
+### Header authentication via trusted reverse-proxy user header (2026-06-30)
+- Added optional header-auth mode controlled by `HEADER_AUTHENTICATION` (default
+  `false`), `HEADER_AUTH_HEADER_NAME` (default `Remote-User`), and
+  `HEADER_AUTH_SECRET` (required when enabled).
+- `GET /` now bootstraps a session from the trusted header when enabled,
+  auto-provisioning users on first seen identity and landing directly in the
+  authenticated calendar state.
+- Added `POST /auth/header-login` for explicit header-login checks and tests.
+- Added startup validation: enabling header auth without `HEADER_AUTH_SECRET`
+  fails fast.
+- Added test coverage for disabled/enabled flows, auto-provisioning, existing
+  header-auth users, incompatible password-mode users (`409`), and startup
+  validation.
+
 ### Keyboard accessibility pass (2026-06-27)
 - **Why**: the app is aimed at non-experts (e.g. a self-hoster setting it up for
   an elderly relative), but a keyboard-only user was locked out of core flows —

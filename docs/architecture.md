@@ -22,6 +22,10 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 
 - Endpoints: `POST /auth/login`, `POST /auth/logout`, `POST /auth/change-password`. No signup endpoint.
 - Flow: argon2id(password, kdf_salt) → KEK → verify `password_verifier` → unwrap DEK (AES-GCM).
+- Optional reverse-proxy header mode (`HEADER_AUTHENTICATION=true`):
+  `GET /` (and `POST /auth/header-login`) can auto-authenticate a user from a
+  trusted upstream header (default `Remote-User`), auto-provisioning unknown
+  users. Startup fails if `HEADER_AUTH_SECRET` is missing in this mode.
 - Session store: in-memory `dict[session_id] = {user_id, dek, last_seen, restricted}`.
 - Session lifecycle: opaque session-ID cookie (`HttpOnly`, `SameSite=Lax`, `Secure` per `COOKIE_SECURE`, default on), idle timeout (`SESSION_IDLE_TIMEOUT`), wiped on process restart.
 - First-login guard: `restricted` sessions (when `users.must_change_password` is true) may only call `/auth/change-password` and `/auth/logout`; everything else returns 403.
@@ -32,7 +36,7 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 ### Admin CLI
 
 - `python -m webcaldav.admin` exposes `create-user`, `list-users`, `reset-password`, `delete-user`.
-- The **only** path for provisioning users. Runs inside the container (`docker compose exec`).
+- The default path for provisioning users. Runs inside the container (`docker compose exec`).
 - `create-user` and `reset-password` print a one-off password to stdout; the admin delivers it out-of-band.
 
 ### Crypto module

@@ -1,8 +1,11 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from webcaldav.admin import _provision_user
+from webcaldav.config import settings
 from webcaldav.db import get_session_factory
+from webcaldav.models import User
 
 
 async def _create_user(email: str, password: str) -> None:
@@ -218,3 +221,139 @@ async def test_events_returns_dummy_when_no_calendars(client: AsyncClient, db_en
     assert len(events) > 0
     titles = [e["title"] for e in events]
     assert any("Welcome" in t for t in titles)
+
+
+@pytest.mark.asyncio
+async def test_header_auth_disabled_ignores_header(client: AsyncClient, db_engine):
+    old = (
+        settings.header_authentication,
+        settings.header_auth_secret,
+        settings.header_auth_header_name,
+    )
+    settings.header_authentication = False
+    settings.header_auth_secret = None
+    settings.header_auth_header_name = "Remote-User"
+    try:
+        r = await client.get("/", headers={"Remote-User": "proxy-user@example.com"})
+        assert r.status_code == 200
+        assert "session_id" not in r.cookies
+        r = await client.get("/settings")
+        assert r.status_code == 401
+    finally:
+        (
+            settings.header_authentication,
+            settings.header_auth_secret,
+            settings.header_auth_header_name,
+        ) = old
+
+
+@pytest.mark.asyncio
+async def test_header_auth_enabled_missing_header_no_session(client: AsyncClient, db_engine):
+    old = (
+        settings.header_authentication,
+        settings.header_auth_secret,
+        settings.header_auth_header_name,
+    )
+    settings.header_authentication = True
+    settings.header_auth_secret = "secret-for-tests"
+    settings.header_auth_header_name = "Remote-User"
+    try:
+        r = await client.get("/")
+        assert r.status_code == 200
+        assert "session_id" not in r.cookies
+        r = await client.get("/settings")
+        assert r.status_code == 401
+    finally:
+        (
+            settings.header_authentication,
+            settings.header_auth_secret,
+            settings.header_auth_header_name,
+        ) = old
+
+
+@pytest.mark.asyncio
+async def test_header_auth_autoprovisions_and_authenticates(client: AsyncClient, db_engine):
+    old = (
+        settings.header_authentication,
+        settings.header_auth_secret,
+        settings.header_auth_header_name,
+    )
+    settings.header_authentication = True
+    settings.header_auth_secret = "secret-for-tests"
+    settings.header_auth_header_name = "Remote-User"
+    try:
+        email = "header-new@example.com"
+        r = await client.get("/", headers={"Remote-User": email})
+        assert r.status_code == 200
+        assert "session_id" in r.cookies
+
+        async with get_session_factory()() as db:
+            user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+            assert user is not None
+            assert user.must_change_password is False
+
+        r = await client.get("/settings")
+        assert r.status_code == 200
+    finally:
+        (
+            settings.header_authentication,
+            settings.header_auth_secret,
+            settings.header_auth_header_name,
+        ) = old
+
+
+@pytest.mark.asyncio
+async def test_header_auth_existing_user_works(client: AsyncClient, db_engine):
+    old = (
+        settings.header_authentication,
+        settings.header_auth_secret,
+        settings.header_auth_header_name,
+    )
+    settings.header_authentication = True
+    settings.header_auth_secret = "secret-for-tests"
+    settings.header_auth_header_name = "Remote-User"
+    try:
+        email = "header-existing@example.com"
+        r = await client.get("/", headers={"Remote-User": email})
+        assert r.status_code == 200
+        assert "session_id" in r.cookies
+
+        r = await client.post("/auth/logout")
+        assert r.status_code == 200
+
+        r = await client.post("/auth/header-login", headers={"Remote-User": email})
+        assert r.status_code == 200
+        assert "session_id" in r.cookies
+
+        r = await client.get("/settings")
+        assert r.status_code == 200
+    finally:
+        (
+            settings.header_authentication,
+            settings.header_auth_secret,
+            settings.header_auth_header_name,
+        ) = old
+
+
+@pytest.mark.asyncio
+async def test_header_auth_rejects_incompatible_password_user(client: AsyncClient, db_engine):
+    old = (
+        settings.header_authentication,
+        settings.header_auth_secret,
+        settings.header_auth_header_name,
+    )
+    settings.header_authentication = True
+    settings.header_auth_secret = "secret-for-tests"
+    settings.header_auth_header_name = "Remote-User"
+    try:
+        email = "legacy-password@example.com"
+        await _create_user(email, "password-mode-user")
+        r = await client.post("/auth/header-login", headers={"Remote-User": email})
+        assert r.status_code == 409
+        assert "cannot be auto-authenticated" in r.json()["detail"]
+    finally:
+        (
+            settings.header_authentication,
+            settings.header_auth_secret,
+            settings.header_auth_header_name,
+        ) = old

@@ -6,6 +6,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     session_idle_timeout: int = 3600
 
+    # Reverse-proxy header authentication. When enabled, users can be
+    # auto-authenticated from a trusted upstream identity header.
+    # Keep off by default; this mode assumes the app is reachable only behind
+    # a proxy that strips/spoofs the configured header safely.
+    header_authentication: bool = False
+    header_auth_header_name: str = "Remote-User"
+    header_auth_secret: str | None = None
+
     # When true, reject CalDAV server URLs that resolve to private/loopback/
     # link-local/metadata addresses and suppress raw connection-error detail
     # (SSRF hardening). Off by default for backward compatibility.

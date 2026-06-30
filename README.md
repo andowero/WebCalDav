@@ -135,8 +135,30 @@ If Radicale runs as **another container**, put both on the same Docker network a
 | `MCP_SERVER_ENABLED` | `false` | Enable the MCP server at `/mcp` so AI assistants can read/write calendars with an API token. Off by default. **An API token can decrypt the user's CalDAV credentials** — enable deliberately. See [MCP.md](MCP.md). |
 | `SHARING_ENABLED` | `true` | Allow users to create share links (single item, grid period, agenda slice) and `.ics` downloads. When `false`, new links can't be created but existing ones can still be listed and revoked. **A share link can decrypt the user's CalDAV credentials** — same model as an API token. See [SHARING.md](SHARING.md). |
 | `PUBLIC_BASE_URL` | _(unset)_ | External origin used to build share links, e.g. `https://calendar.zdeneknovak.one`. When unset it is derived from the reverse proxy's `X-Forwarded-Proto` / `X-Forwarded-Host` headers. Set it if those are unreliable. |
+| `HEADER_AUTHENTICATION` | `false` | Trust a reverse-proxy identity header and auto-login/auto-provision users without `POST /auth/login`. Keep off unless the app is only reachable behind a trusted proxy that strips user-supplied copies of that header. |
+| `HEADER_AUTH_HEADER_NAME` | `Remote-User` | Header name used when `HEADER_AUTHENTICATION=true` (for example `Remote-User` or `X-Forwarded-User`). |
+| `HEADER_AUTH_SECRET` | _(unset)_ | Required when `HEADER_AUTHENTICATION=true`. Secret mixed into header-auth KEK derivation; startup fails if missing. |
 
 The `ARGON2_*` parameters control how expensive it is to brute-force user passwords. The defaults are production-strength — don't weaken them on a real deployment (they exist as variables mainly so the test suite can run fast). Each user's password record stores the parameters it was created with, so raising the values later is safe: existing users keep logging in with their old parameters and pick up the stronger ones the next time they change their password.
+
+### Reverse-proxy header authentication
+
+If your reverse proxy already authenticates users, you can skip WebCalDav's login form:
+
+- Set `HEADER_AUTHENTICATION=true`.
+- Set `HEADER_AUTH_SECRET`.
+- Optionally change `HEADER_AUTH_HEADER_NAME` (default `Remote-User`).
+
+When enabled and the trusted header is present on `GET /`, WebCalDav auto-creates the user if needed and starts a normal session cookie login (`state=authenticated`) immediately.
+
+Security requirements:
+
+- Never expose the app directly to untrusted networks when header auth is enabled.
+- Your reverse proxy must remove any incoming user-supplied copy of the auth header and set its own trusted value only after successful proxy-side authentication.
+
+Migration caveat:
+
+- Existing password-mode users may be incompatible with header-auth KEK derivation. In that case `POST /auth/header-login` returns `409` and the account must be migrated/reset by an operator.
 
 ### Login rate limiting
 
