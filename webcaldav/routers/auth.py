@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..crypto import derive_kek, make_verifier, unwrap_dek, verify_kek, wrap_dek
 from ..deps import get_current_session, get_db, get_login_rate_limiter, get_session_store
+from ..header_auth import resolve_idle_timeout_for_user, try_header_auth
 from ..metrics import active_sessions
 from ..models import User, UserSettings
 from ..ratelimit import LoginRateLimiter
@@ -124,6 +125,45 @@ async def logout(
         store.delete(session_id)
         active_sessions.set(store.active_count)
     response.delete_cookie("session_id")
+    return {"ok": True}
+
+
+@router.post("/header-login")
+async def header_login(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    store: SessionStore = Depends(get_session_store),
+) -> dict[str, Any]:
+    result = await try_header_auth(request, db)
+    if result.reason == "disabled":
+        raise HTTPException(status_code=404, detail="Header authentication is disabled")
+    if result.reason == "missing_header":
+        raise HTTPException(status_code=401, detail="Missing trusted auth header")
+    if result.reason == "incompatible_user" or result.user is None or result.dek is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "User cannot be auto-authenticated by header mode; "
+                "migrate or reset this account first"
+            ),
+        )
+
+    idle_timeout = await resolve_idle_timeout_for_user(result.user.id, db)
+    session_id = store.create(result.user.id, result.dek, restricted=False, idle_timeout=idle_timeout)
+    active_sessions.set(store.active_count)
+    response.set_cookie(
+        "session_id",
+        session_id,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+    )
+    logger.info(
+        "header_login",
+        user_id=result.user.id,
+        created_user=result.created_user,
+    )
     return {"ok": True}
 
 

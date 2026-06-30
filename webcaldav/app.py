@@ -14,6 +14,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from .config import settings
 from .db import create_tables, init_engine, get_session_factory
 from .deps import init_login_rate_limiter, init_session_store, get_session_store
+from .header_auth import resolve_idle_timeout_for_user, try_header_auth
 from .i18n import load_catalog, resolve_language
 from .metrics import http_requests_total
 from .models import User, UserSettings
@@ -65,6 +66,10 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    if settings.header_authentication and not settings.header_auth_secret:
+        raise RuntimeError(
+            "HEADER_AUTHENTICATION is enabled but HEADER_AUTH_SECRET is not set"
+        )
     init_engine(settings.database_url)
     init_session_store(settings.session_idle_timeout)
     init_login_rate_limiter(
@@ -130,6 +135,7 @@ async def metrics_middleware(request: Request, call_next: RequestResponseEndpoin
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request) -> HTMLResponse:
     session_id = request.cookies.get("session_id")
+    new_session_id: str | None = None
     state = "anonymous"
     user_email = None
     user_settings_tz = "UTC"
@@ -145,6 +151,30 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_theme = "system"
     user_settings_language = "autodetect"
     user_settings_double_click_to_create_events = False
+
+    if not session_id:
+        try:
+            async with get_session_factory()() as db:
+                result = await try_header_auth(request, db)
+                if result.user is not None and result.dek is not None:
+                    idle_timeout = await resolve_idle_timeout_for_user(result.user.id, db)
+                    store = get_session_store()
+                    new_session_id = store.create(
+                        result.user.id,
+                        result.dek,
+                        restricted=False,
+                        idle_timeout=idle_timeout,
+                    )
+                    session_id = new_session_id
+                    logger.info(
+                        "header_root_login",
+                        user_id=result.user.id,
+                        created_user=result.created_user,
+                    )
+                elif result.reason == "incompatible_user":
+                    logger.warning("header_root_login_incompatible_user")
+        except Exception:
+            logger.warning("header_root_login_failed", exc_info=True)
 
     if session_id:
         try:
@@ -187,7 +217,7 @@ async def root(request: Request) -> HTMLResponse:
     )
     catalog = load_catalog(lang)
 
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "index.html",
         context={
@@ -215,6 +245,15 @@ async def root(request: Request) -> HTMLResponse:
             "static_v": STATIC_VERSION,
         },
     )
+    if new_session_id:
+        response.set_cookie(
+            "session_id",
+            new_session_id,
+            httponly=True,
+            samesite="lax",
+            secure=settings.cookie_secure,
+        )
+    return response
 
 
 @app.get("/s/{share_id}", response_class=HTMLResponse)

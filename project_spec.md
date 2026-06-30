@@ -6,7 +6,7 @@
 
 Self-hosters who run their own CalDAV server (e.g. Radicale) and want browser access to their calendar from machines where they can't or don't want to install dedicated software — typically a work computer. The user described in the brainstorming has moved away from Google services and uses native calendar apps on Ubuntu and Android; the gap is the browser.
 
-Accounts are provisioned by the server administrator. The app is **not** a multi-tenant signup service.
+Accounts are provisioned by the server administrator by default. Optionally, when reverse-proxy header auth is enabled, accounts can be auto-provisioned on first trusted header login. The app is **not** a multi-tenant signup service.
 
 ### What problems does it solve?
 
@@ -23,9 +23,10 @@ Accounts are provisioned by the server administrator. The app is **not** a multi
 
 ### User lifecycle
 
-- **Creation.** Admin runs a CLI command that creates the user and prints a one-off password. Admin delivers the password to the user out-of-band (e.g. Signal, secure email).
+- **Creation (default mode).** Admin runs a CLI command that creates the user and prints a one-off password. Admin delivers the password to the user out-of-band (e.g. Signal, secure email).
+- **Creation (header-auth mode).** If `HEADER_AUTHENTICATION=true`, `GET /` can auto-provision a user from the trusted reverse-proxy header.
 - **First login.** The user logs in with the one-off password and is forced to change it before any other action.
-- **No self-signup. No password-reset UI. No "forgot password" flow.** A forgotten password means the user's CalDAV credentials are unrecoverable — this is the explicit cost of zero-knowledge at rest. The admin can issue a new one-off password via the CLI, but doing so rotates the user's data encryption key, which invalidates their stored CalDAV credentials; the user must re-enter them after the reset.
+- **No public self-signup. No password-reset UI. No "forgot password" flow.** A forgotten password means the user's CalDAV credentials are unrecoverable — this is the explicit cost of zero-knowledge at rest. The admin can issue a new one-off password via the CLI, but doing so rotates the user's data encryption key, which invalidates their stored CalDAV credentials; the user must re-enter them after the reset.
 
 ### Milestones
 
@@ -111,6 +112,8 @@ The CLI generates a random one-off password, generates a random DEK, derives KEK
 
 **No TLS termination in the app.**
 
+**Optional header-auth mode.** With `HEADER_AUTHENTICATION=true`, identity comes from a trusted reverse-proxy header (default `Remote-User`) and the app auto-creates/authenticates users on `GET /`. This mode requires strict proxy trust boundaries (strip user-supplied header copies; set trusted header only after proxy auth) and a configured `HEADER_AUTH_SECRET`.
+
 ### API surface
 
 Authentication:
@@ -118,6 +121,7 @@ Authentication:
 - `POST /auth/login`
 - `POST /auth/logout`
 - `POST /auth/change-password` — used for both the forced first-login flow and voluntary changes
+- `POST /auth/header-login` — optional trusted-header login endpoint (requires `HEADER_AUTHENTICATION=true`)
 
 CalDAV accounts and calendars:
 
