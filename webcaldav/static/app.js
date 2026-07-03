@@ -1452,30 +1452,58 @@
     const overlayEl = document.getElementById('loading-overlay');
     const barEl = document.getElementById('loading-bar');
     
-    // Check cache first; if ctags haven't changed, use cached data.
+    // Check cache first.
     const cached = getCachedCalendarData(from, to);
     
     if (cached) {
-      // Cache exists: show small top indicator while validating ctags.
+      // Cache exists: return data immediately, validate ctags in background.
+      const dataToReturn = cached.data;
+      
+      // Validate ctags without blocking UI.
       if (barEl) barEl.style.display = 'block';
-      try {
-        const changed = await ctagsChanged();
-        if (!changed) {
-          // Ctags unchanged → cache is valid. Hide bar and return.
+      ctagsChanged().then(changed => {
+        if (changed) {
+          // Ctags changed: fetch fresh data and update cache + calendar.
+          (async () => {
+            try {
+              const params = new URLSearchParams({ from, to, kinds: 'events,tasks,journals' });
+              const cdR = await fetch('/calendar-data?' + params.toString());
+              if (!cdR.ok) throw new Error('Failed to fetch calendar data');
+              const data = await cdR.json();
+              
+              // Update ctags and cache with fresh data.
+              try {
+                const ctagsR = await fetch('/calendars/ctags');
+                const ctags = ctagsR.ok ? await ctagsR.json() : {};
+                setCachedCalendarData(from, to, data, ctags);
+              } catch (_) {
+                setCachedCalendarData(from, to, data, {});
+              }
+              
+              // Refresh calendar display with fresh data.
+              if (calendar) calendar.refetchEvents();
+            } catch (err) {
+              // Silently fail - user still sees cached data.
+            } finally {
+              if (barEl) barEl.style.display = 'none';
+            }
+          })();
+        } else {
+          // Ctags unchanged.
           if (barEl) barEl.style.display = 'none';
-          return cached.data;
         }
-      } catch (_) {
-        // On error, assume changed and refetch.
-      }
-      // If we reach here, ctags changed. Hide bar and fall through to fetch.
-      if (barEl) barEl.style.display = 'none';
-    } else {
-      // Cache miss: show full-page overlay loading indicator.
-      if (overlayEl) overlayEl.style.display = 'flex';
+      }).catch(() => {
+        // On error, just hide bar and keep cached data visible.
+        if (barEl) barEl.style.display = 'none';
+      });
+      
+      return dataToReturn;
     }
     
-    // Cache miss or ctags changed → fetch fresh data.
+    // Cache miss: show full-page overlay loading indicator.
+    if (overlayEl) overlayEl.style.display = 'flex';
+    
+    // Fetch fresh data.
     try {
       const params = new URLSearchParams({ from, to, kinds: 'events,tasks,journals' });
       const cdR = await fetch('/calendar-data?' + params.toString());
