@@ -1449,30 +1449,54 @@
   }
 
   async function fetchCalendarDataWithCache(from, to) {
+    const overlayEl = document.getElementById('loading-overlay');
+    const barEl = document.getElementById('loading-bar');
+    
     // Check cache first; if ctags haven't changed, use cached data.
     const cached = getCachedCalendarData(from, to);
+    
     if (cached) {
-      const changed = await ctagsChanged();
-      if (!changed) {
-        // Ctags unchanged → cache is valid.
-        return cached.data;
+      // Cache exists: show small top indicator while validating ctags.
+      if (barEl) barEl.style.display = 'block';
+      try {
+        const changed = await ctagsChanged();
+        if (!changed) {
+          // Ctags unchanged → cache is valid. Hide bar and return.
+          if (barEl) barEl.style.display = 'none';
+          return cached.data;
+        }
+      } catch (_) {
+        // On error, assume changed and refetch.
       }
+      // If we reach here, ctags changed. Hide bar and fall through to fetch.
+      if (barEl) barEl.style.display = 'none';
+    } else {
+      // Cache miss: show full-page overlay loading indicator.
+      if (overlayEl) overlayEl.style.display = 'flex';
     }
+    
     // Cache miss or ctags changed → fetch fresh data.
-    const params = new URLSearchParams({ from, to, kinds: 'events,tasks,journals' });
-    const cdR = await fetch('/calendar-data?' + params.toString());
-    if (!cdR.ok) throw new Error('Failed to fetch calendar data');
-    const data = await cdR.json();
-    // Fetch current ctags and cache alongside the data.
     try {
-      const ctagsR = await fetch('/calendars/ctags');
-      const ctags = ctagsR.ok ? await ctagsR.json() : {};
-      setCachedCalendarData(from, to, data, ctags);
-    } catch (_) {
-      // Still cache the data even if ctags fetch fails (no additional error).
-      setCachedCalendarData(from, to, data, {});
+      const params = new URLSearchParams({ from, to, kinds: 'events,tasks,journals' });
+      const cdR = await fetch('/calendar-data?' + params.toString());
+      if (!cdR.ok) throw new Error('Failed to fetch calendar data');
+      const data = await cdR.json();
+      
+      // Fetch current ctags and cache alongside the data.
+      try {
+        const ctagsR = await fetch('/calendars/ctags');
+        const ctags = ctagsR.ok ? await ctagsR.json() : {};
+        setCachedCalendarData(from, to, data, ctags);
+      } catch (_) {
+        // Still cache the data even if ctags fetch fails (no additional error).
+        setCachedCalendarData(from, to, data, {});
+      }
+      return data;
+    } finally {
+      // Always hide loading indicators on completion.
+      if (overlayEl) overlayEl.style.display = 'none';
+      if (barEl) barEl.style.display = 'none';
     }
-    return data;
   }
 
   // ── Event / Task type toggle ─────────────────────────────────────────────────

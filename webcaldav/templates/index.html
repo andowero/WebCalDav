@@ -94,6 +94,12 @@
   </header>
   <div class="calendar-body" id="main-content" tabindex="-1">
     <div id="calendar"></div>
+    <!-- Overlay loading indicator (cache miss: full page center) -->
+    <div id="loading-overlay" class="loading-overlay" style="display:none">
+      <div class="loading-spinner"></div>
+    </div>
+    <!-- Top loading indicator (cache hit: small bar at top) -->
+    <div id="loading-bar" class="loading-bar" style="display:none"></div>
     <div id="agenda" class="agenda" style="display:none">
       <div id="agenda-controls" class="agenda-controls" style="display:none">
         <label class="agenda-range">
