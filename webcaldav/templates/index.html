@@ -37,7 +37,7 @@
 <script>
   window.__STATE__ = {{ state | tojson }};
   window.__USER_EMAIL__ = {{ user_email | tojson }};
-  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }}, completed_task_display: {{ completed_task_display | tojson }}, undated_task_display: {{ undated_task_display | tojson }}, theme: {{ theme | tojson }}, language: {{ language | tojson }}, double_click_to_create_events: {{ double_click_to_create_events | tojson }} };
+  window.__SETTINGS__ = { timezone: {{ tz | tojson }}, first_day_of_week: {{ fdow }}, time_format: {{ timefmt | tojson }}, date_format: {{ datefmt | tojson }}, default_view: {{ default_view | tojson }}, auto_logout_enabled: {{ auto_logout_enabled | tojson }}, auto_logout_timeout_seconds: {{ auto_logout_timeout }}, notifications_enabled: {{ notifications_enabled | tojson }}, completed_task_display: {{ completed_task_display | tojson }}, undated_task_display: {{ undated_task_display | tojson }}, theme: {{ theme | tojson }}, language: {{ language | tojson }}, double_click_to_create_events: {{ double_click_to_create_events | tojson }}, holidays_enabled: {{ holidays_enabled | tojson }}, holidays_country: {{ holidays_country | tojson }} };
   window.__CONFIG__ = { notification_horizon_days: {{ notification_horizon_days }}, notification_lookback_days: {{ notification_lookback_days }}, static_v: {{ static_v | tojson }} };
   window.__MCP_ENABLED__ = {{ mcp_enabled | tojson }};
   window.__SHARING_ENABLED__ = {{ sharing_enabled | tojson }};
@@ -504,6 +504,15 @@
         <option value="autodetect" data-i18n="ui.lang_auto">Auto-detect</option>
         <option value="english">English</option>
         <option value="czech">Čeština</option>
+      </select>
+      <label class="ev-check">
+        <input type="checkbox" id="pref-holidays-enabled">
+        <span data-i18n="ui.pref_holidays">Color non-working days</span>
+      </label>
+      <label data-i18n="ui.pref_holidays_country">Country for holidays</label>
+      <select id="pref-holidays-country">
+        <option value="none" data-i18n="ui.holidays_country_none">None</option>
+        <option value="CZ" data-i18n="ui.holidays_country_cz">Czechia</option>
       </select>
       <label data-i18n="ui.pref_agenda_from">Agenda search starts (days in past)</label>
       <input id="pref-agenda-from-offset" type="number" min="0" max="3650" step="1" value="0">

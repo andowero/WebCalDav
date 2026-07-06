@@ -149,7 +149,11 @@
     "pref_notifications": "Browser notifications (reminders & event starts)",
     "pref_notifications_note": "Fire only while a WebCalDav tab stays open. Enabling turns automatic logout off.",
     "pref_notifications_grant": "Enable notifications on this browser",
-    "save": "Save"
+    "save": "Save",
+    "pref_holidays": "Color non-working days",
+    "pref_holidays_country": "Country for holidays",
+    "holidays_country_none": "None",
+    "holidays_country_cz": "Czechia"
   },
   "dyn": {
     "connecting": "Connecting…",
@@ -284,12 +288,30 @@
     "at_iso": "At {value}"
   },
   "units": {
-    "minutes": ["minute", "minutes"],
-    "hours": ["hour", "hours"],
-    "days": ["day", "days"],
-    "weeks": ["week", "weeks"]
+    "minutes": [
+      "minute",
+      "minutes"
+    ],
+    "hours": [
+      "hour",
+      "hours"
+    ],
+    "days": [
+      "day",
+      "days"
+    ],
+    "weeks": [
+      "week",
+      "weeks"
+    ]
   },
-  "ordinals": ["first", "second", "third", "fourth", "fifth"],
+  "ordinals": [
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth"
+  ],
   "errors": {
     "Calendar not found": "Calendar not found",
     "Invalid CalDAV server URL": "Invalid CalDAV server URL",
@@ -333,5 +355,27 @@
     "weekText": "W",
     "moreLinkText": "more",
     "noEventsText": "No events to display"
+  },
+  "holiday": {
+    "weekend": "Weekend",
+    "country": {
+      "none": "None",
+      "cz": "Czechia"
+    },
+    "cz": {
+      "new_year": "New Year's Day",
+      "good_friday": "Good Friday",
+      "easter_monday": "Easter Monday",
+      "labour_day": "Labour Day",
+      "liberation": "Liberation Day",
+      "ss_cyril_methodius": "Sts. Cyril and Methodius Day",
+      "jan_hus": "Jan Hus Day",
+      "st_wenceslas": "St. Wenceslas Day",
+      "independence": "Independent Czechoslovak State Day",
+      "velvet": "Struggle for Freedom and Democracy Day",
+      "christmas_eve": "Christmas Eve",
+      "christmas": "Christmas Day",
+      "boxing_day": "Second Day of Christmas"
+    }
   }
 }

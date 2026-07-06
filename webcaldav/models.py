@@ -226,5 +226,10 @@ class UserSettings(Base):
     # days (future). Used only when a search is active in the agenda view.
     agenda_search_from_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     agenda_search_to_days: Mapped[int] = mapped_column(Integer, default=365, nullable=False)
+    # Out-of-work-day coloring (holidays + country-correct weekend). Off by
+    # default; "holidays_country" = "none" also disables regardless of the flag.
+    # See webcaldav.holidays for the authoritative holiday table.
+    holidays_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    holidays_country: Mapped[str] = mapped_column(String, default="none", nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="settings")

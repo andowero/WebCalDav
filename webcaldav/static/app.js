@@ -437,6 +437,104 @@
     if (_agendaActive) { agendaReset(); agendaLoadMore(); }
   }
 
+  // --- Non-working-day coloring (holidays + country-correct weekend) ---
+  // Server returns {date, kind, name_key}; we cache the set per visible range
+  // and apply CSS classes + a `title` tooltip on the day-number element. The
+  // name_key is resolved to a localized label client-side via tr().
+  let _holidayDays = new Map(); // dateIso -> {kind, name_key}
+  let _holidayRange = null;     // {from, to} currently cached
+
+  function holidaysEnabled() {
+    // Share view has no session, so /holidays (session-authed) isn't usable;
+    // holiday coloring is a logged-in-user feature only.
+    if (SHARE_MODE) return false;
+    const s = window.__SETTINGS__ || {};
+    return !!s.holidays_enabled && (s.holidays_country || 'none') !== 'none';
+  }
+
+  function holidayForDateISO(iso) { return _holidayDays.get(iso) || null; }
+
+  function refreshHolidaysForCurrentRange() {
+    if (!_fcCalendar) return;
+    if (_agendaActive) return; // agenda fetches its own range
+    const view = _fcCalendar.view;
+    if (!view || !view.activeStart || !view.activeEnd) return;
+    const fromISO = luxon.DateTime.fromJSDate(view.activeStart).toISODate();
+    const toISO = luxon.DateTime.fromJSDate(view.activeEnd).minus({ days: 1 }).toISODate();
+    refreshHolidays(fromISO, toISO);
+  }
+
+  async function refreshHolidays(fromISO, toISO) {
+    if (!holidaysEnabled()) { _holidayDays = new Map(); _holidayRange = null; applyHolidayStyling(); return; }
+    if (_holidayRange && _holidayRange.from === fromISO && _holidayRange.to === toISO) return;
+    try {
+      const params = new URLSearchParams({ from: fromISO, to: toISO });
+      const r = await fetch('/holidays?' + params.toString(), { headers: { 'X-Requested-With': 'fetch' } });
+      if (!r.ok) return;
+      const d = await r.json();
+      _holidayDays = new Map((d.days || []).map(x => [x.date, x]));
+      _holidayRange = { from: fromISO, to: toISO };
+    } catch (_) { return; }
+    applyHolidayStyling();
+  }
+
+  // Agenda tiles forward in chunks; merge each chunk's non-working days into
+  // the cache without discarding earlier ones (the agenda shows a growing
+  // contiguous range, so stale entries are harmless).
+  async function refreshHolidaysChunk(fromISO, toISO) {
+    if (!holidaysEnabled()) { applyHolidayStyling(); return; }
+    try {
+      const params = new URLSearchParams({ from: fromISO, to: toISO });
+      const r = await fetch('/holidays?' + params.toString(), { headers: { 'X-Requested-With': 'fetch' } });
+      if (!r.ok) return;
+      const d = await r.json();
+      (d.days || []).forEach(x => _holidayDays.set(x.date, x));
+    } catch (_) { return; }
+    applyHolidayStyling();
+  }
+
+  function _setDayNonworking(el, nameKey) {
+    if (!el) return;
+    el.classList.add('fc-day-nonworking');
+    if (nameKey) el.setAttribute('title', tr(nameKey));
+  }
+  function _clearDayNonworking(el) {
+    if (!el) return;
+    el.classList.remove('fc-day-nonworking');
+    el.removeAttribute('title');
+  }
+
+  function applyHolidayStyling() {
+    const cal = _calRoot();
+    if (!cal) return;
+    // Month + week/day grids: each day cell carries data-date. The header
+    // cell (week/day) shares the same data-date and holds the day number.
+    cal.querySelectorAll('[data-date]').forEach(function (cell) {
+      const iso = cell.getAttribute('data-date');
+      const h = holidayForDateISO(iso);
+      // Month view: the number lives in .fc-daygrid-day-number; week/day:
+      // in the header .fc-col-header-cell-cushion. The whole cell is tinted.
+      if (h) {
+        _setDayNonworking(cell, h.name_key);
+      } else {
+        _clearDayNonworking(cell);
+      }
+    });
+    // Agenda: mark day-group headers whose date matches a non-working day.
+    document.querySelectorAll('#agenda-list .agenda-day-header').forEach(function (h) {
+      // agenda-day-header carries data-date when set below; fall back to nothing.
+      const iso = h.getAttribute('data-date');
+      if (iso && holidayForDateISO(iso)) {
+        h.classList.add('agenda-day-nonworking');
+        h.setAttribute('title', tr(holidayForDateISO(iso).name_key));
+      } else {
+        h.classList.remove('agenda-day-nonworking');
+        h.removeAttribute('title');
+      }
+    });
+  }
+
+
   function openSettings() {
     show('settings-overlay');
     show('settings-panel');
@@ -1029,6 +1127,8 @@
       document.getElementById('pref-theme').value = s.theme || 'system';
       document.getElementById('pref-language').value = s.language || 'autodetect';
       document.getElementById('pref-dblclick-create').checked = !!s.double_click_to_create_events;
+      document.getElementById('pref-holidays-enabled').checked = !!s.holidays_enabled;
+      document.getElementById('pref-holidays-country').value = s.holidays_country || 'none';
       document.getElementById('pref-agenda-from-offset').value = String(s.agenda_search_from_days ?? 0);
       document.getElementById('pref-agenda-to-offset').value = String(s.agenda_search_to_days ?? 365);
       const enabled = s.auto_logout_enabled ?? true;
@@ -1160,6 +1260,8 @@
         const theme = document.getElementById('pref-theme').value;
         const language = document.getElementById('pref-language').value;
         const dblClickCreate = document.getElementById('pref-dblclick-create').checked;
+        const holidaysEnabled = document.getElementById('pref-holidays-enabled').checked;
+        const holidaysCountry = document.getElementById('pref-holidays-country').value;
         const agendaFromDays = Math.max(0, parseInt(document.getElementById('pref-agenda-from-offset').value, 10) || 0);
         const agendaToDays = Math.max(0, parseInt(document.getElementById('pref-agenda-to-offset').value, 10) || 0);
         const languageChanged = language !== (window.__SETTINGS__?.language ?? 'autodetect');
@@ -1185,6 +1287,8 @@
           theme: theme,
           language: language,
           double_click_to_create_events: dblClickCreate,
+          holidays_enabled: holidaysEnabled,
+          holidays_country: holidaysCountry,
           agenda_search_from_days: agendaFromDays,
           agenda_search_to_days: agendaToDays,
         });
@@ -1205,12 +1309,18 @@
         window.__SETTINGS__.theme = theme;
         window.__SETTINGS__.language = language;
         window.__SETTINGS__.double_click_to_create_events = dblClickCreate;
+        window.__SETTINGS__.holidays_enabled = holidaysEnabled;
+        window.__SETTINGS__.holidays_country = holidaysCountry;
         window.__SETTINGS__.agenda_search_from_days = agendaFromDays;
         window.__SETTINGS__.agenda_search_to_days = agendaToDays;
         // Apply theme live; "system" tracked by CSS media query (no JS needed).
         document.documentElement.dataset.theme = theme;
         if (notifEnabled) startNotifications(); else stopNotifications();
         applyCalendarPrefs(tz, fdow, timefmt, datefmt);
+        // Non-working-day coloring may have been toggled/recounted: refetch
+        // for the current visible range and restyle. No reload needed (names
+        // are i18n catalog keys, already loaded).
+        refreshHolidaysForCurrentRange();
         // Live session timeout changed server-side; resync the countdown.
         refreshLogoutCountdown();
         msg.textContent = tr('dyn.saved');
@@ -3816,6 +3926,8 @@
         agendaSetStatus('');
       }
       _agendaCursor = to; // windows tile forward regardless
+      // Color non-working days in this agenda chunk (merged into the cache).
+      refreshHolidaysChunk(from.toISODate(), to.minus({ days: 1 }).toISODate());
       // A share slice is one fixed page, and a bounded search loads its whole
       // interval at once — stop after this single page in both cases.
       if (SHARE_MODE || _agendaToBound) {
@@ -4022,6 +4134,9 @@
         _agendaLastDayKey = dayKey;
         const h = document.createElement('div');
         h.className = 'agenda-day-header' + (dayKey === todayKey ? ' is-today' : '');
+        h.setAttribute('data-date', dayKey);
+        const hd = holidayForDateISO(dayKey);
+        if (hd) { h.classList.add('agenda-day-nonworking'); h.setAttribute('title', tr(hd.name_key)); }
         h.textContent = start.toFormat(headerFmt);
         frag.appendChild(h);
       }
@@ -4760,9 +4875,11 @@
       // Clicking any built-in view button (or navigating) leaves the agenda.
       datesSet: function () {
         if (_agendaActive) { hideAgenda(); return; }
+        // Non-working-day coloring is range-bound: refetch on every navigation.
+        refreshHolidaysForCurrentRange();
         // After any navigation/re-render keep one tabbable entry cell and finish
         // any pending keyboard-focus request (deferred so the new grid is in DOM).
-        setTimeout(() => { ensureGridEntry(); applyGridPendingFocus(); }, 0);
+        setTimeout(() => { ensureGridEntry(); applyGridPendingFocus(); applyHolidayStyling(); }, 0);
       },
       // Make month-grid day cells focusable for keyboard navigation; today is the
       // default Tab entry. Roving tabindex is managed during arrow nav. Only in
@@ -4770,6 +4887,14 @@
       dayCellDidMount: function (arg) {
         if (arg.view.type === 'dayGridMonth') {
           arg.el.setAttribute('tabindex', arg.isToday ? '0' : '-1');
+        }
+        // Style this cell against the cached holiday set (cheap; the set is
+        // refreshed on datesSet). Covers cells FC re-mounts without a full
+        // datesSet (e.g. prev/next of the same month-width).
+        const iso = arg.el.getAttribute('data-date');
+        if (iso) {
+          const h = holidayForDateISO(iso);
+          if (h) _setDayNonworking(arg.el, h.name_key); else _clearDayNonworking(arg.el);
         }
       },
       // Drive the search-box spinner from the grid event-source fetch (the slow

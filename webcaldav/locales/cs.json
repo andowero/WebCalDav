@@ -149,7 +149,11 @@
     "pref_notifications": "Oznámení prohlížeče (připomenutí a začátky událostí)",
     "pref_notifications_note": "Spouštějí se jen dokud je otevřená záložka WebCalDav. Zapnutí vypne automatické odhlášení.",
     "pref_notifications_grant": "Povolit oznámení v tomto prohlížeči",
-    "save": "Uložit"
+    "save": "Uložit",
+    "pref_holidays": "Barvit nepracovní dny",
+    "pref_holidays_country": "Země pro svátky",
+    "holidays_country_none": "Žádná",
+    "holidays_country_cz": "Česko"
   },
   "dyn": {
     "connecting": "Připojování…",
@@ -284,12 +288,34 @@
     "at_iso": "V {value}"
   },
   "units": {
-    "minutes": ["minuta", "minuty", "minut"],
-    "hours": ["hodina", "hodiny", "hodin"],
-    "days": ["den", "dny", "dní"],
-    "weeks": ["týden", "týdny", "týdnů"]
+    "minutes": [
+      "minuta",
+      "minuty",
+      "minut"
+    ],
+    "hours": [
+      "hodina",
+      "hodiny",
+      "hodin"
+    ],
+    "days": [
+      "den",
+      "dny",
+      "dní"
+    ],
+    "weeks": [
+      "týden",
+      "týdny",
+      "týdnů"
+    ]
   },
-  "ordinals": ["první", "druhé", "třetí", "čtvrté", "páté"],
+  "ordinals": [
+    "první",
+    "druhé",
+    "třetí",
+    "čtvrté",
+    "páté"
+  ],
   "errors": {
     "Calendar not found": "Kalendář nenalezen",
     "Invalid CalDAV server URL": "Neplatná adresa CalDAV serveru",
@@ -333,5 +359,27 @@
     "weekText": "T",
     "moreLinkText": "další",
     "noEventsText": "Žádné události k zobrazení"
+  },
+  "holiday": {
+    "weekend": "Víkend",
+    "country": {
+      "none": "Žádná",
+      "cz": "Česko"
+    },
+    "cz": {
+      "new_year": "Nový rok",
+      "good_friday": "Velký pátek",
+      "easter_monday": "Velikonoční pondělí",
+      "labour_day": "Svátek práce",
+      "liberation": "Den vítězství",
+      "ss_cyril_methodius": "Den slovanských věrozvěstů Cyrila a Metoděje",
+      "jan_hus": "Den upálení mistra Jana Husa",
+      "st_wenceslas": "Den české státnosti",
+      "independence": "Den vzniku samostatného československého státu",
+      "velvet": "Den boje za svobodu a demokracii",
+      "christmas_eve": "Štědrý den",
+      "christmas": "1. svátek vánoční",
+      "boxing_day": "2. svátek vánoční"
+    }
   }
 }

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Out-of-work day coloring (holidays + weekend)
+- **Why**: users want public holidays and weekends visually distinguished on
+  the calendar (red day number, light-red day tint), with the holiday name as a
+  hover tooltip. Country selectable (Czechia first). Fully translated (cs + en).
+  Per-user on/off.
+- **Holiday data** (`webcaldav/holidays.py`): authoritative local table — no
+  runtime network calls. Each holiday is a definition with a validity range
+  (`effective_from`/`effective_to` years), so future additions/removals are
+  first-class (Good Friday carries `effective_from=2016`). Easter-based
+  holidays (Good Friday = Easter − 2, Easter Monday = Easter + 1) resolve from
+  a hardcoded `EASTER_SUNDAY` table (years 2000–2100) and merge into the same
+  per-year list as fixed-date holidays — no runtime Computus, no special-case
+  branch downstream. Nager.Date is the designated upstream reference for
+  manually refreshing the table later.
+- **Settings**: new `holidays_enabled` (bool) + `holidays_country`
+  ("none"|"CZ") columns on `user_settings`, with migration for existing DBs.
+  Validated on PUT; surfaced in the settings panel.
+- **Endpoint** (`GET /holidays?from=&to=`): returns `{days:[{date,kind,
+  name_key}]}` for the active user's country over a range. `kind` =
+  `holiday`|`weekend`. Session-authed; no CalDAV/DEK access (purely local).
+- **Rendering** (`app.js`/`app.css`): the visible range is fetched once per
+  navigation; FullCalendar day cells/columns (month/week/day) and agenda day
+  headers get a `fc-day-nonworking` class + a `title` tooltip resolved from
+  `name_key` via the i18n catalog. Country-correct weekends (CZ = Sat+Sun) are
+  colored too. Share views do not color holidays (no session).
+
 ### Keyboard accessibility pass (2026-06-27)
 - **Why**: the app is aimed at non-experts (e.g. a self-hoster setting it up for
   an elderly relative), but a keyboard-only user was locked out of core flows —

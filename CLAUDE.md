@@ -14,6 +14,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 
 - Four calendar views: month, week, day, and agenda (infinitely scrolling).
 - Tasks (VTODO): view, create, edit, complete, and set recurrence alongside calendar events.
+- Out-of-work day coloring: public holidays and country-correct weekends are tinted red (day number + light day tint) with the holiday name as a hover tooltip; country selectable (Czechia first), per-user on/off, fully translated. Holiday data is a local validity-ranged table; Easter is a hardcoded date table merged with fixed-date holidays.
 - Journals (VJOURNAL): view, create, edit, and delete dated notes with a Markdown body (no recurrence/reminders); shown with a downward-triangle marker.
 - First day of the week is a user setting.
 - Timezone is a user setting; default from the browser.

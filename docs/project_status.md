@@ -16,12 +16,21 @@
 | v9        | Journals (VJOURNAL): view, create, edit, delete           | Complete |
 | v10       | Calendar sharing (links + .ics) for items/views/agenda    | Complete |
 | v11       | Keyboard accessibility + basic agenda screen-reader support | Complete |
+| v12       | Out-of-work day coloring (public holidays + weekend)      | Complete |
 
 ## Known issues
 
 - None currently open.
 
 ## Recent additions
+
+### Out-of-work day coloring (holidays + weekend)
+- Colors public holidays and country-correct weekend days red (day number +
+  light day tint), with the holiday name as a hover tooltip. Country selectable
+  (Czechia first); per-user on/off. Holiday data is an authoritative local
+  table with validity ranges per holiday (no runtime network calls); Easter is
+  a hardcoded date table merged with fixed-date holidays. See `Plan.md` and
+  `webcaldav/holidays.py`.
 
 ### Keyboard accessibility pass (2026-06-27)
 - Makes the app fully operable by keyboard (WCAG 2.2 keyboard criteria) and gives

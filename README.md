@@ -15,6 +15,7 @@ A lightweight, self-hosted web UI for viewing and editing calendar events on you
 - Journal (VJOURNAL) support: dated notes with a Markdown body edited in a two-tab editor (an "Edit" tab with raw Markdown and a rendered, read-only "Display" tab — tables, syntax-highlighted code, task lists, footnotes, and custom containers; images disabled), shown with a distinct downward-triangle marker.
 - User-selectable UI theme: system (follows OS), light, or dark.
 - Internationalization with Czech translation included; locale auto-detected from the browser.
+- Out-of-work day coloring: public holidays and country-correct weekends are tinted red with the holiday name as a hover tooltip. Country selectable (Czechia first); per-user on/off. Holiday data is an authoritative local table (no external API calls); Easter is a hardcoded date table. Turn it on under **Settings → Preferences → Color non-working days**.
 - Optional MCP server: AI assistants can read and write your events, tasks, and journals via scoped, read-only or read-write API tokens ([MCP.md](MCP.md)).
 - Calendar sharing: hand a single item, a month/week/day, or an agenda slice to someone via a read-only or read-write link (the secret rides in the URL fragment, never the server logs) or a downloadable `.ics`; links expire and can be revoked ([SHARING.md](SHARING.md)).
 - Per-user settings: timezone, first day of week, time and date format, default view, auto-logout, double-click to create events.

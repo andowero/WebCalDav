@@ -69,6 +69,8 @@
   --fc-highlight-color: rgba(26,115,232,.12);
   --fc-list-event-hover-bg-color: #f7f9fc;
   --fc-non-business-color: rgba(0,0,0,.04);
+  --nonworking-fg: #c0392b;
+  --nonworking-bg: rgba(192,57,43,.08);
 }
 
 /* Dark palette, shared by explicit dark and system-prefers-dark. */
@@ -134,6 +136,8 @@
   --fc-highlight-color: rgba(138,180,248,.14);
   --fc-list-event-hover-bg-color: #2a2f3a;
   --fc-non-business-color: rgba(0,0,0,.25);
+  --nonworking-fg: #ef6b5e;
+  --nonworking-bg: rgba(239,107,94,.12);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -199,6 +203,8 @@
     --fc-highlight-color: rgba(138,180,248,.14);
     --fc-list-event-hover-bg-color: #2a2f3a;
     --fc-non-business-color: rgba(0,0,0,.25);
+    --nonworking-fg: #ef6b5e;
+    --nonworking-bg: rgba(239,107,94,.12);
   }
 }
 
@@ -1441,6 +1447,21 @@ details#add-account-details summary {
 .fc-task-grayed { opacity: 0.55; }
 .fc-task-grayed .fc-event-title,
 .fc-task-grayed .fc-list-event-title { text-decoration: line-through; }
+
+/* Non-working day coloring (public holidays + country-correct weekend).
+   The whole day cell/column is tinted and the day number turns red; hovering
+   the number shows the holiday/weekend name via a `title` attribute set in JS. */
+.fc-day-nonworking { background: var(--nonworking-bg); }
+.fc-day-nonworking .fc-daygrid-day-number,
+.fc-day-nonworking .fc-col-header-cell-cushion,
+.fc-day-nonworking.fc-col-header-cell .fc-col-header-cell-cushion {
+  color: var(--nonworking-fg);
+}
+/* Today keeps its own bg tint; just the number goes red when it's also non-working. */
+.fc-daygrid-day.fc-day-today.fc-day-nonworking { background: var(--fc-today-bg-color); }
+.fc-daygrid-day.fc-day-today.fc-day-nonworking .fc-daygrid-day-number { color: var(--nonworking-fg); }
+/* Agenda day header that is a non-working day. */
+.agenda-day-header.agenda-day-nonworking { color: var(--nonworking-fg); }
 
 /* Agenda square mirrors the grid one, coloured per calendar inline. */
 .agenda-box {

@@ -24,6 +24,7 @@ from .routers import (
     calendar_data,
     calendars,
     events,
+    holidays,
     journals,
     ops,
     settings as settings_router,
@@ -96,6 +97,7 @@ app.include_router(tasks.router)
 app.include_router(journals.router)
 app.include_router(calendar_data.router)
 app.include_router(settings_router.router)
+app.include_router(holidays.router)
 app.include_router(api_tokens.router)
 app.include_router(shares.router)
 app.include_router(ops.router)
@@ -145,6 +147,8 @@ async def root(request: Request) -> HTMLResponse:
     user_settings_theme = "system"
     user_settings_language = "autodetect"
     user_settings_double_click_to_create_events = False
+    user_settings_holidays_enabled = False
+    user_settings_holidays_country = "none"
 
     if session_id:
         try:
@@ -179,6 +183,8 @@ async def root(request: Request) -> HTMLResponse:
                         user_settings_double_click_to_create_events = (
                             s.double_click_to_create_events
                         )
+                        user_settings_holidays_enabled = s.holidays_enabled
+                        user_settings_holidays_country = s.holidays_country
         except Exception:
             logger.warning("root_session_lookup_failed", exc_info=True)
 
@@ -206,6 +212,8 @@ async def root(request: Request) -> HTMLResponse:
             "theme": user_settings_theme,
             "language": user_settings_language,
             "double_click_to_create_events": user_settings_double_click_to_create_events,
+            "holidays_enabled": user_settings_holidays_enabled,
+            "holidays_country": user_settings_holidays_country,
             "mcp_enabled": settings.mcp_server_enabled,
             "sharing_enabled": settings.sharing_enabled,
             "lang": lang,
@@ -239,6 +247,8 @@ async def share_page(request: Request, share_id: int) -> HTMLResponse:
     undated_task_display = "agenda"
     theme = "system"
     language = "autodetect"
+    holidays_enabled = False
+    holidays_country = "none"
     try:
         async with get_session_factory()() as db:
             share = (
@@ -259,6 +269,8 @@ async def share_page(request: Request, share_id: int) -> HTMLResponse:
                     undated_task_display = s.undated_task_display
                     theme = s.theme
                     language = s.language
+                    holidays_enabled = s.holidays_enabled
+                    holidays_country = s.holidays_country
     except Exception:
         logger.warning("share_page_settings_lookup_failed", exc_info=True)
 
@@ -283,6 +295,8 @@ async def share_page(request: Request, share_id: int) -> HTMLResponse:
             "theme": theme,
             "language": language,
             "double_click_to_create_events": False,
+            "holidays_enabled": holidays_enabled,
+            "holidays_country": holidays_country,
             "mcp_enabled": False,
             "sharing_enabled": settings.sharing_enabled,
             "lang": lang,
