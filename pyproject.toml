@@ -56,10 +56,20 @@ extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.ruff.lint.per-file-ignores]
 # Broad except-and-log at the CalDAV I/O boundary is deliberate: one bad
-# calendar/item must not take down a whole listing.
-"webcaldav/caldav_client.py" = ["S110", "S112", "DTZ001"]
-"webcaldav/**" = ["BLE001"]
-"tests/**" = ["DTZ001"]
+# calendar, item, or token must not take down a whole listing/request. Scoped
+# to the files that actually talk to external services — a new blind except
+# elsewhere still fails lint.
+"webcaldav/caldav_client.py" = ["BLE001", "S110", "S112", "DTZ001"]
+"webcaldav/mcp_server.py" = ["BLE001"]
+"webcaldav/shares.py" = ["BLE001"]
+"webcaldav/tokens.py" = ["BLE001"]
+"webcaldav/routers/auth.py" = ["BLE001"]
+"webcaldav/routers/caldav_accounts.py" = ["BLE001"]
+"webcaldav/routers/events.py" = ["BLE001"]
+"webcaldav/routers/journals.py" = ["BLE001"]
+"webcaldav/routers/shares.py" = ["BLE001"]
+"webcaldav/routers/tasks.py" = ["BLE001"]
+"tests/test_caldav.py" = ["DTZ001"]
 
 [tool.mypy]
 python_version = "3.12"

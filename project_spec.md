@@ -170,7 +170,7 @@ MCP API tokens (settings UI):
 
 MCP server (only mounted when `MCP_SERVER_ENABLED`):
 
-- `/mcp` — Streamable HTTP (`mcp` SDK / `FastMCP`), authenticated by
+- `/mcp` — Streamable HTTP (`mcp` SDK 2.x / `MCPServer`), authenticated by
   `Authorization: Bearer WebCalDav…`. Tools: `list_items`, `list_journals`,
   `list_calendars`, `get_item_details`, `create_event`, `create_task`, `create_journal`,
   `update_event`, `update_task`, `update_journal`, `set_task_status`,

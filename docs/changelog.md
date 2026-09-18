@@ -19,15 +19,18 @@
   v6 because the `@fullcalendar/luxon3` adapter has no stable v7 release;
   markdown-it 14.1.0 → 15.0.2 (instance-level `md.utils` still present, which
   the journal editor uses); markdown-it-deflist 3 → 4.0.0;
-  markdown-it-task-lists 2.1.0 → 2.1.1; highlight.js 11.10.0 → 11.12.0.
+  markdown-it-task-lists checked against 2.1.1 (its dist build is byte-identical
+  to the vendored 2.1.0 file, so no file change); highlight.js 11.10.0 → 11.12.0.
   luxon stays 3.7.2 (latest).
 - **Lint**: ruff 0.16's expanded default rule set made `ruff check .` fail
   (397 pre-existing findings). Auto-fixed the safe modernizations
   (`timezone.utc` → `UTC`, `lru_cache` → `cache`, import sorting); added the
   idiomatic config — `extend-immutable-calls = ["fastapi.Depends"]`, and
-  scoped ignores for the deliberate broad-except/best-effort patterns in
-  `caldav_client.py`. Also replaced the deprecated `Row.tuple()` with plain
-  row unpacking. `ruff check .` and `mypy` are green again.
+  per-file ignores for the deliberate broad-except/best-effort patterns,
+  scoped to the 10 modules that talk to external services (caldav_client,
+  mcp_server, shares, tokens + the routers wrapping them) — a new blind
+  `except Exception` anywhere else still fails lint. Also replaced the deprecated
+  `Row.tuple()` with plain row unpacking. `ruff check .` and `mypy` are green again.
 
 ### Out-of-work day coloring (holidays + weekend)
 - **Why**: users want public holidays and weekends visually distinguished on
