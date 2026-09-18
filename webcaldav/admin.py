@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import settings
 from .crypto import derive_kek, generate_dek, make_verifier, wrap_dek
-from .db import create_tables, init_engine, get_session_factory
+from .db import create_tables, get_session_factory, init_engine
 from .models import APIToken, CalDAVAccount, User
 
 cli = typer.Typer(help="WebCalDav admin CLI")

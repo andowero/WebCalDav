@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..deps import get_db, get_unrestricted_session
-from ..models import APIToken, APITokenCalendar, Calendar, CalDAVAccount
+from ..models import APIToken, APITokenCalendar, CalDAVAccount, Calendar
 from ..session import SessionEntry
 from ..tokens import mint_token
 

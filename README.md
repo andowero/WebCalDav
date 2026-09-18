@@ -194,18 +194,19 @@ curl -s https://registry.npmjs.org/fullcalendar/latest | grep -o '"version":"[^"
 curl -s https://registry.npmjs.org/luxon/latest | grep -o '"version":"[^"]*"'
 ```
 
-Then overwrite the vendored files, substituting the versions (here `6.1.20` for FullCalendar / its plugin and `3.7.2` for luxon):
+Then overwrite the vendored files, substituting the versions (here `6.1.21` for FullCalendar / its plugin and `3.7.2` for luxon). FullCalendar stays on the latest **v6** release because its luxon3 date-adapter plugin has no stable v7 yet:
 
 ```sh
 cd webcaldav/static/vendor
-curl -fSL -o fullcalendar.min.js          https://cdn.jsdelivr.net/npm/fullcalendar@6.1.20/index.global.min.js
+curl -fSL -o fullcalendar.min.js          https://cdn.jsdelivr.net/npm/fullcalendar@6.1.21/index.global.min.js
 curl -fSL -o luxon.min.js                  https://cdn.jsdelivr.net/npm/luxon@3.7.2/build/global/luxon.min.js
-curl -fSL -o fullcalendar-luxon3.min.js    https://cdn.jsdelivr.net/npm/@fullcalendar/luxon3@6.1.20/index.global.min.js
+curl -fSL -o fullcalendar-luxon3.min.js    https://cdn.jsdelivr.net/npm/@fullcalendar/luxon3@6.1.21/index.global.min.js
 ```
 
 Notes:
 
 - The FullCalendar v6 global bundle injects its own CSS — there is **no** separate stylesheet to download.
+- The remaining vendored files (markdown-it and its plugins, highlight.js) come from each package's npm tarball browser builds (`dist/browser/*.umd.min.js`, `dist/*.min.js`) or the cdnjs `highlight.min.js` build; grab the latest the same way.
 - Filenames are fixed; `index.html` references them by path, and the cache-busting `?v=` token is recomputed from the file contents on the next start, so browsers pick up the new bytes automatically.
 - Commit the updated files and rebuild: `sudo docker compose up --build -d`. Then hard-reload the page once and confirm the calendar renders.
 

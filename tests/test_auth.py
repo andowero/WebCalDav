@@ -110,9 +110,10 @@ async def test_get_requests_need_no_csrf_header(client: AsyncClient, db_engine):
 @pytest.mark.asyncio
 async def test_login_uses_per_user_kdf_params(client: AsyncClient, db_engine):
     """Hardening the global argon2 defaults must not lock out existing users."""
+    from sqlalchemy import select
+
     from webcaldav.config import settings
     from webcaldav.models import User
-    from sqlalchemy import select
 
     await _create_user("legacy@example.com", "pw")
 

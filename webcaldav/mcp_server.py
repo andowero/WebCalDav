@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 import structlog
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import select
 
@@ -32,7 +32,7 @@ from .caldav_client import (
 )
 from .crypto import decrypt_bytes
 from .db import get_session_factory
-from .models import Calendar, CalDAVAccount
+from .models import CalDAVAccount, Calendar
 from .routers.events import (
     EventUpdate,
     RecurrenceRule,
@@ -93,11 +93,9 @@ _current: contextvars.ContextVar[TokenContext | None] = contextvars.ContextVar(
 # Keep the default streamable_http_path ("/mcp"): the wrapper app is mounted at
 # the root (see build_mcp_app / app.py) so the "/mcp" path reaches it unstripped,
 # giving a clean non-redirecting endpoint at exactly /mcp.
-mcp = FastMCP(
-    "WebCalDav",
-    stateless_http=True,
-    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
-)
+# stateless_http and transport_security moved from the constructor to
+# streamable_http_app() in mcp 2.x.
+mcp = MCPServer("WebCalDav")
 
 
 class ToolError(Exception):
@@ -142,7 +140,7 @@ async def _scoped_calendars(ctx: TokenContext, db: Any) -> list[tuple[Calendar, 
             .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
             .where(
                 CalDAVAccount.user_id == ctx.user_id,
-                Calendar.enabled == True,  # noqa: E712
+                Calendar.enabled == True,
             )
         )
     ).all()
@@ -815,4 +813,11 @@ class TokenAuthMiddleware:
 
 def build_mcp_app() -> Any:
     """The Streamable-HTTP ASGI app to mount at /mcp, wrapped with auth."""
-    return TokenAuthMiddleware(mcp.streamable_http_app())
+    return TokenAuthMiddleware(
+        mcp.streamable_http_app(
+            stateless_http=True,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=False
+            ),
+        )
+    )

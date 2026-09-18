@@ -10,7 +10,7 @@ events come back.
 """
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 import pytest
@@ -133,8 +133,8 @@ async def test_discover_calendars_returns_color(radicale_server):
 
 async def test_fetch_events_parses_all_event_types(radicale_server):
     base_url, calendars = radicale_server
-    frm = datetime(2026, 5, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 5, 1, tzinfo=UTC)
+    to = datetime(2026, 6, 1, tzinfo=UTC)
 
     events = await fetch_events(
         base_url, USER, PASSWORD, calendars["Work"], frm, to, color="#abcdef", calendar_id=1
@@ -179,8 +179,8 @@ async def test_account_fetch_reuses_one_client(radicale_server, monkeypatch):
 
     monkeypatch.setattr(caldav_client, "_make_dav_client", counting)
 
-    frm = datetime(2026, 5, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 5, 1, tzinfo=UTC)
+    to = datetime(2026, 6, 1, tzinfo=UTC)
     refs = [
         CalendarRef(calendar_url=calendars["Work"], color="#abcdef", calendar_id=1),
         CalendarRef(calendar_url=calendars["Plain"], color="#123456", calendar_id=2),
@@ -336,16 +336,16 @@ def edit_calendar(radicale_server):
 
 async def test_update_event_timed(edit_calendar):
     base_url, url = edit_calendar
-    new_start = datetime(2026, 6, 10, 14, 0, tzinfo=timezone.utc)
-    new_end = datetime(2026, 6, 10, 15, 30, tzinfo=timezone.utc)
+    new_start = datetime(2026, 6, 10, 14, 0, tzinfo=UTC)
+    new_end = datetime(2026, 6, 10, 15, 30, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "edit-event",
         title="Renamed", all_day=False, start=new_start, end=new_end,
         location="New place", description="Some notes",
     )
 
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 1, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     ev = {e["id"]: e for e in events}["edit-event"]
     assert ev["title"] == "Renamed"
@@ -366,8 +366,8 @@ async def test_update_event_allday(edit_calendar):
         location=None, description=None,
     )
 
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 1, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     ev = {e["id"]: e for e in events}["edit-allday"]
     assert ev["title"] == "Vacation"
@@ -378,8 +378,8 @@ async def test_update_event_allday(edit_calendar):
 
 async def _recur_view(base_url, url) -> list[tuple[str, str]]:
     """(start ISO, title) for every occurrence on/after the recur series start."""
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     return sorted((e["start"], e["title"]) for e in events if e["start"][:10] >= "2026-06-12")
 
@@ -387,8 +387,8 @@ async def _recur_view(base_url, url) -> list[tuple[str, str]]:
 async def test_update_recurring_all(edit_calendar):
     base_url, url = edit_calendar
     # User clicks the Jun 19 occurrence and renames the whole series (no time change).
-    start = datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 19, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 19, 9, 30, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Renamed", all_day=False, start=start, end=end,
@@ -416,8 +416,8 @@ async def test_update_recurring_all_until_drag(edit_calendar):
     with caldav.DAVClient(url=base_url, username=USER, password=PASSWORD) as client:
         caldav.Calendar(client=client, url=url).save_event(_RECUR_UNTIL_EVENT)
 
-    start = datetime(2026, 6, 30, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 30, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 30, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 30, 9, 30, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "recur-until",
         title="Bounded sync", all_day=False, start=start, end=end,
@@ -425,8 +425,8 @@ async def test_update_recurring_all_until_drag(edit_calendar):
         recurrence_id="2026-06-23T09:00:00+00:00",
     )
 
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     dates = sorted(e["start"][:10] for e in events if e["id"] == "recur-until")
     # Both occurrences survive, shifted +7d: Jun 23 and Jun 30.
@@ -449,8 +449,8 @@ async def test_update_recurring_all_shifts_exdate(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Shifted", all_day=False,
-        start=datetime(2026, 7, 3, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 7, 3, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 7, 3, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 7, 3, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-26T09:00:00+00:00",
     )
@@ -478,13 +478,13 @@ async def test_update_recurring_thisfuture_carries_exdate(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Split", all_day=False,
-        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="thisfuture",
         recurrence_id="2026-06-26T09:00:00+00:00",
     )
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     dates = sorted(e["start"][:10] for e in events)
     # Jul 3 stays excluded on the spun-off series; earlier + pivot slots survive.
@@ -494,8 +494,8 @@ async def test_update_recurring_thisfuture_carries_exdate(edit_calendar):
 
 async def test_update_recurring_this(edit_calendar):
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 19, 11, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 19, 11, 30, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False, start=start, end=end,
@@ -521,14 +521,14 @@ async def test_update_recurring_this_twice(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False,
-        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
     )
 
     # Client refetches; the moved occurrence keeps its original RECURRENCE-ID.
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     solo = [e for e in events if e["title"] == "Solo"]
     assert len(solo) == 1
@@ -539,8 +539,8 @@ async def test_update_recurring_this_twice(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo2", all_day=False,
-        start=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 13, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 13, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 13, 30, tzinfo=UTC),
         location=None, description=None, scope="this", recurrence_id=pivot,
     )
 
@@ -563,16 +563,16 @@ async def test_update_recurring_this_twice_moved_pivot(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False,
-        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
     )
     # Second "this" edit pivots on the MOVED start (11:00), not the stable RID.
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo2", all_day=False,
-        start=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 13, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 13, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 13, 30, tzinfo=UTC),
         location=None, description=None, scope="this",
         recurrence_id="2026-06-19T11:00:00+00:00",
     )
@@ -586,8 +586,8 @@ async def test_update_recurring_this_twice_moved_pivot(edit_calendar):
 
 async def test_update_recurring_thisfuture(edit_calendar):
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 19, 11, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 19, 11, 30, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Future", all_day=False, start=start, end=end,
@@ -607,8 +607,8 @@ async def _make_solo_override(base_url, url):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False,
-        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
     )
 
@@ -622,8 +622,8 @@ async def test_update_recurring_all_reset_time_only(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False,
-        start=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 12, 10, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 12, 10, 30, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00",
         reset_overrides=True, reset_fields=["time"],
@@ -645,8 +645,8 @@ async def test_update_recurring_all_reset_title_only(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Renamed", all_day=False,
-        start=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 12, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 12, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00",
         reset_overrides=True, reset_fields=["title"],
@@ -665,8 +665,8 @@ async def test_update_recurring_all_reset_time_and_title(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Renamed", all_day=False,
-        start=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 12, 10, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 12, 10, 30, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00",
         reset_overrides=True, reset_fields=["time", "title"],
@@ -685,8 +685,8 @@ async def test_update_recurring_all_no_reset_keeps_override(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Renamed", all_day=False,
-        start=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 12, 10, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 12, 10, 30, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00",
     )
@@ -708,15 +708,15 @@ async def test_update_recurring_thisfuture_reset(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="SoloEarly", all_day=False,
-        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
     )
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="SoloLate", all_day=False,
-        start=datetime(2026, 7, 3, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 7, 3, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 7, 3, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 7, 3, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="this",
         recurrence_id="2026-07-03T09:00:00+00:00",
     )
@@ -724,8 +724,8 @@ async def test_update_recurring_thisfuture_reset(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Future", all_day=False,
-        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="thisfuture",
         recurrence_id="2026-06-26T09:00:00+00:00",
         reset_overrides=True, reset_fields=["title"],
@@ -755,14 +755,14 @@ async def test_thisfuture_split_until_survives_all_rename(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Future", all_day=False,
-        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="thisfuture", recurrence_id=_PIVOT,
     )
     # 2. Re-open the master and round-trip its rule exactly as the UI does: the
     #    end-by-date field is date-granular and re-serializes to end-of-day.
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     rule = dict({e["id"]: e for e in events}["recur-event"]["extendedProps"]["recurrenceRule"])
     assert rule.get("until")
@@ -771,8 +771,8 @@ async def test_thisfuture_split_until_survives_all_rename(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Renamed", all_day=False,
-        start=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 12, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 12, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00", rrule=rule,
     )
@@ -793,16 +793,16 @@ async def test_update_recurring_thisfuture_after_this_override(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False,
-        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="this",
         recurrence_id="2026-06-26T09:00:00+00:00",
     )
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Future", all_day=False,
-        start=datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="thisfuture", recurrence_id=_PIVOT,
     )
     view = await _recur_view(base_url, url)
@@ -823,8 +823,8 @@ async def test_thisfuture_after_this_moves_pivot(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False,
-        start=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
     )
     # 2. Drag the (now 11:00) occurrence to 13:00, this+future. The client sends
@@ -832,8 +832,8 @@ async def test_thisfuture_after_this_moves_pivot(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False,
-        start=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 13, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 13, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 13, 30, tzinfo=UTC),
         location=None, description=None, scope="thisfuture",
         recurrence_id="2026-06-19T11:00:00+00:00",
     )
@@ -862,8 +862,8 @@ async def test_thisfuture_twice_until_series_keeps_all(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-until4",
         title="Bounded weekly", all_day=False,
-        start=datetime(2026, 6, 27, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 27, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 27, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 27, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="thisfuture",
         recurrence_id="2026-06-26T09:00:00+00:00",
     )
@@ -872,13 +872,13 @@ async def test_thisfuture_twice_until_series_keeps_all(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-until4",
         title="Bounded weekly", all_day=False,
-        start=datetime(2026, 6, 20, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 20, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 20, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 20, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="thisfuture",
         recurrence_id="2026-06-19T09:00:00+00:00",
     )
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     # Ignore the fixture's unrelated recur-event (COUNT=4) sharing the calendar.
     dates = sorted(
@@ -898,8 +898,8 @@ async def test_update_recurring_all_drag_pins_prior_override(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False,
-        start=datetime(2026, 6, 26, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 26, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 26, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 26, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="this",
         recurrence_id="2026-06-26T09:00:00+00:00",
     )
@@ -907,8 +907,8 @@ async def test_update_recurring_all_drag_pins_prior_override(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Renamed", all_day=False,
-        start=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 12, 10, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 12, 10, 30, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00",
     )
@@ -929,16 +929,16 @@ async def test_update_recurring_two_this_overrides_isolated(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False,
-        start=datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 26, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 26, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 26, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="this",
         recurrence_id="2026-06-26T09:00:00+00:00",
     )
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Other", all_day=False,
-        start=datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 9, 30, tzinfo=UTC),
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
     )
     view = await _recur_view(base_url, url)
@@ -963,8 +963,8 @@ async def test_fetch_sync_token_changes_on_write(edit_calendar):
     await create_event(
         base_url, USER, PASSWORD, url, "tok-event@webcaldav",
         title="New", all_day=False,
-        start=datetime(2026, 6, 28, 9, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 28, 9, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 28, 10, 0, tzinfo=UTC),
         location=None, description=None,
     )
     assert await fetch_sync_token(base_url, USER, PASSWORD, url) != t1
@@ -972,8 +972,8 @@ async def test_fetch_sync_token_changes_on_write(edit_calendar):
 
 async def test_update_event_not_found(edit_calendar):
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 12, 11, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 12, 11, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 12, 12, 0, tzinfo=UTC)
     with pytest.raises(EventNotFoundError):
         await update_event(
             base_url, USER, PASSWORD, url, "does-not-exist",
@@ -984,16 +984,16 @@ async def test_update_event_not_found(edit_calendar):
 
 async def test_create_event_timed(edit_calendar):
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 20, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 20, 10, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 20, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 20, 10, 0, tzinfo=UTC)
     await create_event(
         base_url, USER, PASSWORD, url, "new-timed@webcaldav",
         title="Fresh meeting", all_day=False, start=start, end=end,
         location="Room 1", description="Notes",
     )
 
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 1, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     ev = {e["id"]: e for e in events}["new-timed@webcaldav"]
     assert ev["title"] == "Fresh meeting"
@@ -1014,8 +1014,8 @@ async def test_create_event_allday(edit_calendar):
         location=None, description=None,
     )
 
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 1, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     ev = {e["id"]: e for e in events}["new-allday@webcaldav"]
     assert ev["title"] == "Trip"
@@ -1028,8 +1028,8 @@ async def test_delete_event(edit_calendar):
     base_url, url = edit_calendar
     await delete_event(base_url, USER, PASSWORD, url, "edit-event")
 
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 1, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     assert "edit-event" not in {e["id"] for e in events}
 
@@ -1049,24 +1049,24 @@ _PIVOT = "2026-06-19T09:00:00+00:00"
 
 async def _recur_starts(base_url, url) -> list[str]:
     """Sorted YYYY-MM-DD start dates of every surviving recur-event occurrence."""
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     return sorted(e["start"][:10] for e in events if e["id"] == "recur-event")
 
 
 async def test_create_recurring_weekly_count(edit_calendar):
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 22, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 22, 9, 30, tzinfo=UTC)
     await create_event(
         base_url, USER, PASSWORD, url, "new-recur@webcaldav",
         title="Standup", all_day=False, start=start, end=end,
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 3},
     )
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 8, 1, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     occ = sorted(e["start"][:10] for e in events if e["id"] == "new-recur@webcaldav")
     assert occ == ["2026-06-22", "2026-06-29", "2026-07-06"]
@@ -1078,7 +1078,7 @@ async def test_create_recurring_weekly_count(edit_calendar):
 def test_preview_recurrence_count():
     from webcaldav.caldav_client import preview_recurrence
 
-    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=UTC)
     last, count = preview_recurrence(start, {"freq": "weekly", "count": 3})
     assert count == 3
     assert last.startswith("2026-07-06")
@@ -1087,7 +1087,7 @@ def test_preview_recurrence_count():
 def test_preview_recurrence_until():
     from webcaldav.caldav_client import preview_recurrence
 
-    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=UTC)
     last, count = preview_recurrence(start, {"freq": "weekly", "until": "2026-07-07T00:00:00Z"})
     # Jun 22, 29, Jul 6 fall before the until bound.
     assert count == 3
@@ -1097,7 +1097,7 @@ def test_preview_recurrence_until():
 def test_preview_recurrence_infinite():
     from webcaldav.caldav_client import preview_recurrence
 
-    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=UTC)
     assert preview_recurrence(start, {"freq": "daily"}) == (None, None)
 
 
@@ -1105,7 +1105,7 @@ def test_preview_recurrence_monthly_weekday():
     from webcaldav.caldav_client import preview_recurrence
 
     # 2026-06-22 is the 4th Monday of June; weekday mode should keep Mondays.
-    start = datetime(2026, 6, 22, 9, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 22, 9, 0, tzinfo=UTC)
     last, count = preview_recurrence(
         start, {"freq": "monthly", "monthly_mode": "weekday", "count": 2}
     )
@@ -1145,8 +1145,8 @@ async def test_delete_recurring_thisfuture_drops_orphan_override(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Solo", all_day=False,
-        start=datetime(2026, 6, 26, 11, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 26, 11, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 26, 11, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 26, 11, 30, tzinfo=UTC),
         location=None, description=None, scope="this",
         recurrence_id="2026-06-26T09:00:00+00:00",
     )
@@ -1164,8 +1164,8 @@ async def test_update_recurring_this_no_duplicate(edit_calendar):
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Moved", all_day=False,
-        start=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
-        end=datetime(2026, 6, 19, 13, 30, tzinfo=timezone.utc),
+        start=datetime(2026, 6, 19, 13, 0, tzinfo=UTC),
+        end=datetime(2026, 6, 19, 13, 30, tzinfo=UTC),
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
     )
     view = await _recur_view(base_url, url)
@@ -1179,8 +1179,8 @@ async def test_update_recurring_this_no_duplicate(edit_calendar):
 
 
 async def _fetch_one(base_url, url, uid):
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 1, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     return {e["id"]: e for e in events}[uid]
 
@@ -1215,8 +1215,8 @@ async def test_create_event_with_reminders(edit_calendar):
     from datetime import timedelta
 
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 24, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 24, 10, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 24, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 24, 10, 0, tzinfo=UTC)
     await create_event(
         base_url, USER, PASSWORD, url, "with-rem@webcaldav",
         title="Pinged", all_day=False, start=start, end=end,
@@ -1235,8 +1235,8 @@ async def test_update_event_replaces_reminders(edit_calendar):
     from datetime import timedelta
 
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 5, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 5, 10, 0, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "alarm-event",
         title="Alarmed", all_day=False, start=start, end=end,
@@ -1255,8 +1255,8 @@ async def test_update_event_replaces_reminders(edit_calendar):
 
 async def test_update_event_reminders_none_untouched(edit_calendar):
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 5, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 5, 10, 0, tzinfo=UTC)
     # A drag-style update never sends reminders; all four alarms must remain.
     await update_event(
         base_url, USER, PASSWORD, url, "alarm-event",
@@ -1269,8 +1269,8 @@ async def test_update_event_reminders_none_untouched(edit_calendar):
 
 async def test_update_event_clears_reminders(edit_calendar):
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 5, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 5, 10, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 5, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 5, 10, 0, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "alarm-event",
         title="Silenced", all_day=False, start=start, end=end,
@@ -1309,16 +1309,16 @@ async def test_update_recurring_all_reminders(edit_calendar):
     from datetime import timedelta
 
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 19, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 19, 9, 30, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False, start=start, end=end,
         location=None, description=None, scope="all", recurrence_id=_PIVOT,
         reminders=[(timedelta(minutes=-30), "START")],
     )
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     occurrences = [e for e in events if e["id"] == "recur-event"]
     assert len(occurrences) == 4
@@ -1332,16 +1332,16 @@ async def test_update_recurring_this_reminders(edit_calendar):
     from datetime import timedelta
 
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 19, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 19, 9, 30, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False, start=start, end=end,
         location=None, description=None, scope="this", recurrence_id=_PIVOT,
         reminders=[(timedelta(minutes=-10), "START")],
     )
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     occurrences = {e["start"][:10]: e for e in events if e["id"] == "recur-event"}
     assert _editable(occurrences["2026-06-19"]["extendedProps"].get("reminders", [])) == [
@@ -1356,16 +1356,16 @@ async def test_update_recurring_thisfuture_reminders(edit_calendar):
     from datetime import timedelta
 
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 19, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 19, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 19, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 19, 9, 30, tzinfo=UTC)
     await update_event(
         base_url, USER, PASSWORD, url, "recur-event",
         title="Weekly sync", all_day=False, start=start, end=end,
         location=None, description=None, scope="thisfuture", recurrence_id=_PIVOT,
         reminders=[(timedelta(minutes=-20), "START")],
     )
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 31, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 31, tzinfo=UTC)
     events = await fetch_events(base_url, USER, PASSWORD, url, frm, to, "#000000", 7)
     with_rem = sorted(
         e["start"][:10] for e in events
@@ -1411,8 +1411,8 @@ async def test_create_event_anchored_reminders_roundtrip(edit_calendar):
     from datetime import timedelta
 
     base_url, url = edit_calendar
-    start = datetime(2026, 6, 24, 9, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 24, 10, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 24, 9, 0, tzinfo=UTC)
+    end = datetime(2026, 6, 24, 10, 0, tzinfo=UTC)
     await create_event(
         base_url, USER, PASSWORD, url, "anchored-rem@webcaldav",
         title="Class", all_day=False, start=start, end=end,

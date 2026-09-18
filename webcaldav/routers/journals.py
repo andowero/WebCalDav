@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import date, timezone
+from datetime import UTC, date
 from datetime import datetime as dt_type
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -20,8 +20,9 @@ from ..caldav_client import (
 )
 from ..crypto import decrypt_bytes
 from ..deps import get_db, get_unrestricted_session
-from ..models import Calendar, CalDAVAccount
+from ..models import CalDAVAccount, Calendar
 from ..session import SessionEntry
+
 # Journals (VJOURNAL) reuse the event router's calendar lookup and date parser.
 # They carry no recurrence/reminders/end, so the rest of the surface is trimmed.
 from .events import _calendar_for, _parse_dt
@@ -53,9 +54,9 @@ def _resolve_journal_start(body: JournalUpdate) -> date | dt_type:
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid all-day date")
     try:
-        tz = ZoneInfo(body.timezone) if body.timezone else timezone.utc
+        tz = ZoneInfo(body.timezone) if body.timezone else UTC
     except ZoneInfoNotFoundError:
-        tz = timezone.utc
+        tz = UTC
     try:
         d = dt_type.fromisoformat(body.start)
     except ValueError:
@@ -73,7 +74,7 @@ async def get_journals(
     result = await db.execute(
         select(Calendar, CalDAVAccount)
         .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
-        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)  # noqa: E712
+        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)
     )
     rows = result.all()
     if not rows:
@@ -82,7 +83,7 @@ async def get_journals(
     from_dt = _parse_dt(from_)
     to_dt = _parse_dt(to)
     if from_dt is None or to_dt is None:
-        now = dt_type.now(timezone.utc)
+        now = dt_type.now(UTC)
         from_dt = from_dt or now.replace(day=1)
         to_dt = to_dt or now
 

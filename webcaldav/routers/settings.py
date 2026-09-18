@@ -21,7 +21,7 @@ VALID_UNDATED_TASK = {"agenda", "today"}
 VALID_THEME = {"system", "light", "dark"}
 VALID_LANGUAGE = {"autodetect", "english", "czech"}
 
-from ..holidays import SUPPORTED_COUNTRIES as _HOLIDAY_COUNTRIES  # noqa: E402
+from ..holidays import SUPPORTED_COUNTRIES as _HOLIDAY_COUNTRIES
 
 VALID_HOLIDAYS_COUNTRY = set(_HOLIDAY_COUNTRIES)
 

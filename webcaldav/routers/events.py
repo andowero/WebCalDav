@@ -1,7 +1,7 @@
 import asyncio
 import re
 import uuid
-from datetime import date, timedelta, timezone
+from datetime import UTC, date, timedelta
 from datetime import datetime as dt_type
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -22,7 +22,7 @@ from ..caldav_client import (
 )
 from ..crypto import decrypt_bytes
 from ..deps import get_db, get_unrestricted_session
-from ..models import Calendar, CalDAVAccount
+from ..models import CalDAVAccount, Calendar
 from ..session import SessionEntry
 
 logger = structlog.get_logger()
@@ -91,7 +91,7 @@ async def get_events(
     result = await db.execute(
         select(Calendar, CalDAVAccount)
         .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
-        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)  # noqa: E712
+        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)
     )
     rows = result.all()
 
@@ -102,8 +102,7 @@ async def get_events(
     from_dt = _parse_dt(from_)
     to_dt = _parse_dt(to)
     if from_dt is None or to_dt is None:
-        from datetime import timezone
-        now = dt_type.now(timezone.utc)
+        now = dt_type.now(UTC)
         from_dt = from_dt or now.replace(day=1)
         to_dt = to_dt or now
 
@@ -296,7 +295,10 @@ async def _calendar_for(
     row = result.first()
     if row is None:
         raise HTTPException(status_code=404, detail="Calendar not found")
-    return row.tuple()
+    # Row is a (Calendar, CalDAVAccount) tuple already; _mapping-style access via
+    # .tuple() is deprecated, unpack instead.
+    cal, account = row
+    return cal, account
 
 
 def _resolve_span(body: EventUpdate) -> tuple[date | dt_type, date | dt_type]:
@@ -314,9 +316,9 @@ def _resolve_span(body: EventUpdate) -> tuple[date | dt_type, date | dt_type]:
         return start, end
 
     try:
-        tz = ZoneInfo(body.timezone) if body.timezone else timezone.utc
+        tz = ZoneInfo(body.timezone) if body.timezone else UTC
     except ZoneInfoNotFoundError:
-        tz = timezone.utc
+        tz = UTC
     if not body.end:
         raise HTTPException(status_code=400, detail="End is required for timed events")
     try:
@@ -397,9 +399,9 @@ async def recurrence_preview(
             start: date | dt_type = date.fromisoformat(body.start[:10])
         else:
             try:
-                tz = ZoneInfo(body.timezone) if body.timezone else timezone.utc
+                tz = ZoneInfo(body.timezone) if body.timezone else UTC
             except ZoneInfoNotFoundError:
-                tz = timezone.utc
+                tz = UTC
             start = dt_type.fromisoformat(body.start)
             if start.tzinfo is None:
                 start = start.replace(tzinfo=tz)

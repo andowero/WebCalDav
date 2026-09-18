@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..caldav_client import fetch_sync_token
 from ..crypto import decrypt_bytes
 from ..deps import get_db, get_unrestricted_session
-from ..models import Calendar, CalDAVAccount
+from ..models import CalDAVAccount, Calendar
 from ..session import SessionEntry
 
 logger = structlog.get_logger()
@@ -72,7 +72,7 @@ async def calendar_ctags(
     result = await db.execute(
         select(Calendar, CalDAVAccount)
         .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
-        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)  # noqa: E712
+        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)
     )
     rows = result.all()
 
@@ -130,7 +130,7 @@ async def patch_calendar(
                 .where(
                     CalDAVAccount.user_id == entry.user_id,
                     Calendar.id != cal.id,
-                    Calendar.is_default == True,  # noqa: E712
+                    Calendar.is_default == True,
                 )
             )
             for other in others.scalars().all():

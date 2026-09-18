@@ -4,14 +4,14 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-import webcaldav.mcp_server as mcp_server
+from webcaldav import mcp_server
 from webcaldav import tokens as tok
 from webcaldav.admin import _provision_user, _reset_user
 from webcaldav.config import settings as cfg
 from webcaldav.crypto import encrypt_bytes, generate_dek
 from webcaldav.db import get_session_factory
+from webcaldav.mcp_server import TokenContext, ToolError, _current
 from webcaldav.models import APIToken, APITokenCalendar, CalDAVAccount, Calendar, User
-from webcaldav.mcp_server import ToolError, TokenContext, _current
 from webcaldav.tokens import resolve_token
 
 
@@ -76,7 +76,7 @@ def mcp_off(monkeypatch):
 @pytest.mark.asyncio
 async def test_mint_token_prefix_and_mode():
     dek = generate_dek()
-    full, sha, blob, nonce = tok.mint_token(dek, "rw", True, None, None)
+    full, sha, _, _ = tok.mint_token(dek, "rw", True, None, None)
     assert full.startswith("WebCalDavRW")
     assert len(sha) == 32
     ro, _, _, _ = tok.mint_token(dek, "ro", True, None, None)
@@ -440,7 +440,7 @@ async def test_scoped_token_filters_calendars(db_engine, monkeypatch):
 async def test_reset_password_deletes_tokens(db_engine):
     uid = await _create_user("mcp-reset@example.com")
     dek = generate_dek()
-    full, sha, blob, nonce = tok.mint_token(dek, "rw", True, None, None)
+    _, sha, blob, nonce = tok.mint_token(dek, "rw", True, None, None)
     async with get_session_factory()() as db:
         db.add(APIToken(
             user_id=uid, name="t", token_sha256=sha, sealed_blob=blob,

@@ -1,5 +1,5 @@
 import asyncio
-from datetime import timezone
+from datetime import UTC
 from datetime import datetime as dt_type
 from typing import Any
 
@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..caldav_client import CalendarRef, fetch_account_data
 from ..crypto import decrypt_bytes
 from ..deps import get_db, get_unrestricted_session
-from ..models import Calendar, CalDAVAccount
+from ..models import CalDAVAccount, Calendar
 from ..session import SessionEntry
 from .events import _dummy_events, _parse_dt
 
@@ -43,7 +43,7 @@ async def get_calendar_data(
     result = await db.execute(
         select(Calendar, CalDAVAccount)
         .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
-        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)  # noqa: E712
+        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)
     )
     rows = result.all()
 
@@ -57,7 +57,7 @@ async def get_calendar_data(
     from_dt = _parse_dt(from_)
     to_dt = _parse_dt(to)
     if from_dt is None or to_dt is None:
-        now = dt_type.now(timezone.utc)
+        now = dt_type.now(UTC)
         from_dt = from_dt or now.replace(day=1)
         to_dt = to_dt or now
 

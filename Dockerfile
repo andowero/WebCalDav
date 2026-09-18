@@ -2,7 +2,7 @@ FROM python:3.12-slim AS builder
 WORKDIR /app
 
 # official uv binary, pinnable, no pip download step
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.16 /uv /uvx /bin/
 
 # cache and site-packages are on different mounts, so copy instead of hardlink
 ENV UV_LINK_MODE=copy

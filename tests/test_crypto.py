@@ -14,7 +14,7 @@ from webcaldav.crypto import (
     wrap_dek,
 )
 
-_PARAMS = dict(time_cost=1, memory_cost=1024, parallelism=1)
+_PARAMS = {"time_cost": 1, "memory_cost": 1024, "parallelism": 1}
 
 
 def test_kek_derivation_is_deterministic():

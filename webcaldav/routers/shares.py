@@ -32,7 +32,7 @@ from ..caldav_client import (
 from ..config import settings
 from ..crypto import decrypt_bytes
 from ..deps import get_db, get_share_context, get_unrestricted_session
-from ..models import Calendar, CalDAVAccount, Share, ShareCalendar, UserSettings
+from ..models import CalDAVAccount, Calendar, Share, ShareCalendar, UserSettings
 from ..session import SessionEntry
 from ..shares import ShareContext, grid_window, mint_share
 from . import events as events_router
@@ -327,7 +327,7 @@ async def create_share(
             )
         if default_cal is None and writable_ids:
             # Pick a stable default so sharee-created items have a home.
-            default_cal = sorted(writable_ids)[0]
+            default_cal = min(writable_ids)
         cal_list = [{"id": c.id, "writable": c.id in writable_ids} for c in scope]
         mint_kwargs["calendars"] = cal_list
         mint_kwargs["default_calendar_id"] = default_cal

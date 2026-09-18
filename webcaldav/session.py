@@ -1,8 +1,9 @@
 import secrets
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 
 # Sentinel: entry should fall back to the store's global idle timeout.
 _USE_DEFAULT: Any = object()

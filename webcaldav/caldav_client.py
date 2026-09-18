@@ -4,7 +4,7 @@ import logging
 import socket
 import uuid
 from collections.abc import Callable
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
@@ -164,7 +164,7 @@ async def discover_calendars(url: str, username: str, password: str) -> list[Cal
 def _dt_to_iso(dt: date | datetime) -> str:
     if isinstance(dt, datetime):
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt.isoformat()
     return dt.isoformat()
 
@@ -561,7 +561,7 @@ def _occurrence_dt(recurrence_id: str, dtstart: date | datetime) -> date | datet
     if isinstance(dtstart, datetime):
         dt = datetime.fromisoformat(recurrence_id)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=dtstart.tzinfo or timezone.utc)
+            dt = dt.replace(tzinfo=dtstart.tzinfo or UTC)
         elif dtstart.tzinfo is not None:
             dt = dt.astimezone(dtstart.tzinfo)
         return dt
@@ -650,13 +650,13 @@ def _truncate_until(vevent: Any, pivot: date | datetime) -> None:
     if last is None:
         # No occurrence before the pivot (callers guard against this); fall back.
         if isinstance(pivot, datetime):
-            until = pivot.astimezone(timezone.utc) - timedelta(seconds=1)
+            until = pivot.astimezone(UTC) - timedelta(seconds=1)
         else:
             until = pivot - timedelta(days=1)
     elif _is_all_day(anchor):
         until = last.date()
     else:
-        until = last.astimezone(timezone.utc)
+        until = last.astimezone(UTC)
     parts["UNTIL"] = [until]
     _set_rrule(vevent, parts)
 
@@ -738,8 +738,8 @@ def _build_rrule(rule: dict[str, Any], dtstart: date | datetime) -> dict[str, An
         else:
             u = datetime.fromisoformat(str(until))
             if u.tzinfo is None:
-                u = u.replace(tzinfo=timezone.utc)
-            parts["UNTIL"] = u.astimezone(timezone.utc)
+                u = u.replace(tzinfo=UTC)
+            parts["UNTIL"] = u.astimezone(UTC)
     return parts
 
 
@@ -791,7 +791,7 @@ def _apply_fields(
         seq = 1
     vevent.pop("sequence", None)
     vevent.add("sequence", seq)
-    _replace("last-modified", datetime.now(timezone.utc))
+    _replace("last-modified", datetime.now(UTC))
 
 
 def _upsert_override(
@@ -819,7 +819,7 @@ def _upsert_override(
     ov = kind.make()
     ov.add("uid", str(master.get("uid")))
     ov.add("recurrence-id", pivot)
-    ov.add("dtstamp", datetime.now(timezone.utc))
+    ov.add("dtstamp", datetime.now(UTC))
     if title:
         ov.add("summary", title)
     if start is not None:
@@ -962,7 +962,7 @@ def _reset_override(
         seq = 1
     ov.pop("sequence", None)
     ov.add("sequence", seq)
-    _replace("last-modified", datetime.now(timezone.utc))
+    _replace("last-modified", datetime.now(UTC))
 
 
 def _pop_overrides(
@@ -1006,7 +1006,7 @@ def _series_ical(
     ical.add("version", "2.0")
     ve = kind.make()
     ve.add("uid", uid)
-    ve.add("dtstamp", datetime.now(timezone.utc))
+    ve.add("dtstamp", datetime.now(UTC))
     if title:
         ve.add("summary", title)
     if start is not None:
@@ -1605,12 +1605,12 @@ def _set_status(comp: Any, completed: bool) -> None:
     if completed:
         comp.add("status", "COMPLETED")
         comp.add("percent-complete", 100)
-        comp.add("completed", datetime.now(timezone.utc))
+        comp.add("completed", datetime.now(UTC))
     else:
         comp.add("status", "NEEDS-ACTION")
         comp.add("percent-complete", 0)
     comp.pop("last-modified", None)
-    comp.add("last-modified", datetime.now(timezone.utc))
+    comp.add("last-modified", datetime.now(UTC))
 
 
 def _occurrence_span(
@@ -1945,7 +1945,7 @@ def _sync_update_task(
                 completed_dt = (
                     prev.decoded("completed")
                     if "completed" in prev
-                    else datetime.now(timezone.utc)
+                    else datetime.now(UTC)
                 )
             _upsert_override(
                 ical, master, pivot, title, start, due, location, description,
@@ -2174,7 +2174,7 @@ def _sync_set_task_status(
             _upsert_override(
                 ical, master, pivot, str(master.get("summary") or ""),
                 occ_start, occ_due, None, None, kind=_TODO,
-                status="COMPLETED", completed=datetime.now(timezone.utc),
+                status="COMPLETED", completed=datetime.now(UTC),
             )
         todo.data = ical.to_ical().decode("utf-8")
         todo.save()

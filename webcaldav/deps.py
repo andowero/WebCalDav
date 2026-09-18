@@ -1,4 +1,4 @@
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from fastapi import Cookie, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession

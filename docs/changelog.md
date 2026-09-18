@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Dependency refresh (all packages to latest stable)
+
+- **Python**: every direct and transitive dependency re-locked to latest stable
+  (pyproject floors raised to match): fastapi 0.141.1, uvicorn 0.53.0,
+  SQLAlchemy 2.0.54, cryptography 50.0.1, caldav 3.3.1, structlog 26.1.0,
+  pydantic 2.13.5, typer 0.27.2, and dev tools (pytest 9.1, ruff 0.16.8,
+  mypy 2.3.1, radicale 3.8.0). Python stays 3.12.
+- **MCP SDK 1.x → 2.x** (`webcaldav/mcp_server.py`): `FastMCP` is now
+  `MCPServer`; `stateless_http`/`transport_security` moved from the constructor
+  to `streamable_http_app()`. Behavior unchanged (verified: 200 on `initialize`,
+  suite green).
+- **Docker**: builder's pinned `ghcr.io/astral-sh/uv` image bumped 0.11 →
+  0.12.16.
+- **Vendored JS**: FullCalendar 6.1.20 → 6.1.21 (+ luxon3 plugin) — held on
+  v6 because the `@fullcalendar/luxon3` adapter has no stable v7 release;
+  markdown-it 14.1.0 → 15.0.2 (instance-level `md.utils` still present, which
+  the journal editor uses); markdown-it-deflist 3 → 4.0.0;
+  markdown-it-task-lists 2.1.0 → 2.1.1; highlight.js 11.10.0 → 11.12.0.
+  luxon stays 3.7.2 (latest).
+- **Lint**: ruff 0.16's expanded default rule set made `ruff check .` fail
+  (397 pre-existing findings). Auto-fixed the safe modernizations
+  (`timezone.utc` → `UTC`, `lru_cache` → `cache`, import sorting); added the
+  idiomatic config — `extend-immutable-calls = ["fastapi.Depends"]`, and
+  scoped ignores for the deliberate broad-except/best-effort patterns in
+  `caldav_client.py`. Also replaced the deprecated `Row.tuple()` with plain
+  row unpacking. `ruff check .` and `mypy` are green again.
+
 ### Out-of-work day coloring (holidays + weekend)
 - **Why**: users want public holidays and weekends visually distinguished on
   the calendar (red day number, light-red day tint), with the holiday name as a

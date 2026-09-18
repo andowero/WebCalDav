@@ -12,8 +12,8 @@ from sqlalchemy import select
 from starlette.middleware.base import RequestResponseEndpoint
 
 from .config import settings
-from .db import create_tables, init_engine, get_session_factory
-from .deps import init_login_rate_limiter, init_session_store, get_session_store
+from .db import create_tables, get_session_factory, init_engine
+from .deps import get_session_store, init_login_rate_limiter, init_session_store
 from .i18n import load_catalog, resolve_language
 from .metrics import http_requests_total
 from .models import User, UserSettings
@@ -27,9 +27,11 @@ from .routers import (
     holidays,
     journals,
     ops,
-    settings as settings_router,
     shares,
     tasks,
+)
+from .routers import (
+    settings as settings_router,
 )
 
 _PKG = Path(__file__).parent

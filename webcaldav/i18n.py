@@ -10,7 +10,7 @@ catalog under ``locales/`` is injected into the page for the frontend to use.
 from __future__ import annotations
 
 import json
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,7 @@ SETTING_TO_CODE: dict[str, str | None] = {
 _LOCALES_DIR = Path(__file__).parent / "locales"
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_catalog(code: str) -> dict[str, Any]:
     """Return the translation catalog for ``code`` (falls back to DEFAULT)."""
     if code not in SUPPORTED:

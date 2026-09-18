@@ -6,7 +6,7 @@ many components, which is how multiple events are exported in one file.
 """
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 import pytest
@@ -122,8 +122,8 @@ async def test_export_range_combines_and_keeps_rrule(radicale_server):
     ]
     # A one-month window: the recurring master is included unexpanded, so the
     # whole series (RRULE reaching past the window) survives the export.
-    frm = datetime(2026, 6, 1, tzinfo=timezone.utc)
-    to = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    frm = datetime(2026, 6, 1, tzinfo=UTC)
+    to = datetime(2026, 7, 1, tzinfo=UTC)
     ics = await export_range_ics(sources, frm, to)
     assert ics.count("BEGIN:VCALENDAR") == 1  # one merged calendar
     assert "UID:plain-1" in ics

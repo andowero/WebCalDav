@@ -6,7 +6,7 @@ no end, recurrence or alarms. Reuses the same ephemeral-radicale pattern.
 """
 import tempfile
 import threading
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 import pytest
@@ -69,8 +69,8 @@ def journal_calendar(radicale_base):
             cal.delete()
 
 
-_FROM = datetime(2026, 6, 1, tzinfo=timezone.utc)
-_TO = datetime(2026, 7, 31, tzinfo=timezone.utc)
+_FROM = datetime(2026, 6, 1, tzinfo=UTC)
+_TO = datetime(2026, 7, 31, tzinfo=UTC)
 
 
 async def _fetch(base, url):
@@ -110,7 +110,7 @@ async def test_create_timed_journal(journal_calendar):
     base, url = journal_calendar
     await create_journal(
         base, USER, PASSWORD, url, "j-timed@webcaldav",
-        title="Standup notes", start=datetime(2026, 6, 16, 9, 30, tzinfo=timezone.utc),
+        title="Standup notes", start=datetime(2026, 6, 16, 9, 30, tzinfo=UTC),
         description="notes",
     )
     j = {x["id"]: x for x in await _fetch(base, url)}["j-timed@webcaldav"]

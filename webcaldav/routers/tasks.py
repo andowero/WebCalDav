@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import date, timezone
+from datetime import UTC, date
 from datetime import datetime as dt_type
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -21,8 +21,9 @@ from ..caldav_client import (
 )
 from ..crypto import decrypt_bytes
 from ..deps import get_db, get_unrestricted_session
-from ..models import Calendar, CalDAVAccount
+from ..models import CalDAVAccount, Calendar
 from ..session import SessionEntry
+
 # Tasks (VTODO) reuse the event router's recurrence/reminder primitives verbatim
 # so both kinds share one validation and conversion path.
 from .events import (
@@ -101,9 +102,9 @@ def _resolve_task_span(
         return start, due
 
     try:
-        tz = ZoneInfo(body.timezone) if body.timezone else timezone.utc
+        tz = ZoneInfo(body.timezone) if body.timezone else UTC
     except ZoneInfoNotFoundError:
-        tz = timezone.utc
+        tz = UTC
 
     def _one(raw: str | None) -> dt_type | None:
         if not raw:
@@ -127,7 +128,7 @@ async def get_tasks(
     result = await db.execute(
         select(Calendar, CalDAVAccount)
         .join(CalDAVAccount, Calendar.caldav_account_id == CalDAVAccount.id)
-        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)  # noqa: E712
+        .where(CalDAVAccount.user_id == entry.user_id, Calendar.enabled == True)
     )
     rows = result.all()
     if not rows:
@@ -136,7 +137,7 @@ async def get_tasks(
     from_dt = _parse_dt(from_)
     to_dt = _parse_dt(to)
     if from_dt is None or to_dt is None:
-        now = dt_type.now(timezone.utc)
+        now = dt_type.now(UTC)
         from_dt = from_dt or now.replace(day=1)
         to_dt = to_dt or now
 

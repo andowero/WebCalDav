@@ -6,7 +6,7 @@ recurrence. Reuses the same ephemeral-radicale pattern.
 """
 import tempfile
 import threading
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 import pytest
@@ -70,8 +70,8 @@ def task_calendar(radicale_base):
             cal.delete()
 
 
-_FROM = datetime(2026, 6, 1, tzinfo=timezone.utc)
-_TO = datetime(2026, 7, 31, tzinfo=timezone.utc)
+_FROM = datetime(2026, 6, 1, tzinfo=UTC)
+_TO = datetime(2026, 7, 31, tzinfo=UTC)
 
 
 async def _fetch(base, url):
@@ -88,7 +88,7 @@ def _raw(base, url, uid):
 
 async def test_create_and_fetch_dated_task(task_calendar):
     base, url = task_calendar
-    due = datetime(2026, 6, 15, 17, 0, tzinfo=timezone.utc)
+    due = datetime(2026, 6, 15, 17, 0, tzinfo=UTC)
     await create_task(
         base, USER, PASSWORD, url, "t-dated@webcaldav",
         title="Submit report", start=None, due=due,
@@ -137,12 +137,12 @@ async def test_update_task_fields(task_calendar):
     base, url = task_calendar
     await create_task(
         base, USER, PASSWORD, url, "t-edit@webcaldav",
-        title="Old", start=None, due=datetime(2026, 6, 10, 9, 0, tzinfo=timezone.utc),
+        title="Old", start=None, due=datetime(2026, 6, 10, 9, 0, tzinfo=UTC),
         location=None, description=None,
     )
     await update_task(
         base, USER, PASSWORD, url, "t-edit@webcaldav",
-        title="New", start=None, due=datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc),
+        title="New", start=None, due=datetime(2026, 6, 12, 12, 0, tzinfo=UTC),
         location="Home", description="changed", priority=5,
     )
     t = {x["id"]: x for x in await _fetch(base, url)}["t-edit@webcaldav"]
@@ -156,7 +156,7 @@ async def test_set_task_status_toggle(task_calendar):
     base, url = task_calendar
     await create_task(
         base, USER, PASSWORD, url, "t-done@webcaldav",
-        title="Toggle", start=None, due=datetime(2026, 6, 14, 9, 0, tzinfo=timezone.utc),
+        title="Toggle", start=None, due=datetime(2026, 6, 14, 9, 0, tzinfo=UTC),
         location=None, description=None,
     )
     await set_task_status(base, USER, PASSWORD, url, "t-done@webcaldav", completed=True)
@@ -174,7 +174,7 @@ async def test_delete_task(task_calendar):
     base, url = task_calendar
     await create_task(
         base, USER, PASSWORD, url, "t-del@webcaldav",
-        title="Bye", start=None, due=datetime(2026, 6, 14, 9, 0, tzinfo=timezone.utc),
+        title="Bye", start=None, due=datetime(2026, 6, 14, 9, 0, tzinfo=UTC),
         location=None, description=None,
     )
     await delete_task(base, USER, PASSWORD, url, "t-del@webcaldav")
@@ -191,7 +191,7 @@ async def test_create_task_with_reminder(task_calendar):
     base, url = task_calendar
     await create_task(
         base, USER, PASSWORD, url, "t-rem@webcaldav",
-        title="Pinged", start=None, due=datetime(2026, 6, 16, 9, 0, tzinfo=timezone.utc),
+        title="Pinged", start=None, due=datetime(2026, 6, 16, 9, 0, tzinfo=UTC),
         location=None, description=None,
         reminders=[(timedelta(minutes=-15), "START")],
     )
@@ -205,7 +205,7 @@ async def test_create_recurring_task(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, "t-recur@webcaldav",
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 4},
     )
@@ -222,7 +222,7 @@ async def test_recurring_task_rfc_advance(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, "t-radv@webcaldav",
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 4},
     )
@@ -258,7 +258,7 @@ async def test_complete_keeps_moved_occurrence_time(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, "t-mvdone@webcaldav",
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 4},
     )
@@ -266,7 +266,7 @@ async def test_complete_keeps_moved_occurrence_time(task_calendar):
     await update_task(
         base, USER, PASSWORD, url, "t-mvdone@webcaldav",
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 19, 15, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 19, 15, 0, tzinfo=UTC),
         location=None, description=None,
         scope="this", recurrence_id="2026-06-19T09:00:00+00:00",
     )
@@ -302,14 +302,14 @@ async def test_update_keeps_done_status_nonrecurring(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, "t-updone@webcaldav",
         title="One-off", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
     )
     await set_task_status(base, USER, PASSWORD, url, "t-updone@webcaldav", completed=True)
     await update_task(
         base, USER, PASSWORD, url, "t-updone@webcaldav",
         title="One-off", start=None,
-        due=datetime(2026, 6, 12, 15, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 15, 0, tzinfo=UTC),
         location=None, description=None,
     )
     task = next(x for x in await _fetch(base, url) if x["id"] == "t-updone@webcaldav")
@@ -323,7 +323,7 @@ async def test_move_done_occurrence_keeps_done(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, "t-mvdn2@webcaldav",
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 4},
     )
@@ -335,7 +335,7 @@ async def test_move_done_occurrence_keeps_done(task_calendar):
     await update_task(
         base, USER, PASSWORD, url, "t-mvdn2@webcaldav",
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 19, 15, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 19, 15, 0, tzinfo=UTC),
         location=None, description=None,
         scope="this", recurrence_id="2026-06-19T09:00:00+00:00",
     )
@@ -357,7 +357,7 @@ async def test_redrag_moved_occurrence_no_orphan(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, UID,
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 4},
     )
@@ -366,14 +366,14 @@ async def test_redrag_moved_occurrence_no_orphan(task_calendar):
     # Drag 1 → 15:00 (stable RECURRENCE-ID 09:00).
     await update_task(
         base, USER, PASSWORD, url, UID, title="Weekly chore",
-        start=None, due=datetime(2026, 6, 19, 15, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 19, 15, 0, tzinfo=UTC),
         location=None, description=None,
         scope="this", recurrence_id="2026-06-19T09:00:00+00:00",
     )
     # Drag 2 → 18:00, but the client now sends the MOVED anchor (15:00) as pivot.
     await update_task(
         base, USER, PASSWORD, url, UID, title="Weekly chore",
-        start=None, due=datetime(2026, 6, 19, 18, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 19, 18, 0, tzinfo=UTC),
         location=None, description=None,
         scope="this", recurrence_id="2026-06-19T15:00:00+00:00",
     )
@@ -400,14 +400,14 @@ async def test_task_thisfuture_after_this_moves_pivot(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, UID,
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 4},
     )
     # 1. Detach Jun 19 due to 11:00.
     await update_task(
         base, USER, PASSWORD, url, UID, title="Weekly chore",
-        start=None, due=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 19, 11, 0, tzinfo=UTC),
         location=None, description=None,
         scope="this", recurrence_id="2026-06-19T09:00:00+00:00",
     )
@@ -415,7 +415,7 @@ async def test_task_thisfuture_after_this_moves_pivot(task_calendar):
     #    moved anchor as recurrence_id, _resolve_pivot maps it back to 09:00.
     await update_task(
         base, USER, PASSWORD, url, UID, title="Weekly chore",
-        start=None, due=datetime(2026, 6, 19, 13, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 19, 13, 0, tzinfo=UTC),
         location=None, description=None,
         scope="thisfuture", recurrence_id="2026-06-19T11:00:00+00:00",
     )
@@ -436,14 +436,14 @@ async def test_task_thisfuture_twice_until_keeps_all(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, UID,
         title="Bounded chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "until": "2026-07-03T12:00:00+00:00"},
     )
     # 1. Split Jun 26 forward +1d -> Jun 27 (carries Jul 3 -> Jul 4).
     await update_task(
         base, USER, PASSWORD, url, UID, title="Bounded chore",
-        start=None, due=datetime(2026, 6, 27, 9, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 27, 9, 0, tzinfo=UTC),
         location=None, description=None,
         scope="thisfuture", recurrence_id="2026-06-26T09:00:00+00:00",
     )
@@ -451,7 +451,7 @@ async def test_task_thisfuture_twice_until_keeps_all(task_calendar):
     #    shift +1d too or Jun 20 falls past the stale bound and vanishes.
     await update_task(
         base, USER, PASSWORD, url, UID, title="Bounded chore",
-        start=None, due=datetime(2026, 6, 20, 9, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 20, 9, 0, tzinfo=UTC),
         location=None, description=None,
         scope="thisfuture", recurrence_id="2026-06-19T09:00:00+00:00",
     )
@@ -465,7 +465,7 @@ async def test_delete_recurring_task_this(task_calendar):
     await create_task(
         base, USER, PASSWORD, url, "t-rdel@webcaldav",
         title="Chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 4},
     )
@@ -485,13 +485,13 @@ async def _recur_task_with_override(base, url):
     await create_task(
         base, USER, PASSWORD, url, UID,
         title="Weekly chore", start=None,
-        due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None,
         rrule={"freq": "weekly", "interval": 1, "count": 4},
     )
     await update_task(
         base, USER, PASSWORD, url, UID, title="Solo",
-        start=None, due=datetime(2026, 6, 19, 11, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 19, 11, 0, tzinfo=UTC),
         location=None, description=None,
         scope="this", recurrence_id="2026-06-19T09:00:00+00:00",
     )
@@ -504,7 +504,7 @@ async def test_update_recurring_task_all_reset_title_only(task_calendar):
     UID = await _recur_task_with_override(base, url)
     await update_task(
         base, USER, PASSWORD, url, UID, title="Renamed",
-        start=None, due=datetime(2026, 6, 12, 9, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 12, 9, 0, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00",
         reset_overrides=True, reset_fields=["title"],
@@ -521,7 +521,7 @@ async def test_update_recurring_task_all_reset_time_and_title(task_calendar):
     UID = await _recur_task_with_override(base, url)
     await update_task(
         base, USER, PASSWORD, url, UID, title="Renamed",
-        start=None, due=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00",
         reset_overrides=True, reset_fields=["time", "title"],
@@ -539,7 +539,7 @@ async def test_update_recurring_task_all_no_reset_keeps_override(task_calendar):
     UID = await _recur_task_with_override(base, url)
     await update_task(
         base, USER, PASSWORD, url, UID, title="Renamed",
-        start=None, due=datetime(2026, 6, 12, 10, 0, tzinfo=timezone.utc),
+        start=None, due=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
         location=None, description=None, scope="all",
         recurrence_id="2026-06-12T09:00:00+00:00",
     )

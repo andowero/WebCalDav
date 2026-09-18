@@ -405,7 +405,7 @@ User-selectable UI theme.
 AI-assistant access to calendars and tasks over the Model Context Protocol.
 
 - New optional MCP server at `/mcp` (Streamable HTTP via the official `mcp`
-  SDK / `FastMCP`), gated by `MCP_SERVER_ENABLED` (off by default). Ten tools:
+  SDK, now 2.x `MCPServer`), gated by `MCP_SERVER_ENABLED` (off by default). Ten tools:
   `list_calendars`, `list_items`, `get_item_details`, `create_event`/`create_task`,
   `update_event`/`update_task`, `set_task_status`, `delete_event`/`delete_task`.
   Recurring edits/deletes take a `this`/`thisfuture`/`all` scope. Tools delegate
@@ -418,7 +418,7 @@ AI-assistant access to calendars and tasks over the Model Context Protocol.
 - Security: the DEK and the token's authoritative mode/scope/expiry are sealed in
   an AES-GCM blob keyed by the token secret (only its SHA-256 is stored), so a
   stolen DB stays zero-knowledge and DB tampering of the display-only mirror rows
-  cannot escalate a token. `/mcp` is CSRF-exempt (bearer auth); FastMCP host
+  cannot escalate a token. `/mcp` is CSRF-exempt (bearer auth); MCPServer host
   validation is disabled (trusted reverse proxy). Admin `reset_password` now
   deletes the user's tokens along with the DEK rotation.
 - 168 tests pass (15 new: token mint/resolve, expiry, mode-prefix binding, API

@@ -65,7 +65,7 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
 
 ### MCP server & API tokens
 
-- Optional MCP server (`webcaldav/mcp_server.py`, official `mcp` SDK / `FastMCP`,
+- Optional MCP server (`webcaldav/mcp_server.py`, official `mcp` SDK (`MCPServer`,
   Streamable HTTP) mounted at `/mcp` only when `MCP_SERVER_ENABLED` is set. Its
   ten tools delegate to the same CalDAV client primitives and
   `EventUpdate`/`TaskUpdate` validation as the web routers; output is English +
@@ -82,8 +82,8 @@ The app is a single container. TLS is terminated by the reverse proxy and the ap
   columns / `api_token_calendars` rows are display-only — editing them cannot
   escalate a token because authorization reads the sealed blob.
 - `/mcp` is exempt from the CSRF-header middleware (bearer auth, no ambient
-  cookie). FastMCP DNS-rebinding Host validation is disabled (the app runs behind
-  a trusted, Host-controlling reverse proxy). The FastMCP session manager is
+  cookie). MCPServer DNS-rebinding Host validation is disabled (the app runs behind
+  a trusted, Host-controlling reverse proxy). The MCPServer session manager is
   started inside the app lifespan (a mounted sub-app's lifespan is not run by the
   parent); the wrapper is mounted at the root so its own `/mcp` route is reached
   unstripped (no trailing-slash redirect).
