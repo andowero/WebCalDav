@@ -1479,6 +1479,164 @@
     if (repeats) { updateRecurUI(); scheduleRecurPreview(); }
   }
 
+  // ── Calendar event caching with ctag validation ──────────────────────────────
+  // Cache calendar-data results by date range, keyed by (from, to). Validate
+  // cache against current ctags; if any calendar changed, refetch. Avoids
+  // re-querying the CalDAV server on every view change (month→week→day).
+  // Manually cleared on event create/edit/delete via invalidateCalendarCache().
+
+  const CALENDAR_CACHE_KEY = 'webcaldav_calendar_cache';
+  const CALENDAR_CTAGS_KEY = 'webcaldav_calendar_ctags';
+
+  function getCacheKey(from, to) {
+    return `${from}|${to}`;
+  }
+
+  function getCachedCalendarData(from, to) {
+    try {
+      const cache = JSON.parse(localStorage.getItem(CALENDAR_CACHE_KEY) || '{}');
+      const key = getCacheKey(from, to);
+      return cache[key] || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function getCachedCtags() {
+    try {
+      return JSON.parse(localStorage.getItem(CALENDAR_CTAGS_KEY) || '{}');
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function setCachedCalendarData(from, to, data, ctags) {
+    try {
+      const cache = JSON.parse(localStorage.getItem(CALENDAR_CACHE_KEY) || '{}');
+      const key = getCacheKey(from, to);
+      cache[key] = { data, ctags, timestamp: Date.now() };
+      // Expire old entries (older than 1 day) to prevent unbounded growth.
+      const now = Date.now();
+      const oneDay = 24 * 60 * 60 * 1000;
+      Object.keys(cache).forEach((k) => {
+        if (now - (cache[k].timestamp || 0) > oneDay) delete cache[k];
+      });
+      localStorage.setItem(CALENDAR_CACHE_KEY, JSON.stringify(cache));
+      localStorage.setItem(CALENDAR_CTAGS_KEY, JSON.stringify(ctags));
+    } catch (_) {
+      // Quota exceeded or private window; silently continue without cache.
+    }
+  }
+
+  function invalidateCalendarCache() {
+    try {
+      localStorage.removeItem(CALENDAR_CACHE_KEY);
+      localStorage.removeItem(CALENDAR_CTAGS_KEY);
+    } catch (_) {}
+  }
+
+  // Check if current ctags differ from cached ctags. If any calendar's ctag
+  // changed, the cache is invalid and should be refetched.
+  async function ctagsChanged() {
+    try {
+      const r = await fetch('/calendars/ctags');
+      if (!r.ok) return true;
+      const currentCtags = await r.json();
+      const cachedCtags = getCachedCtags();
+      // Compare all known calendar keys; if any differ or new ones exist, invalid.
+      const allKeys = new Set([
+        ...Object.keys(currentCtags),
+        ...Object.keys(cachedCtags),
+      ]);
+      for (const k of allKeys) {
+        if (currentCtags[k] !== cachedCtags[k]) return true;
+      }
+      return false;
+    } catch (_) {
+      // On error, assume changed and refetch.
+      return true;
+    }
+  }
+
+  async function fetchCalendarDataWithCache(from, to) {
+    const overlayEl = document.getElementById('loading-overlay');
+    const barEl = document.getElementById('loading-bar');
+    
+    // Check cache first.
+    const cached = getCachedCalendarData(from, to);
+    
+    if (cached) {
+      // Cache exists: return data immediately, validate ctags in background.
+      const dataToReturn = cached.data;
+      
+      // Validate ctags without blocking UI.
+      if (barEl) barEl.style.display = 'block';
+      ctagsChanged().then(changed => {
+        if (changed) {
+          // Ctags changed: fetch fresh data and update cache + calendar.
+          (async () => {
+            try {
+              const params = new URLSearchParams({ from, to, kinds: 'events,tasks,journals' });
+              const cdR = await fetch('/calendar-data?' + params.toString());
+              if (!cdR.ok) throw new Error('Failed to fetch calendar data');
+              const data = await cdR.json();
+              
+              // Update ctags and cache with fresh data.
+              try {
+                const ctagsR = await fetch('/calendars/ctags');
+                const ctags = ctagsR.ok ? await ctagsR.json() : {};
+                setCachedCalendarData(from, to, data, ctags);
+              } catch (_) {
+                setCachedCalendarData(from, to, data, {});
+              }
+              
+              // Refresh calendar display with fresh data.
+              if (calendar) calendar.refetchEvents();
+            } catch (err) {
+              // Silently fail - user still sees cached data.
+            } finally {
+              if (barEl) barEl.style.display = 'none';
+            }
+          })();
+        } else {
+          // Ctags unchanged.
+          if (barEl) barEl.style.display = 'none';
+        }
+      }).catch(() => {
+        // On error, just hide bar and keep cached data visible.
+        if (barEl) barEl.style.display = 'none';
+      });
+      
+      return dataToReturn;
+    }
+    
+    // Cache miss: show full-page overlay loading indicator.
+    if (overlayEl) overlayEl.style.display = 'flex';
+    
+    // Fetch fresh data.
+    try {
+      const params = new URLSearchParams({ from, to, kinds: 'events,tasks,journals' });
+      const cdR = await fetch('/calendar-data?' + params.toString());
+      if (!cdR.ok) throw new Error('Failed to fetch calendar data');
+      const data = await cdR.json();
+      
+      // Fetch current ctags and cache alongside the data.
+      try {
+        const ctagsR = await fetch('/calendars/ctags');
+        const ctags = ctagsR.ok ? await ctagsR.json() : {};
+        setCachedCalendarData(from, to, data, ctags);
+      } catch (_) {
+        // Still cache the data even if ctags fetch fails (no additional error).
+        setCachedCalendarData(from, to, data, {});
+      }
+      return data;
+    } finally {
+      // Always hide loading indicators on completion.
+      if (overlayEl) overlayEl.style.display = 'none';
+      if (barEl) barEl.style.display = 'none';
+    }
+  }
+
   // ── Event / Task type toggle ─────────────────────────────────────────────────
 
   // The modal serves three kinds: 'event', 'task', 'journal' (the #ev-type value).
@@ -4270,6 +4428,8 @@
 
   // Reload whichever view(s) are live after a create/edit/delete.
   function refreshViews() {
+    // Clear the calendar cache on local changes so next fetch gets fresh data.
+    invalidateCalendarCache();
     if (_fcCalendar) _fcCalendar.refetchEvents();
     if (_agendaActive) agendaReset();
     if (_agendaActive) agendaLoadMore();
@@ -4926,10 +5086,10 @@
             rawTasks = items.tasks || [];
             rawJournals = items.journals || [];
           } else {
-            const params = new URLSearchParams({ from: fetchInfo.startStr, to: fetchInfo.endStr, kinds: 'events,tasks,journals' });
-            const cdR = await fetch('/calendar-data?' + params.toString());
-            if (!cdR.ok) throw new Error('Failed to fetch calendar data');
-            const cd = await cdR.json();
+            // Use cached fetch to avoid unnecessary CalDAV queries on view changes.
+            // The cache is validated against ctags; if calendars changed, a refetch
+            // is triggered automatically.
+            const cd = await fetchCalendarDataWithCache(fetchInfo.startStr, fetchInfo.endStr);
             data = cd.events || [];
             rawTasks = cd.tasks || [];
             rawJournals = cd.journals || [];
