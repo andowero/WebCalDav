@@ -1457,6 +1457,41 @@
     return settingsTz() || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   }
 
+  // Calculate perceived luminance of a hex color to determine if text should be
+  // light or dark for contrast. Uses the relative luminance formula from WCAG.
+  function getPerceivedLuminance(hexColor) {
+    if (!hexColor || typeof hexColor !== 'string') return 0.5; // default to mid-tone
+    const hex = hexColor.replace(/^#/, '');
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return 0.5; // invalid color, default
+    const r = parseInt(hex.slice(0, 2), 16) / 255;
+    const g = parseInt(hex.slice(2, 4), 16) / 255;
+    const b = parseInt(hex.slice(4, 6), 16) / 255;
+    // Relative luminance formula from WCAG
+    const [rLinear, gLinear, bLinear] = [r, g, b].map(c =>
+      c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+    );
+    return 0.2126 * rLinear + 0.7152 * gLinear + 0.0722 * bLinear;
+  }
+
+  // Determine appropriate text color for an event based on its background color.
+  // Returns a text color (dark or light) that provides sufficient contrast.
+  function getContrastTextColor(bgColor) {
+    const luminance = getPerceivedLuminance(bgColor);
+    // If background is light (luminance > 0.5), use dark text; otherwise use light
+    return luminance > 0.5 ? '#000000' : '#ffffff';
+  }
+
+  // Apply dynamic text colors to events based on their background color for
+  // improved contrast in both light and dark modes.
+  function applyEventTextColors(events) {
+    return events.map((e) => {
+      if (e.color && !e.textColor) {
+        e.textColor = getContrastTextColor(e.color);
+      }
+      return e;
+    });
+  }
+
   // Shift a date-only string (YYYY-MM-DD…) by whole days.
   function shiftDateStr(iso, delta) {
     const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
@@ -4951,6 +4986,8 @@
           });
           let combined = data.concat(tasks).concat(journals);
           if (searchActive()) combined = combined.filter(matchesSearch);
+          // Apply dynamic text colors for contrast based on background color
+          combined = applyEventTextColors(combined);
           successCallback(combined);
         } catch (err) {
           failureCallback(err);
