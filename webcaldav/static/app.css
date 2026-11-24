@@ -935,6 +935,75 @@ details#add-account-details summary {
   color: var(--text-faint);
 }
 
+.ev-attendees {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ev-attendee {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  background: var(--bg-control);
+}
+
+.ev-attendee-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--accent, #3788d8);
+  color: #fff;
+}
+
+.ev-attendee-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ev-attendee-name {
+  font-size: 13px;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ev-attendee-email {
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ev-attendee-status {
+  flex: none;
+  font-size: 11px;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-input);
+  color: var(--text-faint);
+}
+
+.ev-attendee-accepted { color: #15803d; border-color: #15803d; }
+.ev-attendee-declined { color: #b91c1c; border-color: #b91c1c; }
+.ev-attendee-tentative { color: #b45309; border-color: #b45309; }
+
 .event-modal-body input[type="text"],
 .event-modal-body .ev-dnum,
 .event-modal-body textarea {

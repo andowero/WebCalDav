@@ -20,7 +20,7 @@ Minimal, utilitarian UI built around FullCalendar.js. Event color is taken per-c
 - Timezone is a user setting; default from the browser.
 - UI theme is a user setting: system (follows OS), light, or dark.
 - Locale is auto-detected from the browser; Czech translation included; more languages can be added under `webcaldav/locales/`.
-- All event and task attributes are editable; all-day and multi-day events supported.
+- All event and task attributes are editable (including event categories) but event attendees are shown read-only in the event modal. All-day and multi-day events supported.
 - Events and tasks are clickable and editable in place.
 - Desktop-first, but mobile is now a supported target: a `@media (max-width: 768px)` layer turns the settings panel and modals into bottom sheets, enlarges tap targets, and adds touch interactions (long-press → context menu, swipe-down → dismiss). Native mobile apps still cover the heavier use cases.
 - Browser notifications for event and task reminders on Firefox, Chrome, Opera, and Safari.

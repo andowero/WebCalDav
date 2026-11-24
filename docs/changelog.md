@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Event categories and attendee viewing
+
+- Events (VEVENT) now expose `CATEGORIES` as an editable comma-separated field
+  in the event modal (create + edit; full replacement set, absent = untouched so
+  drags don't clobber; applies to the whole series on scoped recurring edits).
+- `ATTENDEE` is shown read-only in the event modal as a list with avatar
+  initial, CN/email, and a localized participation-status badge
+  (accepted/declined/tentative/no response/delegated).
+- API: `EventUpdate` gains `categories: list[str] | None` (max 50, items
+  trimmed/blank-stripped); event payloads now carry `categories` and
+  `attendees` in `extendedProps`. Both translated (en, cs).
+
 ### Dependency refresh (all packages to latest stable)
 
 - **Python**: every direct and transitive dependency re-locked to latest stable

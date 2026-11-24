@@ -221,6 +221,9 @@ class EventUpdate(BaseModel):
     end: str | None = None
     location: str | None = Field(default=None, max_length=8000)
     description: str | None = Field(default=None, max_length=8000)
+    # Full replacement set for CATEGORIES; None/absent leaves them untouched
+    # (drag/resize), [] clears them. Applied to the whole series on scoped edits
+    categories: list[str] | None = Field(default=None, max_length=50)
     timezone: str | None = None
     # Recurring-event controls. scope selects which occurrences a write touches;
     # recurrence_id is the pivot occurrence's original start (the client's
@@ -240,6 +243,10 @@ class EventUpdate(BaseModel):
     @model_validator(mode="after")
     def _check_reminders(self) -> "EventUpdate":
         self.reset_fields = [f for f in self.reset_fields if f in _RESET_FIELDS]
+        if self.categories is not None:
+            self.categories = [
+                c.strip()[:200] for c in self.categories if c.strip()
+            ][:50]
         for r in self.reminders or []:
             if self.all_day:
                 if r.unit not in ("days", "weeks"):
@@ -372,6 +379,7 @@ async def post_event(
             description=body.description,
             rrule=rrule,
             reminders=_reminder_deltas(body.reminders, body.all_day),
+            categories=body.categories,
         )
     except Exception as e:
         logger.warning("event_create_failed", error=repr(e))
@@ -466,6 +474,7 @@ async def put_event(
                 location=body.location,
                 description=body.description,
                 reminders=_reminder_deltas(body.reminders, body.all_day),
+                categories=body.categories,
             )
             await delete_event(
                 account_url=src_account.url,
@@ -493,6 +502,7 @@ async def put_event(
                 reminders=_reminder_deltas(body.reminders, body.all_day),
                 reset_overrides=body.reset_overrides,
                 reset_fields=body.reset_fields,
+                categories=body.categories,
             )
     except EventNotFoundError:
         raise HTTPException(status_code=404, detail="Event not found")

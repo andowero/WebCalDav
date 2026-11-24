@@ -213,6 +213,16 @@
       <input id="ev-location" type="text" placeholder="—">
     </label>
 
+    <label class="ev-field" id="ev-categories-field">
+      <span class="ev-label" data-i18n="ui.modal_categories">Categories</span>
+      <input id="ev-categories" type="text" data-i18n-placeholder="ui.modal_categories_hint" placeholder="Comma-separated, e.g. Work, Family">
+    </label>
+
+    <div class="ev-field" id="ev-attendees-field" style="display:none">
+      <span class="ev-label" data-i18n="ui.modal_attendees">Attendees</span>
+      <ul id="ev-attendees" class="ev-attendees"></ul>
+    </div>
+
     <label class="ev-field" id="ev-priority-field" style="display:none">
       <span class="ev-label" data-i18n="ui.modal_priority">Priority</span>
       <select id="ev-priority">
