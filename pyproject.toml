@@ -70,6 +70,7 @@ extend-immutable-calls = ["fastapi.Depends"]
 "webcaldav/routers/shares.py" = ["BLE001"]
 "webcaldav/routers/tasks.py" = ["BLE001"]
 "tests/test_caldav.py" = ["DTZ001"]
+"tests/test_events_api.py" = ["DTZ001"]
 
 [tool.mypy]
 python_version = "3.12"

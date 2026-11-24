@@ -114,3 +114,75 @@ def test_reminder_anchor_direction_defaults_and_validation():
     for bad in ({"anchor": "middle"}, {"direction": "during"}):
         with pytest.raises(ValueError):
             Reminder(value=1, unit="minutes", **bad)
+
+
+def test_event_update_categories_normalization():
+    from webcaldav.routers.events import EventUpdate
+
+    base = {"calendar_id": 1, "title": "x", "start": "2026-06-22T09:00:00+00:00",
+            "end": "2026-06-22T10:00:00+00:00"}
+    # Absent -> None (leave untouched)
+    assert EventUpdate(**base).categories is None
+    # Blank entries stripped, whitespace trimmed
+    body = EventUpdate(**base, categories=[" Work ", "", "  ", "Family"])
+    assert body.categories == ["Work", "Family"]
+    # Explicit empty list stays an empty list (clear-all signal)
+    assert EventUpdate(**base, categories=[]).categories == []
+
+
+def test_categories_and_attendees_roundtrip():
+    """_series_ical writes CATEGORIES; _extract_props reads CATEGORIES/ATTENDEE."""
+    from datetime import datetime
+
+    from icalendar import Calendar
+
+    from webcaldav.caldav_client import _extract_props, _series_ical
+
+    raw = _series_ical(
+        "u1@webcaldav", "Meet", datetime(2026, 6, 22, 9), datetime(2026, 6, 22, 10),
+        "Room 1", "notes", None, categories=["Work", "Family"],
+    )
+    cal = Calendar.from_ical(raw)
+    vevent = next(c for c in cal.walk("VEVENT"))
+    props = _extract_props(vevent)
+    assert props["categories"] == ["Work", "Family"]
+    assert "attendees" not in props
+
+    vevent.add("attendee", "mailto:ada@example.com", parameters={
+        "CN": "Ada Lovelace", "PARTSTAT": "ACCEPTED", "ROLE": "REQ-PARTICIPANT"})
+    vevent.add("attendee", "mailto:bob@example.com")
+    props = _extract_props(vevent)
+    assert props["attendees"] == [
+        {"name": "Ada Lovelace", "email": "ada@example.com",
+         "role": "REQ-PARTICIPANT", "status": "ACCEPTED"},
+        {"name": "", "email": "bob@example.com",
+         "role": "REQ-PARTICIPANT", "status": "NEEDS-ACTION"},
+    ]
+
+
+def test_apply_fields_categories_semantics():
+    """None leaves CATEGORIES alone; [] clears it; a list replaces it."""
+    from datetime import datetime
+
+    from icalendar import Calendar
+
+    from webcaldav.caldav_client import _apply_fields, _series_ical
+
+    def make():
+        raw = _series_ical("u2@webcaldav", "Meet", datetime(2026, 6, 22, 9),
+                           datetime(2026, 6, 22, 10), None, None, None,
+                           categories=["Work"])
+        return next(c for c in Calendar.from_ical(raw).walk("VEVENT"))
+
+    v = make()
+    _apply_fields(v, "Meet", datetime(2026, 6, 22, 9), datetime(2026, 6, 22, 10),
+                  None, None)
+    assert [str(c) for c in v.get("categories").cats] == ["Work"]
+
+    _apply_fields(v, "Meet", datetime(2026, 6, 22, 9), datetime(2026, 6, 22, 10),
+                  None, None, categories=["Home", "Kids"])
+    assert [str(c) for c in v.get("categories").cats] == ["Home", "Kids"]
+
+    _apply_fields(v, "Meet", datetime(2026, 6, 22, 9), datetime(2026, 6, 22, 10),
+                  None, None, categories=[])
+    assert v.get("categories") is None

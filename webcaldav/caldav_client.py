@@ -436,7 +436,8 @@ def _apply_alarms(
 
 
 def _extract_props(vevent: Any) -> dict[str, Any]:
-    """Pull description/location/recurrence/reminders from a VEVENT."""
+    """Pull description/location/categories/attendees/recurrence/reminders from a
+    VEVENT."""
     out: dict[str, Any] = {}
     desc = vevent.get("description")
     if desc:
@@ -444,6 +445,33 @@ def _extract_props(vevent: Any) -> dict[str, Any]:
     loc = vevent.get("location")
     if loc:
         out["location"] = str(loc)
+    cats = vevent.get("categories")
+    if cats:
+        try:
+            out["categories"] = [str(c) for c in cats.cats]
+        except AttributeError:
+            out["categories"] = [str(cats)]
+    att = vevent.get("attendee")
+    if att:
+        if not isinstance(att, list):
+            att = [att]
+        attendees = []
+        for a in att:
+            try:
+                params = getattr(a, "params", {})
+                email = str(a)
+                if email.lower().startswith("mailto:"):
+                    email = email[7:]
+                attendees.append({
+                    "name": str(params.get("CN") or ""),
+                    "email": email,
+                    "role": str(params.get("ROLE") or "REQ-PARTICIPANT"),
+                    "status": str(params.get("PARTSTAT") or "NEEDS-ACTION"),
+                })
+            except Exception:
+                continue
+        if attendees:
+            out["attendees"] = attendees
     rrule = vevent.get("rrule")
     if rrule:
         out["recurrence"] = _rrule_to_text(rrule)
@@ -764,11 +792,14 @@ def _apply_fields(
     location: str | None,
     description: str | None,
     kind: _Kind = _EVENT,
+    categories: list[str] | None = None,
 ) -> None:
     """Overwrite a component's editable fields + time span, bumping SEQUENCE.
 
     ``start``/``end`` may be ``None`` for tasks (VTODO needs neither DTSTART nor
-    DUE); a ``None`` clears the property rather than re-adding it."""
+    DUE); a ``None`` clears the property rather than re-adding it. ``categories``
+    is the full replacement set: ``None`` leaves CATEGORIES untouched (drags),
+    ``[]`` clears it."""
     def _replace(key: str, value: Any) -> None:
         vevent.pop(key, None)
         if value is not None and value != "":
@@ -777,6 +808,10 @@ def _apply_fields(
     _replace("summary", title)
     _replace("location", location)
     _replace("description", description)
+    if categories is not None:
+        vevent.pop("categories", None)
+        if categories:
+            vevent.add("categories", categories)
     vevent.pop("dtstart", None)
     if kind.end_key:
         vevent.pop(kind.end_key, None)
@@ -1000,6 +1035,7 @@ def _series_ical(
     kind: _Kind = _EVENT,
     status: str | None = None,
     priority: int | None = None,
+    categories: list[str] | None = None,
 ) -> str:
     ical = ICalendar()
     ical.add("prodid", "-//WebCalDav//EN")
@@ -1021,6 +1057,8 @@ def _series_ical(
         ve.add("status", status)
     if priority is not None:
         ve.add("priority", priority)
+    if categories:
+        ve.add("categories", categories)
     if rule_parts:
         ve.add("rrule", rule_parts)
     for d in exdates or []:
@@ -1085,7 +1123,10 @@ def _vevent_to_dict(
         # the unexpanded override component.
         if "reminders" not in inst and (uid, rid) in override_reminders:
             inst["reminders"] = override_reminders[(uid, rid)]
-    for key in ("description", "location", "recurrence", "recurrenceRule", "reminders"):
+    for key in (
+        "description", "location", "categories", "attendees",
+        "recurrence", "recurrenceRule", "reminders",
+    ):
         val = inst.get(key, master_props.get(key))
         if val:
             extended[key] = val
@@ -1247,6 +1288,7 @@ def _sync_update_event(
     reminders: list[tuple[timedelta, str]] | None = None,
     reset_overrides: bool = False,
     reset_fields: list[str] | None = None,
+    categories: list[str] | None = None,
 ) -> None:
     with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
@@ -1286,7 +1328,8 @@ def _sync_update_event(
                 for ov in _overrides(ical):
                     _shift_override(ov, delta, time_too=False)
                 _shift_exdate(master, delta)
-            _apply_fields(master, title, anchor_start, anchor_end, location, description)
+            _apply_fields(master, title, anchor_start, anchor_end, location, description,
+                          categories=categories)
             _apply_alarms(master, reminders)
             if rrule is not None:
                 _set_rrule(master, _build_rrule(rrule, anchor_start))
@@ -1334,7 +1377,8 @@ def _sync_update_event(
                 for ov in _overrides(ical):
                     _shift_override(ov, start - base, time_too=False)
                 _shift_exdate(master, start - base)
-                _apply_fields(master, title, start, end, location, description)
+                _apply_fields(master, title, start, end, location, description,
+                              categories=categories)
                 _apply_alarms(master, reminders)
                 _set_rrule(master, new_rule)
                 if reset_overrides and reset_fields:
@@ -1375,7 +1419,7 @@ def _sync_update_event(
             cal.save_event(_series_ical(
                 new_uid, title, start, end, location, description, new_rule,
                 overrides=migrated, exdates=migrated_ex, reminders=reminders,
-                alarms=carried,
+                alarms=carried, categories=categories,
             ))
             return
 
@@ -1401,6 +1445,7 @@ async def update_event(
     reminders: list[tuple[timedelta, str]] | None = None,
     reset_overrides: bool = False,
     reset_fields: list[str] | None = None,
+    categories: list[str] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="update_event").time():
         try:
@@ -1423,6 +1468,7 @@ async def update_event(
                 reminders,
                 reset_overrides,
                 reset_fields,
+                categories,
             )
         except EventNotFoundError:
             raise
@@ -1445,13 +1491,14 @@ def _sync_create_event(
     description: str | None,
     rrule: dict[str, Any] | None = None,
     reminders: list[tuple[timedelta, str]] | None = None,
+    categories: list[str] | None = None,
 ) -> None:
     with _make_dav_client(account_url, username, password) as client:
         cal = caldav.Calendar(client=client, url=calendar_url)
         rule_parts = _build_rrule(rrule, start) if rrule else None
         cal.save_event(_series_ical(
             uid, title, start, end, location, description, rule_parts,
-            reminders=reminders,
+            reminders=reminders, categories=categories,
         ))
 
 
@@ -1469,6 +1516,7 @@ async def create_event(
     description: str | None,
     rrule: dict[str, Any] | None = None,
     reminders: list[tuple[timedelta, str]] | None = None,
+    categories: list[str] | None = None,
 ) -> None:
     with caldav_request_duration_seconds.labels(operation="create_event").time():
         try:
@@ -1487,6 +1535,7 @@ async def create_event(
                 description,
                 rrule,
                 reminders,
+                categories,
             )
         except Exception:
             caldav_request_errors_total.labels(operation="create_event").inc()

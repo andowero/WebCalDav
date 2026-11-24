@@ -1605,6 +1605,11 @@
     // notes textarea for the Markdown body editor.
     document.getElementById('ev-repeat-fieldset').style.display = isJournal ? 'none' : '';
     document.getElementById('ev-location-field').style.display = isJournal ? 'none' : '';
+    // Categories/attendees are events-only (the task/journal APIs ignore them)
+    document.getElementById('ev-categories-field').style.display =
+      (!isJournal && !isTask) ? '' : 'none';
+    // Populated per-event in openEventModal; hidden until then
+    document.getElementById('ev-attendees-field').style.display = 'none';
     document.getElementById('ev-reminders-field').style.display = isJournal ? 'none' : '';
     document.getElementById('ev-notes-field').style.display = isJournal ? 'none' : '';
     document.getElementById('ev-journal-field').style.display = isJournal ? '' : 'none';
@@ -2636,7 +2641,7 @@
   function setEditable(on) {
     _editLocked = !on;
     ['ev-name', 'ev-calendar', 'ev-allday', 'ev-start-hh', 'ev-start-mm',
-     'ev-end-hh', 'ev-end-mm', 'ev-location', 'ev-notes',
+     'ev-end-hh', 'ev-end-mm', 'ev-location', 'ev-notes', 'ev-categories',
      'ev-priority', 'ev-done'].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.disabled = !on;
@@ -2660,6 +2665,51 @@
     document.getElementById('btn-event-save').style.display = on ? '' : 'none';
     _remindersEditable = on;
     renderReminders();
+  }
+
+  // Read-only ATTENDEE list: initial avatar, display name (CN or email), and a
+  // participation-status badge. Attendees come from the server; editing them
+  // (invites/replies) is out of scope.
+  function renderAttendees(attendees) {
+    const field = document.getElementById('ev-attendees-field');
+    const list = document.getElementById('ev-attendees');
+    list.innerHTML = '';
+    if (!attendees.length) { field.style.display = 'none'; return; }
+    field.style.display = '';
+    for (const a of attendees) {
+      const li = document.createElement('li');
+      li.className = 'ev-attendee';
+      const avatar = document.createElement('span');
+      avatar.className = 'ev-attendee-avatar';
+      const label = a.name || a.email;
+      avatar.textContent = (label || '?').trim().charAt(0).toUpperCase();
+      const body = document.createElement('span');
+      body.className = 'ev-attendee-body';
+      const name = document.createElement('span');
+      name.className = 'ev-attendee-name';
+      name.textContent = label;
+      body.appendChild(name);
+      if (a.name && a.email && a.email !== a.name) {
+        const mail = document.createElement('span');
+        mail.className = 'ev-attendee-email';
+        mail.textContent = a.email;
+        body.appendChild(mail);
+      }
+      const badge = document.createElement('span');
+      const status = (a.status || 'NEEDS-ACTION').toUpperCase();
+      badge.className = `ev-attendee-status ev-attendee-${status.toLowerCase()}`;
+      const tKey = `dyn.att_status_${status.toLowerCase().replace(/-/g, '_')}`;
+      const tVal = tr(tKey);
+      badge.textContent = tVal !== tKey ? tVal : status;
+      li.append(avatar, body, badge);
+      list.appendChild(li);
+    }
+  }
+
+  // "a, b ,c" -> ['a', 'b', 'c']; the full replacement set sent on save.
+  function parseCategories() {
+    return document.getElementById('ev-categories').value
+      .split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
   }
 
   async function openEventModal(event) {
@@ -2733,6 +2783,8 @@
 
     document.getElementById('ev-location').value = props.location || '';
     document.getElementById('ev-notes').value = props.description || '';
+    document.getElementById('ev-categories').value = (props.categories || []).join(', ');
+    renderAttendees(props.attendees || []);
     if (isJournal) { setJournalBody(props.description || ''); setJournalTab('display'); }
 
     resetReminders(props.reminders);
@@ -2884,6 +2936,8 @@
     document.getElementById('ev-allday').checked = !!allDay;
     document.getElementById('ev-location').value = '';
     document.getElementById('ev-notes').value = '';
+    document.getElementById('ev-categories').value = '';
+    document.getElementById('ev-attendees-field').style.display = 'none';
     document.getElementById('ev-priority').value = '0';
     document.getElementById('ev-repeats').checked = false;
     document.getElementById('ev-repeats').disabled = false;
@@ -3023,6 +3077,7 @@
       all_day: allDay,
       location: document.getElementById('ev-location').value,
       description: document.getElementById('ev-notes').value,
+      categories: parseCategories(),
       timezone: effectiveTz(),
       // Always the full replacement set; [] clears all editable alarms.
       reminders: collectReminders(),
@@ -4289,6 +4344,8 @@
     document.getElementById('ev-allday').checked = false;
     document.getElementById('ev-location').value = '';
     document.getElementById('ev-notes').value = '';
+    document.getElementById('ev-categories').value = '';
+    document.getElementById('ev-attendees-field').style.display = 'none';
     document.getElementById('ev-priority').value = '0';
     document.getElementById('ev-repeats').checked = false;
     document.getElementById('ev-repeats').disabled = false;
